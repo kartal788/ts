@@ -37,6 +37,7 @@ class Telegram:
     LIMIT_SIFIRLAMA = getenv("LIMIT_SIFIRLAMA", "") # Günlük limit sıfırlama saati (UTC). "SS:DD" formatında. Boş → gece 00:00 UTC'de sıfırlanır. Örn: "06:00" → 06:00 UTC'de sıfırlanır.
 
     SUBSCRIPTION = getenv("SUBSCRIPTION", "false").lower() == "true"
+    SUBSCRIPTION_GROUP_ID = int(getenv("SUBSCRIPTION_GROUP_ID", "0"))
     SUBSCRIPTION_URL = getenv("SUBSCRIPTION_URL", "https://t.me/")
     APPROVER_IDS = [int(x.strip()) for x in (getenv("APPROVER_IDS") or "").split(",") if x.strip().isdigit()]
 

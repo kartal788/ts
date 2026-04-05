@@ -1018,12 +1018,13 @@ async def get_stream_stats(_: bool = Depends(_require_admin)):
 
     active = []
     for sid, info in ACTIVE_STREAMS.items():
+        meta = info.get("meta", {})
         active.append(
             {
                 "stream_id": sid,
                 "msg_id": info.get("msg_id"),
                 "chat_id": info.get("chat_id"),
-                "title": info.get("meta", {}).get("title"),
+                "title": meta.get("title"),
                 "client_index": info.get("client_index"),
                 "dc_id": info.get("dc_id"),
                 "status": info.get("status"),
@@ -1032,6 +1033,12 @@ async def get_stream_stats(_: bool = Depends(_require_admin)):
                 "avg_mbps": round(info.get("avg_mbps", 0.0), 3),
                 "peak_mbps": round(info.get("peak_mbps", 0.0), 3),
                 "start_ts": info.get("start_ts"),
+                "meta": {
+                    "title": meta.get("title"),
+                    "user_name": meta.get("user_name"),
+                    "client_host": meta.get("client_host"),
+                    "user_token": meta.get("user_token"),
+                },
             }
         )
 

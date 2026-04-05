@@ -73,152 +73,127 @@
                 <!-- Bot Workload Section -->
                 <!-- Live Streaming Status Card -->
                 <div class="streams-container">
-                    <div class="theme-card rounded-xl p-8 shadow-xl">
-                        <div class="flex items-center mb-6">
-                            <div
-                                class="w-12 h-12 theme-primary rounded-lg flex items-center justify-center mr-4 bg-opacity-20 text-primary">
-                                <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" fill="none" viewBox="0 0 24 24"
-                                    stroke="white">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                        d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z">
-                                    </path>
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                        d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    <div class="theme-card rounded-2xl shadow-xl overflow-hidden">
+
+                        <!-- Header -->
+                        <div class="px-6 py-5 flex items-center gap-4" style="background: linear-gradient(135deg, var(--primary-color, #6366f1) 0%, var(--primary-dark, #4f46e5) 100%);">
+                            <div class="w-10 h-10 rounded-xl bg-white bg-opacity-20 flex items-center justify-center shrink-0">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                    <circle cx="12" cy="12" r="2" fill="white" stroke="none"/>
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M9.5 9.5a3.5 3.5 0 015 5M7 7a7 7 0 0110 10M4.5 4.5a11.5 11.5 0 0115 15"/>
                                 </svg>
                             </div>
-                            <div class="flex-1">
-                                <h3 class="text-2xl font-semibold">Canlı Yayın Durumu</h3>
+                            <div class="flex-1 min-w-0">
+                                <h3 class="text-white font-bold text-lg leading-tight">Canlı Yayın Durumu</h3>
+                                <p class="text-white text-opacity-70 text-xs mt-0.5" style="opacity:0.75;">Gerçek zamanlı izleme bilgileri</p>
                             </div>
-                            <span class="px-3 py-1 bg-red-500 text-white rounded-full text-sm font-semibold">
-                                {{ system_stats.total_active_streams }} Aktif
-                            </span>
+                            <div class="flex items-center gap-2 shrink-0">
+                                <span class="relative flex h-2.5 w-2.5">
+                                    <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-300 opacity-75"></span>
+                                    <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-400"></span>
+                                </span>
+                                <span class="text-white font-bold text-sm">{{ system_stats.total_active_streams }} Aktif</span>
+                            </div>
                         </div>
 
-                        <!-- Sayfalama: max 2 kart/sayfa, JS tarafından yönetilir -->
-                        <div id="active-streams-container" class="space-y-4">
+                        <!-- Stream Cards -->
+                        <div id="active-streams-container" class="p-5 space-y-4">
                             {% if system_stats.active_streams and system_stats.active_streams|length > 0 %}
                             {% for stream in system_stats.active_streams if stream.total_bytes and stream.total_bytes > 0 %}
                             <div data-stream-card="{{ loop.index0 }}"
-                                class="stream-card p-4 bg-gray-50 rounded-lg border-l-4 {% if stream.status == 'active' %}border-green-500{% elif stream.status == 'cancelled' %}border-yellow-500{% else %}border-red-500{% endif %}">
-                                <div class="flex justify-between items-start mb-3">
-                                    <div class="flex items-center gap-2 max-w-[70%]">
-                                        <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 text-primary shrink-0"
-                                            fill="currentColor" viewBox="0 0 24 24">
-                                            <path d="M8 5v14l11-7z" />
-                                        </svg>
-                                        <div class="truncate">
-                                            <span class="font-semibold"
-                                                title="{{ stream.meta.get('title') or stream.stream_id }}">{{
-                                                stream.meta.get('title') or
-                                                'Bilinmeyen Yayın' }}</span>
-                                            <div class="text-[10px] text-gray-500 font-mono mt-0.5"
-                                                title="{{ stream.stream_id }}">
-                                                ID: {{ stream.stream_id[:8] }}...
-                                            </div>
-                                        </div>
+                                class="stream-card rounded-xl overflow-hidden border {% if stream.status == 'active' %}border-green-200{% elif stream.status == 'cancelled' %}border-yellow-200{% else %}border-red-200{% endif %}"
+                                style="background: var(--card-bg, #f9fafb);">
+
+                                <!-- Card Top: İzleyen + Başlık + Durum -->
+                                <div class="px-4 pt-4 pb-3 flex items-start gap-3">
+                                    <!-- Avatar -->
+                                    <div class="w-9 h-9 rounded-full flex items-center justify-center shrink-0 font-bold text-sm text-white
+                                        {% if stream.status == 'active' %}bg-green-500{% elif stream.status == 'cancelled' %}bg-yellow-500{% else %}bg-red-500{% endif %}">
+                                        {{ (stream.meta.get('user_name') or 'K')[0]|upper }}
                                     </div>
-                                    <span
-                                        class="px-2 py-1 rounded text-xs font-semibold shrink-0 {% if stream.status == 'active' %}bg-green-100 text-green-800{% elif stream.status == 'cancelled' %}bg-yellow-100 text-yellow-800{% else %}bg-red-100 text-red-800{% endif %}">
-                                        {{ stream.status|upper }}
+                                    <div class="flex-1 min-w-0">
+                                        <!-- Kullanıcı adı + durum badge -->
+                                        <div class="flex items-center justify-between gap-2 mb-0.5">
+                                            <span class="font-semibold text-sm truncate">
+                                                {{ stream.meta.get('user_name') or 'Bilinmeyen Kullanıcı' }}
+                                            </span>
+                                            <span class="px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0
+                                                {% if stream.status == 'active' %}bg-green-100 text-green-700{% elif stream.status == 'cancelled' %}bg-yellow-100 text-yellow-700{% else %}bg-red-100 text-red-700{% endif %}">
+                                                {% if stream.status == 'active' %}● AKTİF{% elif stream.status == 'cancelled' %}⏸ İPTAL{% else %}✕ DOLU{% endif %}
+                                            </span>
+                                        </div>
+                                        <!-- İçerik başlığı -->
+                                        <p class="text-xs theme-text-secondary truncate" title="{{ stream.meta.get('title') or stream.stream_id }}">
+                                            <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3 inline mr-1 text-primary" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                                            {{ stream.meta.get('title') or 'Bilinmeyen İçerik' }}
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <!-- Hız Göstergeleri -->
+                                <div class="px-4 pb-3 flex gap-2">
+                                    {% if stream.instant_mbps is defined and stream.instant_mbps|float != 0.0 %}
+                                    <div class="flex-1 rounded-lg px-3 py-2 text-center" style="background:rgba(99,102,241,0.08);">
+                                        <div class="text-[10px] theme-text-secondary mb-0.5">⚡ Anlık</div>
+                                        <div class="text-sm font-bold text-primary">{{ stream.instant_mbps }} <span class="text-[10px] font-normal">MB/s</span></div>
+                                    </div>
+                                    {% endif %}
+                                    <div class="flex-1 rounded-lg px-3 py-2 text-center" style="background:rgba(16,185,129,0.08);">
+                                        <div class="text-[10px] theme-text-secondary mb-0.5">∅ Ort.</div>
+                                        <div class="text-sm font-bold" style="color:#10b981;">{{ stream.avg_mbps }} <span class="text-[10px] font-normal">MB/s</span></div>
+                                    </div>
+                                    <div class="flex-1 rounded-lg px-3 py-2 text-center" style="background:rgba(245,158,11,0.08);">
+                                        <div class="text-[10px] theme-text-secondary mb-0.5">▲ Zirve</div>
+                                        <div class="text-sm font-bold" style="color:#f59e0b;">{{ stream.peak_mbps }} <span class="text-[10px] font-normal">MB/s</span></div>
+                                    </div>
+                                </div>
+
+                                <!-- Alt Bilgi Şeridi -->
+                                <div class="px-4 py-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 border-t {% if stream.status == 'active' %}border-green-100{% elif stream.status == 'cancelled' %}border-yellow-100{% else %}border-red-100{% endif %}"
+                                     style="background: rgba(0,0,0,0.02);">
+                                    <span class="text-xs theme-text-secondary flex items-center gap-1">
+                                        <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+                                        Bot{{ stream.client_index + 1 }}
                                     </span>
+                                    <span class="text-xs theme-text-secondary flex items-center gap-1">
+                                        <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                                        DC{{ stream.dc_id }}
+                                    </span>
+                                    <span class="text-xs theme-text-secondary flex items-center gap-1">
+                                        <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+                                        {{ stream.duration }}s
+                                    </span>
+                                    <span class="text-xs theme-text-secondary flex items-center gap-1">
+                                        <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1M16 12l-4 4-4-4M12 16V4"/></svg>
+                                        {{ "%.2f"|format(stream.total_bytes / 1024 / 1024) }} MB
+                                    </span>
+                                    {% if stream.meta and stream.meta.client_host %}
+                                    <span class="text-xs theme-text-secondary flex items-center gap-1">
+                                        <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/><path d="M3.6 9h16.8M3.6 15h16.8M12 3a15 15 0 010 18M12 3a15 15 0 000 18"/></svg>
+                                        {{ stream.meta.client_host }}
+                                    </span>
+                                    {% endif %}
                                 </div>
 
-                                <div class="grid grid-cols-2 gap-3 mb-3">
-                                    <div class="flex justify-between py-2 px-3 bg-white rounded">
-                                        <span class="text-sm theme-text-secondary">Bot:</span>
-                                        <span class="text-sm font-semibold">Bot{{ stream.client_index + 1 }} </span>
-                                    </div>
-                                    <div class="flex justify-between py-2 px-3 bg-white rounded">
-                                        <span class="text-sm theme-text-secondary">Dosya:</span>
-                                        <span class="text-sm font-semibold">DC{{ stream.dc_id }}</span>
-                                    </div>
-                                    <div class="flex justify-between py-2 px-3 bg-white rounded col-span-2">
-                                        <span class="text-sm theme-text-secondary">Süre:</span>
-                                        <span class="text-sm font-semibold">{{ stream.duration }}s</span>
-                                    </div>
-
-                                    <div class="flex justify-between py-2 px-3 bg-white rounded col-span-2">
-                                        <span class="text-sm theme-text-secondary">Veri Aktarımı:</span>
-                                        <span class="text-sm font-semibold">{{ "%.2f"|format(stream.total_bytes / 1024 /
-                                            1024) }} MB</span>
-                                    </div>
-                                </div>
-
-                                <div class="grid grid-cols-3 gap-3">
-                                    <div class="text-center py-3 bg-white rounded">
-                                        <div class="text-xs theme-text-secondary mb-1">Ani</div>
-                                        <div class="text-sm font-bold text-primary">{{ stream.instant_mbps }} MB/s</div>
-                                    </div>
-                                    <div class="text-center py-3 bg-white rounded">
-                                        <div class="text-xs theme-text-secondary mb-1">Ortalama</div>
-                                        <div class="text-sm font-bold text-primary">{{ stream.avg_mbps }} MB/s</div>
-                                    </div>
-                                    <div class="text-center py-3 bg-white rounded">
-                                        <div class="text-xs theme-text-secondary mb-1">En yüksek</div>
-                                        <div class="text-sm font-bold text-primary">{{ stream.peak_mbps }} MB/s</div>
-                                    </div>
-                                </div>
-
-                                {% if stream.meta and (stream.meta.client_host or stream.meta.user_name) %}
-                                <div class="mt-3 pt-3 border-t border-gray-200">
-                                    <div class="flex flex-col gap-1">
-                                        {% if stream.meta.client_host %}
-                                        <div class="flex justify-between items-center text-sm">
-                                            <div class="flex items-center gap-2">
-                                                <svg xmlns="http://www.w3.org/2000/svg"
-                                                    class="w-4 h-4 theme-text-secondary" fill="none" viewBox="0 0 24 24"
-                                                    stroke="currentColor">
-                                                    <path stroke-linecap="round" stroke-linejoin="round"
-                                                        stroke-width="2"
-                                                        d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9">
-                                                    </path>
-                                                </svg>
-                                                <span class="theme-text-secondary">Client IPv4:</span>
-                                            </div>
-                                            <span class="font-mono text-xs">{{ stream.meta.client_host }}</span>
-                                        </div>
-                                        {% endif %}
-                                        {% if stream.meta.user_name %}
-                                        <div class="flex justify-between items-center text-sm">
-                                            <div class="flex items-center gap-2">
-                                                <svg xmlns="http://www.w3.org/2000/svg"
-                                                    class="w-4 h-4 theme-text-secondary" fill="none" viewBox="0 0 24 24"
-                                                    stroke="currentColor">
-                                                    <path stroke-linecap="round" stroke-linejoin="round"
-                                                        stroke-width="2"
-                                                        d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z">
-                                                    </path>
-                                                </svg>
-                                                <span class="theme-text-secondary">Kullanıcı:</span>
-                                            </div>
-                                            <span class="font-mono text-xs font-semibold">{{ stream.meta.user_name
-                                                }}</span>
-                                        </div>
-                                        {% endif %}
-                                    </div>
-                                </div>
-                                {% endif %}
                             </div>
                             {% endfor %}
                             {% else %}
-                            <div class="text-center py-12">
-                                <svg xmlns="http://www.w3.org/2000/svg" class="w-16 h-16 mx-auto mb-4 text-gray-300"
-                                    fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                        d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z">
-                                    </path>
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                        d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                                </svg>
-                                <p class="text-gray-500 font-medium mb-1">Aktif yayın yok</p>
+                            <div class="flex flex-col items-center justify-center py-14 text-center">
+                                <div class="w-16 h-16 rounded-2xl bg-gray-100 flex items-center justify-center mb-4">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="w-8 h-8 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M9.5 9.5a3.5 3.5 0 015 5M7 7a7 7 0 0110 10M4.5 4.5a11.5 11.5 0 0115 15"/>
+                                    </svg>
+                                </div>
+                                <p class="text-gray-500 font-semibold mb-1">Aktif yayın yok</p>
                                 <p class="text-gray-400 text-sm">Kullanıcılar içerik izlemeye başladığında yayınlar burada görünecektir</p>
                             </div>
                             {% endif %}
                         </div>
+
                         <!-- Sayfalama kontrolleri (JS tarafından gösterilir/gizlenir) -->
-                        <div id="streams-pagination" class="hidden mt-4 flex items-center justify-between">
+                        <div id="streams-pagination" class="hidden px-5 pb-5 flex items-center justify-between gap-3">
                             <button id="streams-prev-btn" onclick="streamsChangePage(-1)"
-                                class="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-medium bg-gray-100 hover:bg-gray-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                                class="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium border theme-border hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
                                 <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
                                 </svg>
@@ -226,7 +201,7 @@
                             </button>
                             <span id="streams-page-info" class="text-sm theme-text-secondary font-medium"></span>
                             <button id="streams-next-btn" onclick="streamsChangePage(1)"
-                                class="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-medium bg-gray-100 hover:bg-gray-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                                class="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium border theme-border hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
                                 Sonraki
                                 <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
@@ -838,84 +813,73 @@
         };
 
         container.innerHTML = pageItems.map(stream => {
-            const statusColor = stream.status === 'active'
-                ? 'bg-green-100 text-green-800'
-                : stream.status === 'cancelled'
-                    ? 'bg-yellow-100 text-yellow-800'
-                    : 'bg-red-100 text-red-800';
-            const borderColor = stream.status === 'active'
-                ? 'border-green-500'
-                : stream.status === 'cancelled'
-                    ? 'border-yellow-500'
-                    : 'border-red-500';
-            const streamIdStr = stream.stream_id ? stream.stream_id.substring(0, 8) + '...' : 'Bilinmiyor';
-            const titleStr = (stream.meta && stream.meta.title) ? stream.meta.title : (stream.title || 'Bilinmeyen Yayın');
+            const borderColor = stream.status === 'active' ? 'border-green-200' : stream.status === 'cancelled' ? 'border-yellow-200' : 'border-red-200';
+            const borderTopColor = stream.status === 'active' ? 'border-green-100' : stream.status === 'cancelled' ? 'border-yellow-100' : 'border-red-100';
+            const avatarBg = stream.status === 'active' ? 'bg-green-500' : stream.status === 'cancelled' ? 'bg-yellow-500' : 'bg-red-500';
+            const statusLabel = stream.status === 'active' ? '● AKTİF' : stream.status === 'cancelled' ? '⏸ İPTAL' : '✕ DOLU';
+            const statusBadge = stream.status === 'active' ? 'bg-green-100 text-green-700' : stream.status === 'cancelled' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700';
+            const userName = (stream.meta && stream.meta.user_name) ? stream.meta.user_name : 'Bilinmeyen Kullanıcı';
+            const avatarLetter = userName.charAt(0).toUpperCase();
+            const titleStr = (stream.meta && stream.meta.title) ? stream.meta.title : (stream.title || 'Bilinmeyen İçerik');
 
             return `
-            <div class="p-4 bg-gray-50 rounded-lg border-l-4 ${borderColor}">
-                <div class="flex justify-between items-start mb-3">
-                    <div class="flex items-center gap-2 max-w-[70%]">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 text-primary shrink-0" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-                        <div class="truncate">
-                            <span class="font-semibold" title="${escapeHtml(stream.title || stream.stream_id)}">${escapeHtml(titleStr)}</span>
-                            <div class="text-[10px] text-gray-500 font-mono mt-0.5" title="${escapeHtml(stream.stream_id)}">ID: ${escapeHtml(streamIdStr)}</div>
+            <div class="rounded-xl overflow-hidden border ${borderColor}" style="background: var(--card-bg, #f9fafb);">
+                <!-- Üst: Avatar + Kullanıcı + Başlık + Durum -->
+                <div class="px-4 pt-4 pb-3 flex items-start gap-3">
+                    <div class="w-9 h-9 rounded-full flex items-center justify-center shrink-0 font-bold text-sm text-white ${avatarBg}">
+                        ${escapeHtml(avatarLetter)}
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <div class="flex items-center justify-between gap-2 mb-0.5">
+                            <span class="font-semibold text-sm truncate">${escapeHtml(userName)}</span>
+                            <span class="px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${statusBadge}">${statusLabel}</span>
                         </div>
-                    </div>
-                    <span class="px-2 py-1 rounded text-xs font-semibold shrink-0 uppercase ${statusColor}">${escapeHtml(stream.status)}</span>
-                </div>
-                <div class="grid grid-cols-2 gap-3 mb-3">
-                    <div class="flex justify-between py-2 px-3 bg-white rounded">
-                        <span class="text-sm theme-text-secondary">Bot:</span>
-                        <span class="text-sm font-semibold">Bot${(stream.client_index || 0) + 1}</span>
-                    </div>
-                    <div class="flex justify-between py-2 px-3 bg-white rounded">
-                        <span class="text-sm theme-text-secondary">Dosya:</span>
-                        <span class="text-sm font-semibold">DC${stream.dc_id || '-'}</span>
-                    </div>
-                    <div class="flex justify-between py-2 px-3 bg-white rounded col-span-2">
-                        <span class="text-sm theme-text-secondary">Süre:</span>
-                        <span class="text-sm font-semibold">${stream.duration || 0}s</span>
-                    </div>
-                    <div class="flex justify-between py-2 px-3 bg-white rounded col-span-2">
-                        <span class="text-sm theme-text-secondary">Veri Aktarımı:</span>
-                        <span class="text-sm font-semibold">${formatBytes(stream.total_bytes)}</span>
+                        <p class="text-xs theme-text-secondary truncate" title="${escapeHtml(titleStr)}">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3 inline mr-1 text-primary" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                            ${escapeHtml(titleStr)}
+                        </p>
                     </div>
                 </div>
-                <div class="grid grid-cols-3 gap-3">
-                    <div class="text-center py-3 bg-white rounded">
-                        <div class="text-xs theme-text-secondary mb-1">Ani</div>
-                        <div class="text-sm font-bold text-primary">${stream.instant_mbps || 0} MB/s</div>
+                <!-- Hız Göstergeleri -->
+                <div class="px-4 pb-3 flex gap-2">
+                    ${parseFloat(stream.instant_mbps || 0) !== 0.0 ? `
+                    <div class="flex-1 rounded-lg px-3 py-2 text-center" style="background:rgba(99,102,241,0.08);">
+                        <div class="text-[10px] theme-text-secondary mb-0.5">⚡ Anlık</div>
+                        <div class="text-sm font-bold text-primary">${stream.instant_mbps || 0} <span class="text-[10px] font-normal">MB/s</span></div>
+                    </div>` : ''}
+                    <div class="flex-1 rounded-lg px-3 py-2 text-center" style="background:rgba(16,185,129,0.08);">
+                        <div class="text-[10px] theme-text-secondary mb-0.5">∅ Ort.</div>
+                        <div class="text-sm font-bold" style="color:#10b981;">${stream.avg_mbps || 0} <span class="text-[10px] font-normal">MB/s</span></div>
                     </div>
-                    <div class="text-center py-3 bg-white rounded">
-                        <div class="text-xs theme-text-secondary mb-1">Ortalama</div>
-                        <div class="text-sm font-bold text-primary">${stream.avg_mbps || 0} MB/s</div>
-                    </div>
-                    <div class="text-center py-3 bg-white rounded">
-                        <div class="text-xs theme-text-secondary mb-1">En yüksek</div>
-                        <div class="text-sm font-bold text-primary">${stream.peak_mbps || 0} MB/s</div>
+                    <div class="flex-1 rounded-lg px-3 py-2 text-center" style="background:rgba(245,158,11,0.08);">
+                        <div class="text-[10px] theme-text-secondary mb-0.5">▲ Zirve</div>
+                        <div class="text-sm font-bold" style="color:#f59e0b;">${stream.peak_mbps || 0} <span class="text-[10px] font-normal">MB/s</span></div>
                     </div>
                 </div>
-                ${stream.meta && (stream.meta.client_host || stream.meta.user_name) ? `
-                <div class="mt-3 pt-3 border-t border-gray-200">
-                    <div class="flex flex-col gap-1">
-                        ${stream.meta.client_host ? `
-                        <div class="flex justify-between items-center text-sm">
-                            <div class="flex items-center gap-2">
-                                <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 theme-text-secondary" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/></svg>
-                                <span class="theme-text-secondary">Client IPv4:</span>
-                            </div>
-                            <span class="font-mono text-xs">${escapeHtml(stream.meta.client_host)}</span>
-                        </div>` : ''}
-                        ${stream.meta.user_name ? `
-                        <div class="flex justify-between items-center text-sm">
-                            <div class="flex items-center gap-2">
-                                <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 theme-text-secondary" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
-                                <span class="theme-text-secondary">Kullanıcı:</span>
-                            </div>
-                            <span class="font-mono text-xs font-semibold">${escapeHtml(stream.meta.user_name)}</span>
-                        </div>` : ''}
-                    </div>
-                </div>` : ''}
+                <!-- Alt Bilgi Şeridi -->
+                <div class="px-4 py-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 border-t ${borderTopColor}" style="background:rgba(0,0,0,0.02);">
+                    <span class="text-xs theme-text-secondary flex items-center gap-1">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+                        Bot${(stream.client_index || 0) + 1}
+                    </span>
+                    <span class="text-xs theme-text-secondary flex items-center gap-1">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                        DC${stream.dc_id || '-'}
+                    </span>
+                    <span class="text-xs theme-text-secondary flex items-center gap-1">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+                        ${stream.duration || 0}s
+                    </span>
+                    <span class="text-xs theme-text-secondary flex items-center gap-1">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1M16 12l-4 4-4-4M12 16V4"/></svg>
+                        ${formatBytes(stream.total_bytes)}
+                    </span>
+                    ${stream.meta && stream.meta.client_host ? `
+                    <span class="text-xs theme-text-secondary flex items-center gap-1">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/><path d="M3.6 9h16.8M3.6 15h16.8M12 3a15 15 0 010 18M12 3a15 15 0 000 18"/></svg>
+                        ${escapeHtml(stream.meta.client_host)}
+                    </span>` : ''}
+                </div>
             </div>`;
         }).join('');
 
