@@ -1,0 +1,364 @@
+{% extends "base.html" %}
+
+{% block title %}Link ile İçerik Ekle{% endblock %}
+
+{% block content %}
+<div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-8">
+
+    <!-- Header -->
+    <div class="mb-6 sm:mb-8">
+        <div class="flex items-center gap-2 mb-2">
+            <a href="/" class="text-primary hover:underline flex items-center text-sm">
+                <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/>
+                </svg>
+                Kontrol Paneli
+            </a>
+        </div>
+        <h1 class="text-2xl sm:text-3xl font-bold flex items-center gap-3">
+            <span class="inline-flex items-center justify-center w-10 h-10 rounded-full bg-primary text-white text-lg">🔗</span>
+            Link ile İçerik Ekle
+        </h1>
+        <p class="theme-text-secondary text-sm mt-1">Tek veya toplu link ekleyerek veritabanına film/dizi kaydedin</p>
+    </div>
+
+    <!-- Toast -->
+    <div id="toast" class="fixed top-4 right-4 z-50 hidden px-5 py-3 rounded-lg shadow-xl text-white text-sm font-medium transition-all duration-300 max-w-sm"></div>
+
+    <!-- Input Alanı -->
+    <div class="theme-card rounded-2xl shadow-lg p-6 mb-6">
+        <h2 class="text-lg font-semibold mb-1 flex items-center gap-2">
+            <svg class="w-5 h-5 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/>
+            </svg>
+            Link(ler) Girin
+        </h2>
+        <p class="theme-text-secondary text-xs mb-4">
+            Her satıra bir link yazın. İsteğe bağlı olarak linkten sonra boşluk bırakıp dosya adı yazabilirsiniz.
+            <br>
+            <span class="text-yellow-500 font-medium">Örnek:</span>
+            <code class="bg-gray-100 dark:bg-gray-800 px-1 rounded text-xs">https://1.com/film.mkv Firebrand 2024 1080p WEB-DL.mkv</code>
+        </p>
+
+        <textarea
+            id="links-input"
+            rows="6"
+            placeholder="https://example.com/film.mkv&#10;https://pixeldrain.com/u/AbCdEfGh&#10;https://cdn.example.com/dizi.mkv The Bear S03E01 1080p WEB-DL.mkv"
+            class="w-full rounded-xl border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 text-sm p-3 font-mono focus:outline-none focus:ring-2 focus:ring-primary resize-none transition"
+        ></textarea>
+
+        <div class="flex items-center justify-between mt-4 flex-wrap gap-3">
+            <div class="flex items-center gap-2 text-xs theme-text-secondary">
+                <svg class="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+                Pixeldrain linkleri otomatik API linkine dönüştürülür
+            </div>
+            <div class="flex gap-3">
+                <button onclick="clearAll()" class="px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 text-sm transition">
+                    Temizle
+                </button>
+                <button onclick="processLinks()" id="process-btn"
+                    class="flex items-center gap-2 px-5 py-2 bg-primary text-white rounded-lg hover:opacity-90 transition font-medium shadow-md text-sm">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                    </svg>
+                    Sorgula
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Sonuçlar Listesi -->
+    <div id="results-container" class="space-y-4"></div>
+
+    <!-- Toplu Onay Butonu -->
+    <div id="bulk-actions" class="hidden mt-6 flex justify-end gap-3">
+        <button onclick="approveAll()" class="flex items-center gap-2 px-6 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition font-medium shadow-md">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+            </svg>
+            Tümünü Onayla
+        </button>
+        <button onclick="rejectAll()" class="flex items-center gap-2 px-6 py-2.5 bg-red-600 text-white rounded-lg hover:bg-red-700 transition font-medium shadow-md">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+            Tümünü Reddet
+        </button>
+    </div>
+</div>
+
+<script>
+// Tüm sorgu sonuçlarını tutar
+let queryResults = [];
+
+function showToast(msg, type = 'success') {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.className = `fixed top-4 right-4 z-50 px-5 py-3 rounded-lg shadow-xl text-white text-sm font-medium transition-all duration-300 max-w-sm ${
+        type === 'success' ? 'bg-green-600' : type === 'error' ? 'bg-red-600' : 'bg-blue-600'
+    }`;
+    t.classList.remove('hidden');
+    setTimeout(() => t.classList.add('hidden'), 3500);
+}
+
+function clearAll() {
+    document.getElementById('links-input').value = '';
+    document.getElementById('results-container').innerHTML = '';
+    document.getElementById('bulk-actions').classList.add('hidden');
+    queryResults = [];
+}
+
+function parseInputLine(line) {
+    line = line.trim();
+    if (!line) return null;
+
+    // URL'yi bul (boşluğa veya satır sonuna kadar)
+    const urlMatch = line.match(/^(https?:\/\/\S+)/);
+    if (!urlMatch) return null;
+
+    let url = urlMatch[1];
+    const rest = line.slice(url.length).trim();
+
+    // Pixeldrain dönüşümü: https://pixeldrain.com/u/XXXX → https://pixeldrain.com/api/file/XXXX
+    const pdMatch = url.match(/^https:\/\/pixeldrain\.com\/u\/([A-Za-z0-9]+)$/);
+    if (pdMatch) {
+        url = `https://pixeldrain.com/api/file/${pdMatch[1]}`;
+    }
+
+    return { url, customFilename: rest || null };
+}
+
+async function processLinks() {
+    const raw = document.getElementById('links-input').value;
+    const lines = raw.split('\n').map(l => l.trim()).filter(Boolean);
+
+    if (!lines.length) {
+        showToast('Lütfen en az bir link girin.', 'error');
+        return;
+    }
+
+    const parsed = lines.map(parseInputLine).filter(Boolean);
+    if (!parsed.length) {
+        showToast('Geçerli URL bulunamadı.', 'error');
+        return;
+    }
+
+    const btn = document.getElementById('process-btn');
+    btn.disabled = true;
+    btn.innerHTML = `<svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg> Sorgulanıyor…`;
+
+    document.getElementById('results-container').innerHTML = '';
+    document.getElementById('bulk-actions').classList.add('hidden');
+    queryResults = [];
+
+    for (let i = 0; i < parsed.length; i++) {
+        const { url, customFilename } = parsed[i];
+        const cardId = `result-${i}`;
+        // Placeholder kart
+        document.getElementById('results-container').insertAdjacentHTML('beforeend', `
+            <div id="${cardId}" class="theme-card rounded-2xl shadow p-5 border border-gray-200 dark:border-gray-700">
+                <div class="flex items-center gap-3 text-sm theme-text-secondary">
+                    <svg class="w-5 h-5 animate-spin text-primary flex-shrink-0" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                    </svg>
+                    <span class="truncate font-mono text-xs">${url}</span>
+                    <span class="ml-auto text-xs">Sorgulanıyor…</span>
+                </div>
+            </div>
+        `);
+
+        try {
+            const res = await fetch('/api/link-ekle/query', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url, custom_filename: customFilename })
+            });
+            const data = await res.json();
+            if (data.error) {
+                renderErrorCard(cardId, i, url, data.error);
+            } else {
+                queryResults[i] = { ...data, url, index: i };
+                renderResultCard(cardId, i, data);
+            }
+        } catch (e) {
+            renderErrorCard(cardId, i, url, 'Sunucu hatası: ' + e.message);
+        }
+    }
+
+    btn.disabled = false;
+    btn.innerHTML = `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg> Sorgula`;
+
+    // Toplu onay butonlarını göster
+    const valid = queryResults.filter(Boolean).length;
+    if (valid > 1) {
+        document.getElementById('bulk-actions').classList.remove('hidden');
+    }
+}
+
+function renderResultCard(cardId, idx, data) {
+    const mediaTypeLabel = data.media_type === 'tv'
+        ? `<span class="px-2 py-0.5 bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded-full text-xs font-medium">Dizi</span>`
+        : `<span class="px-2 py-0.5 bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300 rounded-full text-xs font-medium">Film</span>`;
+
+    const episodeInfo = data.media_type === 'tv' && data.season
+        ? `<span class="text-xs theme-text-secondary">S${String(data.season).padStart(2,'0')}E${String(data.episode).padStart(2,'0')}</span>`
+        : '';
+
+    document.getElementById(cardId).outerHTML = `
+    <div id="${cardId}" class="theme-card rounded-2xl shadow-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+        <div class="p-5">
+            <div class="flex gap-5">
+                <!-- Poster -->
+                <div class="flex-shrink-0 w-20 sm:w-24">
+                    ${data.poster
+                        ? `<img src="${data.poster}" alt="poster" class="w-full rounded-xl shadow object-cover aspect-[2/3]" onerror="this.src=''">`
+                        : `<div class="w-full aspect-[2/3] rounded-xl bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-3xl">🎬</div>`
+                    }
+                </div>
+
+                <!-- Info -->
+                <div class="flex-1 min-w-0">
+                    <div class="flex items-start justify-between gap-2 flex-wrap">
+                        <div>
+                            <div class="flex items-center gap-2 flex-wrap mb-1">
+                                ${mediaTypeLabel}
+                                ${episodeInfo}
+                                ${data.year ? `<span class="text-xs theme-text-secondary">${data.year}</span>` : ''}
+                            </div>
+                            <h3 class="text-base font-bold leading-tight">${data.title || '—'}</h3>
+                            ${data.title_tr ? `<p class="text-sm theme-text-secondary mt-0.5">🇹🇷 ${data.title_tr}</p>` : ''}
+                            ${data.title_de ? `<p class="text-sm theme-text-secondary mt-0.5">🇩🇪 ${data.title_de}</p>` : ''}
+                        </div>
+                    </div>
+
+                    <!-- IDs -->
+                    <div class="flex gap-3 mt-2 flex-wrap">
+                        ${data.imdb_id ? `<span class="text-xs bg-yellow-100 dark:bg-yellow-900 text-yellow-700 dark:text-yellow-300 px-2 py-0.5 rounded font-mono">IMDb: ${data.imdb_id}</span>` : ''}
+                        ${data.tmdb_id ? `<span class="text-xs bg-teal-100 dark:bg-teal-900 text-teal-700 dark:text-teal-300 px-2 py-0.5 rounded font-mono">TMDb: ${data.tmdb_id}</span>` : ''}
+                    </div>
+
+                    <!-- Dosya Bilgisi -->
+                    <div class="mt-2 flex gap-3 flex-wrap text-xs theme-text-secondary">
+                        <span class="flex items-center gap-1">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                            ${data.filename || '—'}
+                        </span>
+                        <span class="flex items-center gap-1">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2 1 3 3 3h10c2 0 3-1 3-3V9l-5-5H7c-2 0-3 1-3 3z"/></svg>
+                            ${data.file_size || '—'}
+                        </span>
+                        ${data.quality ? `<span class="flex items-center gap-1">📺 ${data.quality}</span>` : ''}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Onay Butonları -->
+            <div id="${cardId}-actions" class="flex gap-3 mt-4 justify-end">
+                <button onclick="rejectResult(${idx})" id="${cardId}-reject-btn"
+                    class="flex items-center gap-1.5 px-4 py-2 border border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/30 transition text-sm font-medium">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                    Reddet
+                </button>
+                <button onclick="approveResult(${idx})" id="${cardId}-approve-btn"
+                    class="flex items-center gap-1.5 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition text-sm font-medium shadow">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                    Onayla & Kaydet
+                </button>
+            </div>
+        </div>
+    </div>`;
+}
+
+function renderErrorCard(cardId, idx, url, errMsg) {
+    document.getElementById(cardId).outerHTML = `
+    <div id="${cardId}" class="theme-card rounded-2xl shadow border border-red-200 dark:border-red-800 p-5">
+        <div class="flex items-start gap-3">
+            <svg class="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+            <div class="flex-1 min-w-0">
+                <p class="text-sm font-medium text-red-600 dark:text-red-400">Sorgu Başarısız</p>
+                <p class="text-xs theme-text-secondary font-mono truncate mt-0.5">${url}</p>
+                <p class="text-xs text-red-500 mt-1">${errMsg}</p>
+            </div>
+        </div>
+    </div>`;
+}
+
+async function approveResult(idx) {
+    const data = queryResults[idx];
+    if (!data) return;
+
+    const cardId = `result-${idx}`;
+    const approveBtn = document.getElementById(`${cardId}-approve-btn`);
+    const rejectBtn = document.getElementById(`${cardId}-reject-btn`);
+
+    approveBtn.disabled = true;
+    rejectBtn.disabled = true;
+    approveBtn.innerHTML = `<svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg> Kaydediliyor…`;
+
+    try {
+        const res = await fetch('/api/link-ekle/save', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        const result = await res.json();
+
+        if (result.ok) {
+            document.getElementById(`${cardId}-actions`).innerHTML = `
+                <div class="flex items-center gap-2 text-green-600 dark:text-green-400 text-sm font-medium">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                    Veritabanına kaydedildi
+                </div>`;
+            showToast(`✅ "${data.title}" kaydedildi`, 'success');
+            queryResults[idx] = null;
+        } else {
+            approveBtn.disabled = false;
+            rejectBtn.disabled = false;
+            approveBtn.innerHTML = `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Onayla & Kaydet`;
+            showToast('Kayıt hatası: ' + (result.error || 'Bilinmeyen hata'), 'error');
+        }
+    } catch (e) {
+        showToast('Sunucu hatası: ' + e.message, 'error');
+        approveBtn.disabled = false;
+        rejectBtn.disabled = false;
+        approveBtn.innerHTML = `Onayla & Kaydet`;
+    }
+}
+
+function rejectResult(idx) {
+    const cardId = `result-${idx}`;
+    const card = document.getElementById(cardId);
+    if (!card) return;
+    queryResults[idx] = null;
+    card.style.opacity = '0.4';
+    card.style.pointerEvents = 'none';
+    document.getElementById(`${cardId}-actions`).innerHTML = `
+        <div class="flex items-center gap-2 theme-text-secondary text-sm">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+            Reddedildi — kaydedilmeyecek
+        </div>`;
+    showToast('❌ İçerik reddedildi', 'info');
+}
+
+async function approveAll() {
+    const pending = queryResults.map((r, i) => ({ r, i })).filter(({ r }) => r !== null && r !== undefined);
+    if (!pending.length) { showToast('Onaylanacak içerik yok', 'error'); return; }
+    for (const { i } of pending) {
+        await approveResult(i);
+    }
+}
+
+function rejectAll() {
+    queryResults.forEach((r, i) => { if (r) rejectResult(i); });
+}
+</script>
+{% endblock %}

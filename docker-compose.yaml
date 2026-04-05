@@ -1,0 +1,19 @@
+services:
+  telegram-stremio:
+    build: .
+    container_name: tg_stremio  
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./config.env:/app/config.env
+      - ./gdrive_token.pickle:/app/gdrive_token.pickle
+
+      # NOT: İlk kullanımdan önce host'ta bu dosyayı oluşturun:
+      #   touch gdrive_token.pickle
+      # Ardından /ayarlar → 📁 Dosya Ekle → token.pickle Yükle
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "1m"     
+        max-file: "3"      

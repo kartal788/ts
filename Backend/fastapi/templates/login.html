@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+
+{% block title %}Giriş Yap{% endblock %}
+
+{% block content %}
+<div class="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+    <div class="max-w-md w-full space-y-8">
+        <div class="text-center">
+            <h2 class="text-3xl font-bold">Yönetici Girişi</h2>
+            <p class="mt-2 theme-text-secondary">Yönetici paneline erişmek için giriş yapın</p>
+
+        </div>
+
+        {% if error %}
+        <div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md">
+            {{ error }}
+        </div>
+        {% endif %}
+
+        <form method="post" class="theme-card p-6 sm:p-8 rounded-lg shadow-lg space-y-6">
+            <div>
+                <label for="username" class="block text-sm font-medium mb-2">Kullanıcı Adı</label>
+                <input type="text" id="username" name="username" required autocomplete="username"
+                    class="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent">
+            </div>
+
+            <div>
+                <label for="password" class="block text-sm font-medium mb-2">Şifre</label>
+                <input type="password" id="password" name="password" required autocomplete="current-password"
+                    class="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent">
+            </div>
+
+            {% if captcha %}
+            <div>
+                <p class="text-sm font-medium mb-3" id="captcha-label">
+                    Tüm <strong class="text-blue-600" id="captcha-cat-name">{{ captcha.target_i18n.tr }}</strong> resimlerini seçin
+                    <span class="theme-text-secondary text-xs" id="captcha-count-label">({{ captcha.correct_count }} resim)</span>
+                </p>
+                <div id="captcha-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;">
+                    {% for img in captcha.images %}
+                    <div class="captcha-cell" data-index="{{ img.index }}"
+                        onclick="toggleCaptcha(this)"
+                        style="cursor:pointer;border:2px solid var(--c-border);border-radius:8px;overflow:hidden;position:relative;aspect-ratio:1;">
+                        <img src="{{ img.b64 }}" alt="resim" style="width:100%;height:100%;display:block;object-fit:cover;pointer-events:none;">
+                        <div class="captcha-check" style="display:none;position:absolute;inset:0;background:rgba(37,99,235,0.35);align-items:center;justify-content:center;">
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                <input type="hidden" id="captcha_selected" name="captcha_selected" value="[]">
+                <input type="hidden" name="captcha_token" value="{{ captcha.token if captcha else '' }}">
+                <div id="captcha-error-msg" style="display:none;color:#dc2626;font-size:.78rem;margin-top:.4rem;"></div>
+            </div>
+            {% endif %}
+
+            <button type="submit" id="login-submit-btn"
+                class="w-full bg-blue-600 hover:bg-blue-700 text-white py-2.5 px-4 rounded-md transition-colors font-medium shadow-sm text-base">
+                Giriş Yap
+            </button>
+        </form>
+
+        <script>
+        (function() {
+            // Çok dilli captcha metinleri
+            var CAPTCHA_I18N = {
+                tr: {
+                    label: function(cat, n) { return 'Tüm <strong class="text-blue-600">' + cat + '</strong> resimlerini seçin'; },
+                    count: function(n) { return '(' + n + ' resim)'; },
+                    err: function(n) { return n + ' resim seçmelisiniz.'; }
+                },
+                en: {
+                    label: function(cat, n) { return 'Select all <strong class="text-blue-600">' + cat + '</strong> images'; },
+                    count: function(n) { return '(' + n + ' images)'; },
+                    err: function(n) { return 'You must select ' + n + ' images.'; }
+                },
+                de: {
+                    label: function(cat, n) { return 'Alle <strong class="text-blue-600">' + cat + '</strong>-Bilder auswählen'; },
+                    count: function(n) { return '(' + n + ' Bilder)'; },
+                    err: function(n) { return 'Bitte ' + n + ' Bilder auswählen.'; }
+                }
+            };
+
+            var CAPTCHA_CATS = {
+                tr: "{{ captcha.target_i18n.tr if captcha else '' }}",
+                en: "{{ captcha.target_i18n.en if captcha else '' }}",
+                de: "{{ captcha.target_i18n.de if captcha else '' }}"
+            };
+            var CORRECT_COUNT = {{ captcha.correct_count if captcha else 0 }};
+
+            // Aktif dil (Türkçe varsayılan, admin sayfası)
+            var currentLang = localStorage.getItem('admin_lang') || 'tr';
+
+            function applyCaptchaLang(lang) {
+                var i = CAPTCHA_I18N[lang] || CAPTCHA_I18N.tr;
+                var cat = CAPTCHA_CATS[lang] || CAPTCHA_CATS.tr;
+                var labelEl = document.getElementById('captcha-label');
+                var countEl = document.getElementById('captcha-count-label');
+                if (labelEl) labelEl.innerHTML = i.label(cat, CORRECT_COUNT) + ' ';
+                if (countEl) countEl.textContent = i.count(CORRECT_COUNT);
+            }
+
+            function toggleCaptcha(el) {
+                el.classList.toggle('selected');
+                var selected = Array.from(document.querySelectorAll('.captcha-cell.selected')).map(function(e) { return parseInt(e.dataset.index); });
+                document.getElementById('captcha_selected').value = JSON.stringify(selected);
+                // Hata mesajını temizle
+                var errEl = document.getElementById('captcha-error-msg');
+                if (errEl) errEl.style.display = 'none';
+            }
+            // Global erişim için
+            window.toggleCaptcha = toggleCaptcha;
+
+            // Form submit doğrulama
+            var form = document.querySelector('form');
+            if (form) {
+                form.addEventListener('submit', function(e) {
+                    {% if captcha %}
+                    var selectedVal = document.getElementById('captcha_selected').value;
+                    var selected = [];
+                    try { selected = JSON.parse(selectedVal); } catch(ex) {}
+                    if (selected.length !== CORRECT_COUNT) {
+                        e.preventDefault();
+                        var lang = currentLang;
+                        var i = CAPTCHA_I18N[lang] || CAPTCHA_I18N.tr;
+                        var errEl = document.getElementById('captcha-error-msg');
+                        if (errEl) {
+                            errEl.textContent = i.err(CORRECT_COUNT);
+                            errEl.style.display = 'block';
+                        }
+                        return false;
+                    }
+                    {% endif %}
+                });
+            }
+
+            // Sayfa yüklendiğinde dili uygula
+            applyCaptchaLang(currentLang);
+        })();
+        </script>
+
+        </div>
+    </div>
+</div>
+{% endblock %}

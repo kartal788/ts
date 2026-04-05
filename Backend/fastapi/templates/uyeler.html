@@ -1,0 +1,288 @@
+{% extends "base.html" %}
+{% block title %}Üyeler – {{ app_name }}{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+  <!-- Başlık -->
+  <div class="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <div>
+      <h1 class="text-2xl sm:text-3xl font-bold flex items-center gap-3">
+        <span class="bg-primary/15 p-2 rounded-xl">
+          <i class="fas fa-users text-primary text-xl"></i>
+        </span>
+        Üyeler
+      </h1>
+      <p class="mt-2 text-sm theme-text-secondary">Tüm üyeleri veri kullanımına göre görüntüleyin ve yönetin.</p>
+    </div>
+    <div class="flex items-center gap-3">
+      <button onclick="loadMembers()" id="refresh-btn"
+        class="flex items-center gap-2 px-4 py-2 bg-primary/10 hover:bg-primary/20 text-primary rounded-xl text-sm font-medium transition-all">
+        <i class="fas fa-sync-alt" id="refresh-icon"></i> Yenile
+      </button>
+    </div>
+  </div>
+
+  <!-- Özet Kartlar -->
+  <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8" id="summary-row">
+    <div class="theme-card rounded-2xl border p-5 flex flex-col gap-1">
+      <span class="text-xs theme-text-secondary uppercase tracking-wide font-semibold">Toplam Üye</span>
+      <span class="text-2xl font-bold text-text" id="s-total">—</span>
+    </div>
+    <div class="theme-card rounded-2xl border p-5 flex flex-col gap-1">
+      <span class="text-xs theme-text-secondary uppercase tracking-wide font-semibold">Aktif</span>
+      <span class="text-2xl font-bold text-green-400" id="s-active">—</span>
+    </div>
+    <div class="theme-card rounded-2xl border p-5 flex flex-col gap-1">
+      <span class="text-xs theme-text-secondary uppercase tracking-wide font-semibold">Toplam Veri</span>
+      <span class="text-2xl font-bold text-primary" id="s-data">—</span>
+    </div>
+    <div class="theme-card rounded-2xl border p-5 flex flex-col gap-1">
+      <span class="text-xs theme-text-secondary uppercase tracking-wide font-semibold">Bu Ay</span>
+      <span class="text-2xl font-bold text-blue-400" id="s-monthly">—</span>
+    </div>
+  </div>
+
+  <!-- Arama + Filtre -->
+  <div class="flex flex-wrap gap-3 mb-4 items-center">
+    <div class="relative flex-1 min-w-[220px]">
+      <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-xs theme-text-secondary"></i>
+      <input id="search-input" type="text"
+        placeholder="İsim, kullanıcı adı veya ID ara..."
+        oninput="filterAndRender()"
+        class="w-full pl-9 pr-4 py-2.5 rounded-xl border text-sm focus:outline-none focus:border-primary transition">
+    </div>
+    <select id="filter-status" onchange="filterAndRender()"
+      class="rounded-xl border px-3 py-2.5 text-sm focus:outline-none focus:border-primary">
+      <option value="all">Tüm Durumlar</option>
+      <option value="active">🟢 Aktif</option>
+      <option value="expired">🔴 Süresi Dolmuş</option>
+    </select>
+    <select id="sort-by" onchange="filterAndRender()"
+      class="rounded-xl border px-3 py-2.5 text-sm focus:outline-none focus:border-primary">
+      <option value="total">Toplam Veri ↓</option>
+      <option value="monthly">Bu Ay ↓</option>
+      <option value="daily">Bugün ↓</option>
+      <option value="name">Ad A-Z</option>
+    </select>
+  </div>
+
+  <!-- Tablo -->
+  <div class="theme-card rounded-2xl border overflow-hidden shadow-sm">
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="border-b">
+            <th class="px-5 py-4 text-left font-semibold text-xs uppercase tracking-wide theme-text-secondary">#</th>
+            <th class="px-5 py-4 text-left font-semibold text-xs uppercase tracking-wide theme-text-secondary">Üye</th>
+            <th class="px-5 py-4 text-center font-semibold text-xs uppercase tracking-wide theme-text-secondary">Durum</th>
+            <th class="px-5 py-4 text-right font-semibold text-xs uppercase tracking-wide theme-text-secondary">Bugün</th>
+            <th class="px-5 py-4 text-right font-semibold text-xs uppercase tracking-wide theme-text-secondary hidden sm:table-cell">Bu Ay</th>
+            <th class="px-5 py-4 text-right font-semibold text-xs uppercase tracking-wide theme-text-secondary">Toplam</th>
+            <th class="px-5 py-4 text-right font-semibold text-xs uppercase tracking-wide theme-text-secondary hidden md:table-cell">Bitiş Tarihi</th>
+            <th class="px-5 py-4 text-center font-semibold text-xs uppercase tracking-wide theme-text-secondary">İşlem</th>
+          </tr>
+        </thead>
+        <tbody id="members-tbody">
+          <tr>
+            <td colspan="8" class="px-6 py-12 text-center theme-text-secondary">
+              <i class="fas fa-spinner fa-spin text-primary text-xl mr-2"></i>
+              <span>Üyeler yükleniyor...</span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Sayfalama -->
+  <div class="flex flex-col sm:flex-row items-center justify-between mt-4 gap-3" id="pagination-row">
+    <span class="text-sm theme-text-secondary" id="page-info"></span>
+    <div class="flex items-center gap-2">
+      <button id="btn-prev" onclick="changePage(-1)"
+        class="px-4 py-2 rounded-xl border text-sm hover:border-primary transition disabled:opacity-40">
+        <i class="fas fa-chevron-left mr-1"></i> Önceki
+      </button>
+      <span class="text-sm font-semibold px-2" id="page-num"></span>
+      <button id="btn-next" onclick="changePage(1)"
+        class="px-4 py-2 rounded-xl border text-sm hover:border-primary transition disabled:opacity-40">
+        Sonraki <i class="fas fa-chevron-right ml-1"></i>
+      </button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  let ALL_MEMBERS = [];
+  let FILTERED = [];
+  let currentPage = 1;
+  const PAGE_SIZE = 20;
+
+  function fmtGB(bytes) {
+    if (!bytes || bytes <= 0) return "0 B";
+    if (bytes >= 1073741824) return (bytes / 1073741824).toFixed(2) + " GB";
+    if (bytes >= 1048576)    return (bytes / 1048576).toFixed(1) + " MB";
+    return (bytes / 1024).toFixed(0) + " KB";
+  }
+
+  function fmtDate(iso) {
+    if (!iso) return "—";
+    try {
+      return new Date(iso).toLocaleDateString("tr-TR", { day: "2-digit", month: "2-digit", year: "numeric" });
+    } catch { return "—"; }
+  }
+
+  function statusBadge(status) {
+    if (status === "active")  return `<span class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-green-500/15 text-green-400 font-medium"><span class="w-1.5 h-1.5 rounded-full bg-green-400 inline-block"></span>Aktif</span>`;
+    if (status === "expired") return `<span class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-red-500/15 text-red-400 font-medium"><span class="w-1.5 h-1.5 rounded-full bg-red-400 inline-block"></span>Süresi Dolmuş</span>`;
+    if (status === "banned")  return `<span class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-gray-500/15 text-gray-400 font-medium"><span class="w-1.5 h-1.5 rounded-full bg-gray-400 inline-block"></span>Engellendi</span>`;
+    return `<span class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-gray-500/15 text-gray-400 font-medium">Bilinmiyor</span>`;
+  }
+
+  function dataBar(bytes, maxBytes) {
+    if (!maxBytes || maxBytes <= 0) return "";
+    const pct = Math.min(100, Math.round((bytes / maxBytes) * 100));
+    const color = pct > 75 ? "bg-red-500" : pct > 40 ? "bg-yellow-500" : "bg-primary";
+    return `<div class="flex items-center gap-2">
+      <span class="font-semibold text-text">${fmtGB(bytes)}</span>
+      <div class="hidden sm:block w-16 h-1.5 rounded-full bg-white/10">
+        <div class="${color} h-1.5 rounded-full transition-all" style="width:${pct}%"></div>
+      </div>
+    </div>`;
+  }
+
+  function filterAndRender() {
+    const q      = document.getElementById("search-input").value.trim().toLowerCase();
+    const status = document.getElementById("filter-status").value;
+    const sort   = document.getElementById("sort-by").value;
+
+    FILTERED = ALL_MEMBERS.filter(m => {
+      const name = (m.user_name || m.name || "").toLowerCase();
+      const uid  = String(m.user_id || "");
+      const matchQ = !q || name.includes(q) || uid.includes(q);
+      const matchS = status === "all" || (m.subscription_status || m.status) === status;
+      return matchQ && matchS;
+    });
+
+    FILTERED.sort((a, b) => {
+      if (sort === "total")   return (b.total_bytes || 0) - (a.total_bytes || 0);
+      if (sort === "monthly") return (b.monthly_bytes || 0) - (a.monthly_bytes || 0);
+      if (sort === "daily")   return (b.daily_bytes || 0) - (a.daily_bytes || 0);
+      if (sort === "name")    return (a.user_name || a.name || "").localeCompare(b.user_name || b.name || "");
+      return 0;
+    });
+
+    currentPage = 1;
+    renderTable();
+  }
+
+  function renderTable() {
+    const tbody = document.getElementById("members-tbody");
+    const total = FILTERED.length;
+    const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+    currentPage = Math.min(Math.max(currentPage, 1), pages);
+
+    const start = (currentPage - 1) * PAGE_SIZE;
+    const slice = FILTERED.slice(start, start + PAGE_SIZE);
+    const maxBytes = FILTERED.length > 0 ? Math.max(...FILTERED.map(m => m.total_bytes || 0)) : 0;
+
+    document.getElementById("page-info").textContent = `${total} üye • Sayfa ${currentPage} / ${pages}`;
+    document.getElementById("page-num").textContent = `${currentPage} / ${pages}`;
+    document.getElementById("btn-prev").disabled = currentPage === 1;
+    document.getElementById("btn-next").disabled = currentPage === pages;
+
+    if (slice.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="8" class="px-6 py-12 text-center theme-text-secondary">Üye bulunamadı</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = slice.map((m, i) => {
+      const rank = start + i + 1;
+      const name = m.user_name || m.name || `Kullanıcı ${m.user_id || "?"}`;
+      const uid  = m.user_id || "";
+      const token = m.token || "";
+      const status = m.subscription_status || m.status || "unknown";
+      const expiry = m.subscription_expiry || m.expiry || null;
+      const totalBytes   = m.total_bytes   || 0;
+      const monthlyBytes = m.monthly_bytes || 0;
+      const dailyBytes   = m.daily_bytes   || 0;
+      const rankColor = rank === 1 ? "text-yellow-400" : rank === 2 ? "text-gray-300" : rank === 3 ? "text-amber-600" : "theme-text-secondary";
+
+      return `<tr class="border-b border-white/5 hover:bg-primary/5 transition-colors group">
+        <td class="px-5 py-4 font-bold text-sm ${rankColor}">${rank}</td>
+        <td class="px-5 py-4">
+          <div class="flex items-center gap-3">
+            <div class="w-9 h-9 rounded-xl flex-shrink-0 flex items-center justify-center font-bold text-sm" style="background:color-mix(in srgb, var(--c-prim) 20%, var(--c-card))">
+              ${(name.charAt(0) || "?").toUpperCase()}
+            </div>
+            <div>
+              <div class="font-semibold text-text leading-tight">${escHtml(name)}</div>
+              <div class="text-xs theme-text-secondary mt-0.5">${uid ? `ID: ${uid}` : token ? `Token: ${token.substring(0,8)}…` : "—"}</div>
+            </div>
+          </div>
+        </td>
+        <td class="px-5 py-4 text-center">${statusBadge(status)}</td>
+        <td class="px-5 py-4 text-right text-sm theme-text-secondary">${fmtGB(dailyBytes)}</td>
+        <td class="px-5 py-4 text-right hidden sm:table-cell">${fmtGB(monthlyBytes)}</td>
+        <td class="px-5 py-4 text-right">${dataBar(totalBytes, maxBytes)}</td>
+        <td class="px-5 py-4 text-right text-xs theme-text-secondary hidden md:table-cell">${fmtDate(expiry)}</td>
+        <td class="px-5 py-4 text-center">
+          <a href="/admin/uyeler/${uid || encodeURIComponent(token)}"
+            class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-primary/10 hover:bg-primary/25 text-primary rounded-lg text-xs font-medium transition-all">
+            <i class="fas fa-chart-bar"></i> Detay
+          </a>
+        </td>
+      </tr>`;
+    }).join("");
+  }
+
+  function changePage(dir) {
+    currentPage += dir;
+    renderTable();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function escHtml(s) {
+    return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  }
+
+  async function loadMembers() {
+    const btn  = document.getElementById("refresh-btn");
+    const icon = document.getElementById("refresh-icon");
+    btn.disabled = true;
+    icon.classList.add("fa-spin");
+
+    try {
+      const res = await fetch("/api/admin/uyeler");
+      if (!res.ok) throw new Error("API hatası: " + res.status);
+      const data = await res.json();
+
+      // data → { members: [...], total: N }
+      ALL_MEMBERS = data.members || [];
+
+      // Özet kartları güncelle
+      const total   = ALL_MEMBERS.length;
+      const active  = ALL_MEMBERS.filter(m => (m.subscription_status || m.status) === "active").length;
+      const sumData = ALL_MEMBERS.reduce((a, m) => a + (m.total_bytes || 0), 0);
+      const sumMon  = ALL_MEMBERS.reduce((a, m) => a + (m.monthly_bytes || 0), 0);
+
+      document.getElementById("s-total").textContent   = total;
+      document.getElementById("s-active").textContent  = active;
+      document.getElementById("s-data").textContent    = fmtGB(sumData);
+      document.getElementById("s-monthly").textContent = fmtGB(sumMon);
+
+      filterAndRender();
+    } catch (e) {
+      console.error(e);
+      document.getElementById("members-tbody").innerHTML =
+        `<tr><td colspan="8" class="px-6 py-12 text-center text-red-400"><i class="fas fa-exclamation-triangle mr-2"></i>Veriler yüklenemedi: ${e.message}</td></tr>`;
+    } finally {
+      btn.disabled = false;
+      icon.classList.remove("fa-spin");
+    }
+  }
+
+  loadMembers();
+</script>
+{% endblock %}

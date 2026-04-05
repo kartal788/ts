@@ -1,0 +1,482 @@
+{% extends "base.html" %}
+
+{% block title %}Canlı Yayın Yönetimi{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-8">
+
+    <!-- Header -->
+    <div class="mb-6 sm:mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+            <div class="flex items-center gap-2 mb-2">
+                <a href="/" class="text-primary hover:underline flex items-center text-sm">
+                    <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/>
+                    </svg>
+                    Kontrol Paneli
+                </a>
+            </div>
+            <h1 class="text-2xl sm:text-3xl font-bold flex items-center gap-3">
+                <span class="inline-flex items-center justify-center w-10 h-10 rounded-full bg-red-600 text-white text-lg">📡</span>
+                Canlı Yayın Yönetimi
+            </h1>
+            <p class="theme-text-secondary text-sm mt-1">Stremio Live TV kataloğuna kanal ekle, düzenle veya sil</p>
+        </div>
+        <button onclick="openAddModal()"
+            class="flex items-center gap-2 px-5 py-2.5 bg-primary text-white rounded-lg hover:opacity-90 transition font-medium shadow-md">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+            </svg>
+            Yeni Kanal Ekle
+        </button>
+    </div>
+
+    <!-- Toast -->
+    <div id="toast" class="fixed top-4 right-4 z-50 hidden px-5 py-3 rounded-lg shadow-xl text-white text-sm font-medium transition-all"></div>
+
+    <!-- Channel Grid -->
+    <div id="channels-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+        <div class="col-span-full flex justify-center py-12">
+            <div class="flex flex-col items-center gap-3 theme-text-secondary">
+                <svg class="w-10 h-10 animate-spin text-primary" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                </svg>
+                <span>Kanallar yükleniyor…</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Empty State -->
+    <div id="empty-state" class="hidden col-span-full flex flex-col items-center justify-center py-20 theme-text-secondary">
+        <svg class="w-16 h-16 mb-4 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+        </svg>
+        <p class="text-lg font-medium mb-1">Henüz kanal yok</p>
+        <p class="text-sm">"Yeni Kanal Ekle" butonuyla ilk kanalınızı oluşturun.</p>
+    </div>
+</div>
+
+<!-- ═══════════════════════════ ADD / EDIT MODAL ═══════════════════════════ -->
+<div id="channel-modal" class="fixed inset-0 z-40 hidden flex items-center justify-center p-4">
+    <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" onclick="closeModal()"></div>
+    <div class="relative theme-card rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto z-10">
+
+        <div class="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700 sticky top-0 theme-card z-10">
+            <h2 id="modal-title" class="text-xl font-bold">Yeni Kanal Ekle</h2>
+            <button onclick="closeModal()" class="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                </svg>
+            </button>
+        </div>
+
+        <div class="p-6 space-y-5">
+
+            <!-- Preview Bar -->
+            <div id="preview-bar" class="flex items-center gap-4 p-4 rounded-xl bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
+                <div class="relative w-16 h-16 rounded-lg overflow-hidden bg-gray-300 dark:bg-gray-600 flex-shrink-0">
+                    <img id="preview-logo" src="" alt="" class="w-full h-full object-cover hidden" onerror="this.classList.add('hidden'); document.getElementById('preview-placeholder').classList.remove('hidden')">
+                    <div id="preview-placeholder" class="w-full h-full flex items-center justify-center text-2xl">📡</div>
+                </div>
+                <div>
+                    <p id="preview-name" class="font-bold text-lg">Kanal Adı</p>
+                    <p id="preview-desc" class="theme-text-secondary text-xs line-clamp-2 max-w-sm">Açıklama…</p>
+                </div>
+            </div>
+
+            <!-- Name -->
+            <div>
+                <label class="block text-sm font-semibold mb-1">Kanal Adı <span class="text-red-500">*</span></label>
+                <input id="ch-name" type="text" placeholder="örn. TRT 1 HD"
+                    class="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent focus:outline-none focus:ring-2 focus:ring-primary"
+                    oninput="document.getElementById('preview-name').textContent = this.value || 'Kanal Adı'">
+            </div>
+
+            <!-- Logo URL -->
+            <div>
+                <label class="block text-sm font-semibold mb-1">Logo URL</label>
+                <input id="ch-logo" type="url" placeholder="https://…/logo.png"
+                    class="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent focus:outline-none focus:ring-2 focus:ring-primary"
+                    oninput="updatePreviewLogo(this.value)">
+                <p class="text-xs theme-text-secondary mt-1">Kanalın küçük logosu (kare önerilir)</p>
+            </div>
+
+            <!-- Poster URL -->
+            <div>
+                <label class="block text-sm font-semibold mb-1">Poster URL</label>
+                <input id="ch-poster" type="url" placeholder="https://…/poster.jpg"
+                    class="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent focus:outline-none focus:ring-2 focus:ring-primary">
+                <p class="text-xs theme-text-secondary mt-1">Stremio'da görünecek poster/kapak görseli</p>
+            </div>
+
+            <!-- Backdrop URL -->
+            <div>
+                <label class="block text-sm font-semibold mb-1">Arka Plan (Backdrop) URL</label>
+                <input id="ch-backdrop" type="url" placeholder="https://…/backdrop.jpg"
+                    class="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent focus:outline-none focus:ring-2 focus:ring-primary">
+            </div>
+
+            <!-- Description -->
+            <div>
+                <label class="block text-sm font-semibold mb-1">Açıklama</label>
+                <textarea id="ch-desc" rows="2" placeholder="Kanalın kısa açıklaması…"
+                    class="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent focus:outline-none focus:ring-2 focus:ring-primary resize-none"
+                    oninput="document.getElementById('preview-desc').textContent = this.value || 'Açıklama…'"></textarea>
+            </div>
+
+            <!-- Genres -->
+            <div>
+                <label class="block text-sm font-semibold mb-1">Kategoriler</label>
+                <input id="ch-genres" type="text" placeholder="örn. Haber, Spor, Eğlence  (virgülle ayırın)"
+                    class="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent focus:outline-none focus:ring-2 focus:ring-primary">
+            </div>
+
+            <!-- Order -->
+            <div>
+                <label class="block text-sm font-semibold mb-1">Sıra (küçük = önce)</label>
+                <input id="ch-order" type="number" value="0" min="0"
+                    class="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent focus:outline-none focus:ring-2 focus:ring-primary">
+            </div>
+
+            <!-- Links Section -->
+            <div>
+                <div class="flex items-center justify-between mb-2">
+                    <label class="text-sm font-semibold">Yayın Linkleri <span class="text-red-500">*</span></label>
+                    <button onclick="addLinkRow()" type="button"
+                        class="flex items-center gap-1 text-xs px-3 py-1.5 bg-primary text-white rounded-lg hover:opacity-90 transition">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                        </svg>
+                        Link Ekle
+                    </button>
+                </div>
+                <div id="links-container" class="space-y-2"></div>
+                <p class="text-xs theme-text-secondary mt-1">Her kanal için birden fazla kalite/yedek link girebilirsiniz. (.m3u8, .mpd, http stream vb.)</p>
+            </div>
+
+        </div><!-- /p-6 -->
+
+        <div class="flex justify-end gap-3 px-6 py-4 border-t border-gray-200 dark:border-gray-700 sticky bottom-0 theme-card">
+            <button onclick="closeModal()" class="px-5 py-2 rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 transition text-sm font-medium">
+                İptal
+            </button>
+            <button id="modal-save-btn" onclick="saveChannel()"
+                class="px-6 py-2 bg-primary text-white rounded-lg hover:opacity-90 transition text-sm font-semibold shadow">
+                Kaydet
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- ═══════════════════════════ DELETE CONFIRM MODAL ═══════════════════════════ -->
+<div id="delete-modal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4">
+    <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" onclick="closeDeleteModal()"></div>
+    <div class="relative theme-card rounded-2xl shadow-2xl w-full max-w-sm z-10 p-6">
+        <div class="flex flex-col items-center text-center gap-4">
+            <div class="w-14 h-14 rounded-full bg-red-100 dark:bg-red-900/40 flex items-center justify-center">
+                <svg class="w-7 h-7 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+                </svg>
+            </div>
+            <div>
+                <h3 class="text-lg font-bold mb-1">Kanalı Sil</h3>
+                <p class="theme-text-secondary text-sm"><span id="delete-ch-name" class="font-semibold text-red-500"></span> kanalını silmek istediğinizden emin misiniz? Bu işlem geri alınamaz.</p>
+            </div>
+            <div class="flex gap-3 w-full">
+                <button onclick="closeDeleteModal()" class="flex-1 py-2 rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 transition text-sm font-medium">
+                    İptal
+                </button>
+                <button id="confirm-delete-btn" class="flex-1 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition text-sm font-semibold">
+                    Evet, Sil
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .line-clamp-2 { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+    .channel-card { transition: transform .15s, box-shadow .15s; }
+    .channel-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,.18); }
+</style>
+
+<script>
+const API = {
+    list:   () => fetch('/api/live').then(r => r.json()),
+    add:    (d) => fetch('/api/live', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(d)}).then(r => r.json()),
+    update: (id, d) => fetch(`/api/live/${id}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(d)}).then(r => r.json()),
+    delete: (id) => fetch(`/api/live/${id}`, {method:'DELETE'}).then(r => r.json()),
+};
+
+let editingId = null;
+let deleteTargetId = null;
+
+/* ── Toast ── */
+function showToast(msg, ok=true) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.className = `fixed top-4 right-4 z-50 px-5 py-3 rounded-lg shadow-xl text-white text-sm font-medium transition-all ${ok ? 'bg-green-600' : 'bg-red-600'}`;
+    t.classList.remove('hidden');
+    setTimeout(() => t.classList.add('hidden'), 3000);
+}
+
+/* ── Preview logo ── */
+function updatePreviewLogo(url) {
+    const img = document.getElementById('preview-logo');
+    const ph  = document.getElementById('preview-placeholder');
+    if (url) {
+        img.src = url;
+        img.classList.remove('hidden');
+        ph.classList.add('hidden');
+    } else {
+        img.classList.add('hidden');
+        ph.classList.remove('hidden');
+    }
+}
+
+/* ── Link rows ── */
+let linkIdx = 0;
+function addLinkRow(label='', url='', logo='') {
+    const idx = linkIdx++;
+    const row = document.createElement('div');
+    row.className = 'flex flex-col gap-1 p-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50';
+    row.id = `link-row-${idx}`;
+    row.innerHTML = `
+        <div class="flex gap-2 items-center">
+            <input type="text" value="${escHtml(label)}" placeholder="Etiket  (örn. HD, 4K, Yedek)"
+                class="link-label flex-shrink-0 w-28 px-2 py-1.5 text-xs rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent focus:outline-none focus:ring-2 focus:ring-primary font-semibold">
+            <input type="url" value="${escHtml(url)}" placeholder="Yayın URL  (.m3u8, .mpd, http stream…)"
+                class="link-url flex-1 px-2 py-1.5 text-xs rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent focus:outline-none focus:ring-2 focus:ring-primary">
+            <button onclick="document.getElementById('link-row-${idx}').remove()" type="button"
+                class="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-100 dark:hover:bg-red-900/40 rounded-lg transition flex-shrink-0">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                </svg>
+            </button>
+        </div>
+        <div class="flex gap-2 items-center">
+            <span class="text-xs theme-text-secondary flex-shrink-0 w-28">↳ Link logosu</span>
+            <input type="url" value="${escHtml(logo)}" placeholder="https://…/logo.png  (bu link için özel logo, isteğe bağlı)"
+                class="link-logo flex-1 px-2 py-1.5 text-xs rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent focus:outline-none focus:ring-2 focus:ring-primary">
+            <div class="w-8 h-8 flex-shrink-0 rounded overflow-hidden bg-gray-200 dark:bg-gray-700 flex items-center justify-center" id="logo-preview-${idx}">
+                ${logo ? `<img src="${escHtml(logo)}" class="w-full h-full object-cover" onerror="this.style.display='none'">` : '<svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>'}
+            </div>
+        </div>`;
+    // Canlı logo önizleme
+    row.querySelector('.link-logo').addEventListener('input', function() {
+        const prev = document.getElementById('logo-preview-' + idx);
+        prev.innerHTML = this.value
+            ? `<img src="${escHtml(this.value)}" class="w-full h-full object-cover" onerror="this.style.display='none'">`
+            : '<svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>';
+    });
+    document.getElementById('links-container').appendChild(row);
+}
+function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;'); }
+
+function getLinks() {
+    const rows = document.querySelectorAll('#links-container [id^="link-row-"]');
+    return Array.from(rows).map(r => ({
+        label: r.querySelector('.link-label').value.trim(),
+        url:   r.querySelector('.link-url').value.trim(),
+        logo:  r.querySelector('.link-logo').value.trim(),
+    })).filter(l => l.url);
+}
+
+/* ── Modal open/close ── */
+function openAddModal() {
+    editingId = null;
+    document.getElementById('modal-title').textContent = 'Yeni Kanal Ekle';
+    document.getElementById('modal-save-btn').textContent = 'Kaydet';
+    clearForm();
+    document.getElementById('channel-modal').classList.remove('hidden');
+}
+
+function openEditModal(ch) {
+    editingId = ch._id;
+    document.getElementById('modal-title').textContent = 'Kanalı Düzenle';
+    document.getElementById('modal-save-btn').textContent = 'Güncelle';
+    clearForm();
+    document.getElementById('ch-name').value    = ch.name || '';
+    document.getElementById('ch-logo').value    = ch.logo || '';
+    document.getElementById('ch-poster').value  = ch.poster || '';
+    document.getElementById('ch-backdrop').value= ch.backdrop || '';
+    document.getElementById('ch-desc').value    = ch.description || '';
+    document.getElementById('ch-genres').value  = (ch.genres||[]).join(', ');
+    document.getElementById('ch-order').value   = ch.order ?? 0;
+    document.getElementById('preview-name').textContent = ch.name || 'Kanal Adı';
+    document.getElementById('preview-desc').textContent = ch.description || 'Açıklama…';
+    updatePreviewLogo(ch.logo || '');
+    (ch.links||[]).forEach(l => addLinkRow(l.label, l.url, l.logo || ''));
+    document.getElementById('channel-modal').classList.remove('hidden');
+}
+
+function closeModal() {
+    document.getElementById('channel-modal').classList.add('hidden');
+}
+
+function clearForm() {
+    ['ch-name','ch-logo','ch-poster','ch-backdrop','ch-desc','ch-genres'].forEach(id => document.getElementById(id).value = '');
+    document.getElementById('ch-order').value = 0;
+    document.getElementById('links-container').innerHTML = '';
+    document.getElementById('preview-name').textContent = 'Kanal Adı';
+    document.getElementById('preview-desc').textContent = 'Açıklama…';
+    updatePreviewLogo('');
+    linkIdx = 0;
+}
+
+/* ── Save ── */
+async function saveChannel() {
+    const name = document.getElementById('ch-name').value.trim();
+    if (!name) { showToast('Kanal adı zorunludur!', false); return; }
+    const links = getLinks();
+    if (!links.length) { showToast('En az bir link giriniz!', false); return; }
+
+    const payload = {
+        name,
+        logo:        document.getElementById('ch-logo').value.trim(),
+        poster:      document.getElementById('ch-poster').value.trim(),
+        backdrop:    document.getElementById('ch-backdrop').value.trim(),
+        description: document.getElementById('ch-desc').value.trim(),
+        genres:      document.getElementById('ch-genres').value.split(',').map(s=>s.trim()).filter(Boolean),
+        order:       parseInt(document.getElementById('ch-order').value) || 0,
+        links,
+    };
+
+    const btn = document.getElementById('modal-save-btn');
+    btn.disabled = true;
+    btn.textContent = 'Kaydediliyor…';
+
+    try {
+        let res;
+        if (editingId) {
+            res = await API.update(editingId, payload);
+        } else {
+            res = await API.add(payload);
+        }
+        if (res.error) throw new Error(res.error);
+        showToast(editingId ? 'Kanal güncellendi ✓' : 'Kanal eklendi ✓');
+        closeModal();
+        loadChannels();
+    } catch(e) {
+        showToast('Hata: ' + e.message, false);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = editingId ? 'Güncelle' : 'Kaydet';
+    }
+}
+
+/* ── Delete modal ── */
+function openDeleteModal(id, name) {
+    deleteTargetId = id;
+    document.getElementById('delete-ch-name').textContent = name;
+    document.getElementById('confirm-delete-btn').onclick = confirmDelete;
+    document.getElementById('delete-modal').classList.remove('hidden');
+}
+function closeDeleteModal() {
+    document.getElementById('delete-modal').classList.add('hidden');
+    deleteTargetId = null;
+}
+async function confirmDelete() {
+    if (!deleteTargetId) return;
+    const btn = document.getElementById('confirm-delete-btn');
+    btn.disabled = true; btn.textContent = 'Siliniyor…';
+    try {
+        const res = await API.delete(deleteTargetId);
+        if (res.error) throw new Error(res.error);
+        showToast('Kanal silindi ✓');
+        closeDeleteModal();
+        loadChannels();
+    } catch(e) {
+        showToast('Hata: ' + e.message, false);
+        btn.disabled = false; btn.textContent = 'Evet, Sil';
+    }
+}
+
+/* ── Render channels ── */
+function renderChannels(channels) {
+    const grid  = document.getElementById('channels-grid');
+    const empty = document.getElementById('empty-state');
+    grid.innerHTML = '';
+    if (!channels.length) {
+        empty.classList.remove('hidden');
+        grid.appendChild(empty);
+        return;
+    }
+    empty.classList.add('hidden');
+    channels.forEach(ch => {
+        const card = document.createElement('div');
+        card.className = 'theme-card channel-card rounded-xl overflow-hidden shadow-md flex flex-col';
+        const posterUrl = ch.poster || ch.logo || '';
+        const logoUrl   = ch.logo  || '';
+        const linkCount = (ch.links||[]).length;
+        card.innerHTML = `
+            <!-- Poster / Backdrop -->
+            <div class="relative h-36 bg-gradient-to-br from-gray-800 to-gray-900 overflow-hidden flex-shrink-0">
+                ${posterUrl
+                    ? `<img src="${posterUrl}" alt="${ch.name}" class="w-full h-full object-cover opacity-80" onerror="this.style.display='none'">`
+                    : '<div class="w-full h-full flex items-center justify-center text-5xl opacity-30">📡</div>'
+                }
+                <div class="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent"></div>
+                ${logoUrl
+                    ? `<img src="${logoUrl}" alt="" class="absolute bottom-2 left-3 h-8 object-contain drop-shadow-lg" onerror="this.style.display='none'">`
+                    : ''
+                }
+                <span class="absolute top-2 right-2 px-2 py-0.5 bg-red-600 text-white text-xs font-bold rounded-full flex items-center gap-1">
+                    <span class="w-1.5 h-1.5 bg-white rounded-full animate-pulse"></span>
+                    CANLI
+                </span>
+                <span class="absolute top-2 left-2 px-2 py-0.5 bg-black/50 text-white text-xs rounded-full">#${ch.order ?? 0}</span>
+            </div>
+
+            <!-- Body -->
+            <div class="p-4 flex flex-col gap-2 flex-1">
+                <h3 class="font-bold text-base truncate" title="${ch.name}">${ch.name}</h3>
+                ${ch.description
+                    ? `<p class="theme-text-secondary text-xs line-clamp-2">${ch.description}</p>`
+                    : ''
+                }
+                ${(ch.genres||[]).length
+                    ? `<div class="flex flex-wrap gap-1">${ch.genres.slice(0,3).map(g=>`<span class="px-2 py-0.5 text-xs rounded-full bg-gray-200 dark:bg-gray-700 theme-text-secondary">${g}</span>`).join('')}</div>`
+                    : ''
+                }
+                <div class="flex items-center gap-1 text-xs theme-text-secondary mt-auto pt-1">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg>
+                    <span>${linkCount} link</span>
+                </div>
+            </div>
+
+            <!-- Actions -->
+            <div class="flex border-t border-gray-200 dark:border-gray-700">
+                <button onclick='openEditModal(${JSON.stringify(ch).replace(/'/g,"&#39;")})'
+                    class="flex-1 flex items-center justify-center gap-2 py-3 text-sm font-medium text-primary hover:bg-gray-100 dark:hover:bg-gray-800 transition">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                    Düzenle
+                </button>
+                <div class="w-px bg-gray-200 dark:bg-gray-700"></div>
+                <button onclick="openDeleteModal('${ch._id}', '${ch.name.replace(/'/g,"\\'")}')"
+                    class="flex-1 flex items-center justify-center gap-2 py-3 text-sm font-medium text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                    Sil
+                </button>
+            </div>`;
+        grid.appendChild(card);
+    });
+}
+
+/* ── Load ── */
+async function loadChannels() {
+    try {
+        const data = await API.list();
+        renderChannels(data.channels || []);
+    } catch(e) {
+        showToast('Kanallar yüklenemedi: ' + e.message, false);
+        document.getElementById('channels-grid').innerHTML = `<div class="col-span-full text-center py-12 theme-text-secondary">Yükleme hatası</div>`;
+    }
+}
+
+document.addEventListener('DOMContentLoaded', loadChannels);
+</script>
+{% endblock %}

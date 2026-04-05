@@ -1,0 +1,416 @@
+{% extends "base.html" %}
+
+{% block title %}Yönetici Paneli - Telegram Stremio{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 text-text">
+    <div class="mb-8 flex justify-between items-center">
+        <div>
+            <h1 class="text-3xl font-bold text-text">Yönetici Paneli</h1>
+            <p class="mt-2 text-sm theme-text-secondary">Sistem sağlığını izleyin ve işaretlenmiş hatalı linkleri yönetin.</p>
+        </div>
+    </div>
+
+    <!-- System Health Section -->
+    <div class="mb-10">
+        <div class="flex items-center justify-between mb-4">
+            <h2 class="text-xl font-semibold text-text">Sistem Sağlığı</h2>
+            <button onclick="clearCache()"
+                class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors shadow-sm flex items-center justify-center">
+                <i class="fas fa-trash-alt mr-2"></i> Dosya Önbelleğini Temizle
+            </button>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6" id="stats-container">
+            <!-- Cache Card -->
+            <div class="theme-card rounded-xl border p-6 shadow-sm">
+                <div class="flex items-center">
+                    <div class="flex-shrink-0 bg-primary/10 p-3 rounded-lg">
+                        <i class="fas fa-memory text-xl text-primary"></i>
+                    </div>
+                    <div class="ml-4">
+                        <h3 class="text-sm font-medium theme-text-secondary">Önbelleğe Alınan Dosya ID'leri</h3>
+                        <p class="text-2xl font-bold text-text" id="stat-cache-size">-</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Active Bots Card -->
+            <div class="theme-card rounded-xl border p-6 shadow-sm">
+                <div class="flex items-center">
+                    <div class="flex-shrink-0 bg-primary/10 p-3 rounded-lg">
+                        <i class="fas fa-robot text-xl text-primary"></i>
+                    </div>
+                    <div class="ml-4">
+                        <h3 class="text-sm font-medium theme-text-secondary">Bağlı Botlar</h3>
+                        <p class="text-2xl font-bold text-text" id="stat-bot-count">-</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bot Health & Load -->
+        <div class="theme-card rounded-xl border shadow-sm mt-6">
+            <div class="flex items-center justify-between px-6 py-4 border-b">
+                <div class="flex items-center gap-3">
+                    <div class="bg-primary/10 p-2 rounded-lg">
+                        <i class="fas fa-heartbeat text-primary"></i>
+                    </div>
+                    <h3 class="text-base font-semibold text-text">Bot Sağlığı & Yük</h3>
+                </div>
+            </div>
+            <div id="stat-workloads" class="divide-y divide-white/10">
+                <div class="px-6 py-4 text-sm theme-text-secondary">Yükleniyor...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Stream Analytics -->
+    <div class="mb-10">
+        <div class="flex items-center justify-between mb-4">
+            <h2 class="text-xl font-semibold text-text">Son Yayın Analizleri</h2>
+            <button onclick="clearAnalytics()"
+                class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors shadow-sm flex items-center">
+                <i class="fas fa-trash-alt mr-2"></i> Analizleri Temizle
+            </button>
+        </div>
+
+        <div class="theme-card border rounded-xl overflow-hidden shadow-sm">
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm text-left text-text">
+                    <thead class="text-xs uppercase theme-card border-b text-text">
+                        <tr>
+                            <th class="px-6 py-4 font-semibold">Yayın ID</th>
+                            <th class="px-6 py-4 font-semibold">Başlık</th>
+                            <th class="px-6 py-4 font-semibold text-center">Bot (DC)</th>
+                            <th class="px-6 py-4 font-semibold text-right">Aktarılan Veri</th>
+                            <th class="px-6 py-4 font-semibold text-right">Ort. / En Yüksek Hız</th>
+                            <th class="px-6 py-4 font-semibold text-center">Süre</th>
+                            <th class="px-6 py-4 font-semibold text-center">Durum</th>
+                            <th class="px-6 py-4 font-semibold text-right">Zaman</th>
+                        </tr>
+                    </thead>
+                    <tbody id="analytics-tbody" class="divide-y divide-white/10">
+                        <tr>
+                            <td colspan="8" class="px-6 py-8 text-center theme-text-secondary">
+                                <i class="fas fa-spinner fa-spin text-primary mr-2"></i> Analizler yükleniyor...
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <!-- Pagination -->
+            <div id="analytics-pagination" class="hidden flex items-center justify-between px-6 py-4 border-t border-white/10">
+                <span id="analytics-page-info" class="text-xs theme-text-secondary"></span>
+                <div class="flex items-center gap-2">
+                    <button id="analytics-prev" onclick="analyticsChangePage(-1)"
+                        class="px-3 py-1.5 rounded-md text-xs font-medium border border-white/10 hover:bg-white/5 disabled:opacity-30 disabled:cursor-not-allowed transition-colors flex items-center gap-1">
+                        <i class="fas fa-chevron-left"></i> Önceki
+                    </button>
+                    <div id="analytics-page-numbers" class="flex items-center gap-1"></div>
+                    <button id="analytics-next" onclick="analyticsChangePage(1)"
+                        class="px-3 py-1.5 rounded-md text-xs font-medium border border-white/10 hover:bg-white/5 disabled:opacity-30 disabled:cursor-not-allowed transition-colors flex items-center gap-1">
+                        Sonraki <i class="fas fa-chevron-right"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Dead Links -->
+    <div>
+        <h2 class="text-xl font-semibold text-text mb-4">İşaretlenmiş Hatalı Linkler</h2>
+        <div class="theme-card border rounded-xl overflow-hidden shadow-sm">
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm text-left text-text">
+                    <thead class="text-xs uppercase theme-card border-b text-text">
+                        <tr>
+                            <th class="px-6 py-4 font-semibold">Başlık</th>
+                            <th class="px-6 py-4 font-semibold w-24">Tür</th>
+                            <th class="px-6 py-4 font-semibold">Kalite Detayları</th>
+                            <th class="px-6 py-4 font-semibold w-32 text-center">Eklenme Tarihi</th>
+                            <th class="px-6 py-4 font-semibold w-24 text-center">İşlem</th>
+                        </tr>
+                    </thead>
+                    <tbody id="dead-links-tbody" class="divide-y divide-white/10">
+                        <tr>
+                            <td colspan="5" class="px-6 py-8 text-center theme-text-secondary">
+                                <i class="fas fa-spinner fa-spin text-primary mr-2"></i> Hatalı linkler yükleniyor...
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    async function fetchStats() {
+        try {
+            const res = await fetch('/api/admin/system-stats');
+            if (res.ok) {
+                const data = await res.json();
+                document.getElementById('stat-cache-size').textContent = data.cache_size;
+                document.getElementById('stat-bot-count').textContent = data.total_bots;
+
+                let wlHtml = '';
+                if (data.bot_workloads && data.bot_workloads.length > 0) {
+                    data.bot_workloads.forEach(b => {
+                        let statusColor = 'bg-green-500/10 text-green-500';
+                        if (b.status === 'degraded' || b.status === 'düşük') statusColor = 'bg-yellow-500/10 text-yellow-500';
+                        if (b.status === 'failing' || b.status === 'arızalı') statusColor = 'bg-red-500/10 text-red-500';
+
+                        wlHtml += `
+                            <div class="flex items-center justify-between px-6 py-4 hover:bg-white/5 transition-colors">
+                                <div class="flex items-center gap-3">
+                                    <span class="font-semibold text-text">${b.display_name}</span>
+                                    <span class="text-[10px] px-2 py-0.5 rounded-full uppercase font-bold tracking-wider ${statusColor}">${b.status}</span>
+                                </div>
+                                <div class="flex items-center gap-6 text-sm">
+                                    <div class="text-center">
+                                        <div class="text-xs theme-text-secondary mb-0.5">Aktif Yayınlar</div>
+                                        <div class="font-bold text-text">${b.current_load}</div>
+                                    </div>
+                                    <div class="text-center">
+                                        <div class="text-xs theme-text-secondary mb-0.5">Ort. Hız</div>
+                                        <div class="font-bold text-text">${b.avg_mbps} <span class="font-normal text-xs theme-text-secondary">MB/s</span></div>
+                                    </div>
+                                    <div class="text-center">
+                                        <div class="text-xs theme-text-secondary mb-0.5">Son Hatalar</div>
+                                        <div class="font-bold ${b.failures > 0 ? 'text-red-500' : 'theme-text-secondary'}">${b.failures}</div>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    });
+                } else {
+                    wlHtml = '<div class="px-6 py-8 text-center theme-text-secondary">Bot verisi bulunamadı</div>';
+                }
+                document.getElementById('stat-workloads').innerHTML = wlHtml;
+            }
+        } catch (err) {
+            console.error(err);
+        }
+    }
+
+    // Analytics pagination state
+    let _analyticsAllStreams = [];
+    let _analyticsCurrentPage = 1;
+    const ANALYTICS_PER_PAGE = 10;
+
+    async function fetchAnalytics() {
+        try {
+            const res = await fetch('/api/admin/stream-analytics');
+            const tbody = document.getElementById('analytics-tbody');
+            if (res.ok) {
+                const data = await res.json();
+                _analyticsAllStreams = data.data.recent || [];
+                _analyticsCurrentPage = 1;
+                renderAnalyticsPage();
+            }
+        } catch (err) {
+            console.error(err);
+        }
+    }
+
+    function renderAnalyticsPage() {
+        const tbody = document.getElementById('analytics-tbody');
+        const pagination = document.getElementById('analytics-pagination');
+        const streams = _analyticsAllStreams;
+
+        if (!streams || streams.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="8" class="px-6 py-8 text-center theme-text-secondary">Kayıtlı yayın analizi yok.</td></tr>';
+            pagination.classList.add('hidden');
+            return;
+        }
+
+        const totalPages = Math.ceil(streams.length / ANALYTICS_PER_PAGE);
+        const start = (_analyticsCurrentPage - 1) * ANALYTICS_PER_PAGE;
+        const end = Math.min(start + ANALYTICS_PER_PAGE, streams.length);
+        const pageStreams = streams.slice(start, end);
+
+        let html = '';
+        pageStreams.forEach(s => {
+            const mbpsStr = `${s.avg_mbps.toFixed(1)} / <span class="theme-text-secondary">${s.peak_mbps.toFixed(1)}</span>`;
+            const bytesStr = (s.total_bytes / (1024 * 1024)).toFixed(1) + ' MB';
+            const timeStr = new Date(s.logged_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            const durationStr = s.duration_sec ? `${s.duration_sec.toFixed(1)}s` : '—';
+            const titleStr = s.title || s.meta?.title || '—';
+
+            let statusColor = 'text-green-500';
+            if (s.status === 'hata') statusColor = 'text-red-500';
+            if (s.status === 'iptal') statusColor = 'text-yellow-500';
+
+            html += `
+                <tr class="hover:bg-white/5 transition-colors">
+                    <td class="px-6 py-3 font-mono text-xs theme-text-secondary truncate max-w-[120px]" title="${s.stream_id}">${s.stream_id}</td>
+                    <td class="px-6 py-3 text-sm font-medium text-text max-w-[160px] truncate" title="${titleStr}">${titleStr}</td>
+                    <td class="px-6 py-3 text-center">Bot ${s.client_index + 1} <span class="text-xs theme-text-secondary ml-1">(DC${s.dc_id})</span></td>
+                    <td class="px-6 py-3 text-right font-medium text-text">${bytesStr}</td>
+                    <td class="px-6 py-3 text-right font-medium text-text">${mbpsStr} <span class="text-xs theme-text-secondary">MB/s</span></td>
+                    <td class="px-6 py-3 text-center theme-text-secondary">${durationStr}</td>
+                    <td class="px-6 py-3 text-center text-xs font-bold ${statusColor}">${
+                        {'completed':'Tamamlandı','error':'Hata','cancelled':'İptal','active':'Aktif'}[s.status] || s.status
+                    }</td>
+                    <td class="px-6 py-3 text-right theme-text-secondary text-xs">${timeStr}</td>
+                </tr>
+            `;
+        });
+        tbody.innerHTML = html;
+
+        // Update pagination controls
+        pagination.classList.remove('hidden');
+        document.getElementById('analytics-page-info').textContent =
+            `${start + 1}–${end} / ${streams.length} kayıt — Sayfa ${_analyticsCurrentPage} / ${totalPages}`;
+
+        document.getElementById('analytics-prev').disabled = _analyticsCurrentPage <= 1;
+        document.getElementById('analytics-next').disabled = _analyticsCurrentPage >= totalPages;
+
+        // Page number buttons (show up to 5 around current)
+        let pageHtml = '';
+        const maxBtn = 5;
+        let pageStart = Math.max(1, _analyticsCurrentPage - Math.floor(maxBtn / 2));
+        let pageEnd = Math.min(totalPages, pageStart + maxBtn - 1);
+        if (pageEnd - pageStart < maxBtn - 1) pageStart = Math.max(1, pageEnd - maxBtn + 1);
+
+        for (let i = pageStart; i <= pageEnd; i++) {
+            const active = i === _analyticsCurrentPage
+                ? 'bg-primary text-white border-primary'
+                : 'border-white/10 hover:bg-white/5';
+            pageHtml += `<button onclick="analyticsGoToPage(${i})"
+                class="w-7 h-7 rounded-md text-xs font-medium border ${active} transition-colors">${i}</button>`;
+        }
+        document.getElementById('analytics-page-numbers').innerHTML = pageHtml;
+    }
+
+    function analyticsChangePage(delta) {
+        const totalPages = Math.ceil(_analyticsAllStreams.length / ANALYTICS_PER_PAGE);
+        const next = _analyticsCurrentPage + delta;
+        if (next >= 1 && next <= totalPages) {
+            _analyticsCurrentPage = next;
+            renderAnalyticsPage();
+        }
+    }
+
+    function analyticsGoToPage(page) {
+        _analyticsCurrentPage = page;
+        renderAnalyticsPage();
+    }
+
+    async function fetchDeadLinks() {
+        try {
+            const res = await fetch('/api/admin/dead-links');
+            const tbody = document.getElementById('dead-links-tbody');
+            if (res.ok) {
+                const data = await res.json();
+                const links = data.data;
+
+                if (links.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5" class="px-6 py-8 text-center theme-text-secondary">Hatalı link bulunamadı. Tüm dosyalar sağlıklı!</td></tr>';
+                    return;
+                }
+
+                let html = '';
+                links.forEach(l => {
+                    const typeBadge = l.type === 'movie'
+                        ? '<span class="px-2 py-1 rounded bg-primary/10 text-primary text-xs font-medium">Film</span>'
+                        : '<span class="px-2 py-1 rounded bg-accent/10 text-accent text-xs font-medium">Dizi</span>';
+
+                    html += `
+                        <tr class="hover:bg-white/5 transition-colors">
+                            <td class="px-6 py-4">
+                                <div class="font-medium text-text">${l.title}</div>
+                                <div class="text-xs theme-text-secondary">${l.year || ''}</div>
+                            </td>
+                            <td class="px-6 py-4">${typeBadge}</td>
+                            <td class="px-6 py-4">
+                                <div class="text-sm font-medium text-red-500">${l.quality}</div>
+                                <div class="text-xs theme-text-secondary">${l.size || 'Boyut bilinmiyor'}</div>
+                            </td>
+                            <td class="px-6 py-4 text-center theme-text-secondary text-xs">${l.date_added ? new Date(l.date_added).toLocaleDateString() : '—'}</td>
+                            <td class="px-6 py-4 text-center">
+                                <button onclick="deleteDeadLink(${l.tmdb_id}, ${l.db_index}, '${l.type}', '${l.quality_id}', ${l.season || -1}, ${l.episode || -1})"
+                                        class="text-red-500 hover:text-red-600 bg-red-500/10 hover:bg-red-500/20 rounded p-2 transition-colors"
+                                        title="Veritabanından Sil">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </td>
+                        </tr>
+                    `;
+                });
+                tbody.innerHTML = html;
+            }
+        } catch (err) {
+            console.error(err);
+        }
+    }
+
+    async function clearCache() {
+        if (!confirm("Telegram FileId önbelleğini temizlemek istediğinizden emin misiniz? Botlar bir sonraki yayında meta verileri yeniden alacak.")) return;
+
+        try {
+            const res = await fetch('/api/admin/clear-cache', { method: 'POST' });
+            if (res.ok) {
+                const data = await res.json();
+                alert(data.message);
+                fetchStats();
+            } else {
+                alert("Önbellek temizlenemedi.");
+            }
+        } catch (err) {
+            alert("Önbellek temizlenirken hata oluştu.");
+        }
+    }
+
+    async function clearAnalytics() {
+        if (!confirm("Tüm yayın analiz geçmişini temizlemek istediğinizden emin misiniz? Bu işlem geri alınamaz.")) return;
+
+        try {
+            const res = await fetch('/api/admin/clear-analytics', { method: 'POST' });
+            if (res.ok) {
+                const data = await res.json();
+                alert(data.message || 'Analizler başarıyla temizlendi.');
+                fetchAnalytics();
+            } else {
+                const err = await res.json().catch(() => ({}));
+                alert(err.detail || 'Analizler temizlenemedi.');
+            }
+        } catch (err) {
+            alert('Analizler temizlenirken hata oluştu.');
+        }
+    }
+
+    async function deleteDeadLink(tmdb_id, db_index, type, quality_id, season, episode) {
+        if (!confirm("Bu hatalı linki veritabanından silmek istediğinizden emin misiniz? Kullanıcılar bu kaliteyi artık Stremio'da görmeyecek.")) return;
+
+        try {
+            let endpoint = '';
+            if (type === 'movie') {
+                endpoint = `/api/media/delete-quality?tmdb_id=${tmdb_id}&db_index=${db_index}&id=${quality_id}`;
+            } else {
+                endpoint = `/api/media/delete-tv-quality?tmdb_id=${tmdb_id}&db_index=${db_index}&season=${season}&episode=${episode}&id=${quality_id}`;
+            }
+
+            const res = await fetch(endpoint, { method: 'DELETE' });
+            if (res.ok) {
+                fetchDeadLinks(); // Refresh table
+            } else {
+                alert("Hatalı link silinemedi.");
+            }
+        } catch (err) {
+            alert("Sunucuyla iletişim hatası.");
+        }
+    }
+
+    // Initial fetch on load
+    document.addEventListener('DOMContentLoaded', () => {
+        fetchStats();
+        fetchAnalytics();
+        fetchDeadLinks();
+        // Refresh dynamic stats
+        setInterval(fetchStats, 10000);
+        setInterval(fetchAnalytics, 15000);
+    });
+</script>
+{% endblock %}

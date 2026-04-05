@@ -1,0 +1,1724 @@
+{% extends "base.html" %}
+
+{% block title %}Sunucu Dosya Yöneticisi{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-8">
+
+    <!-- Header -->
+    <div class="mb-6 sm:mb-8">
+        <div class="flex items-center gap-2 mb-2">
+            <a href="/admin/dashboard" class="text-primary hover:underline flex items-center text-sm">
+                <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/>
+                </svg>
+                Yönetici Paneli
+            </a>
+        </div>
+        <h1 class="text-2xl sm:text-3xl font-bold flex items-center gap-3">
+            <span class="inline-flex items-center justify-center w-10 h-10 rounded-full bg-primary text-white text-lg">
+                <i class="fas fa-server text-base"></i>
+            </span>
+            Sunucu Dosya Yöneticisi
+        </h1>
+        <p class="theme-text-secondary text-sm mt-1">HTTPS bağlantısından dosya indirin, sunucudaki içerikleri yönetin</p>
+    </div>
+
+    <!-- Sistem Durumu Paneli -->
+    <div class="theme-card rounded-2xl shadow-lg p-4 mb-4 border border-white/10">
+        <div class="flex items-center justify-between mb-3">
+            <h2 class="text-sm font-bold flex items-center gap-2 theme-text-secondary uppercase tracking-wide">
+                <i class="fas fa-microchip text-primary"></i> Sistem Durumu
+            </h2>
+            <button onclick="loadSistemDurumu()" title="Yenile" class="text-xs text-primary hover:underline flex items-center gap-1">
+                <i id="sistem-refresh-icon" class="fas fa-sync-alt"></i> Yenile
+            </button>
+        </div>
+        <div id="sistem-durumu-grid" class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+            <div class="bg-white/5 rounded-xl p-3 text-center">
+                <div class="text-xs theme-text-secondary mb-1 flex items-center justify-center gap-1"><i class="fas fa-microchip text-blue-400 text-xs"></i> CPU</div>
+                <div id="sd-cpu" class="text-lg font-bold text-blue-400">—</div>
+                <div class="w-full bg-white/10 rounded-full h-1.5 mt-2"><div id="sd-cpu-bar" class="h-1.5 rounded-full bg-blue-400 transition-all duration-500" style="width:0%"></div></div>
+            </div>
+            <div class="bg-white/5 rounded-xl p-3 text-center">
+                <div class="text-xs theme-text-secondary mb-1 flex items-center justify-center gap-1"><i class="fas fa-memory text-purple-400 text-xs"></i> RAM</div>
+                <div id="sd-ram" class="text-lg font-bold text-purple-400">—</div>
+                <div class="text-xs theme-text-secondary mt-0.5" id="sd-ram-detail">—</div>
+                <div class="w-full bg-white/10 rounded-full h-1.5 mt-2"><div id="sd-ram-bar" class="h-1.5 rounded-full bg-purple-400 transition-all duration-500" style="width:0%"></div></div>
+            </div>
+            <div class="bg-white/5 rounded-xl p-3 text-center">
+                <div class="text-xs theme-text-secondary mb-1 flex items-center justify-center gap-1"><i class="fas fa-hdd text-orange-400 text-xs"></i> Kullanılan</div>
+                <div id="sd-disk-used" class="text-lg font-bold text-orange-400">—</div>
+                <div class="text-xs theme-text-secondary mt-0.5" id="sd-disk-total">—</div>
+                <div class="w-full bg-white/10 rounded-full h-1.5 mt-2"><div id="sd-disk-bar" class="h-1.5 rounded-full bg-orange-400 transition-all duration-500" style="width:0%"></div></div>
+            </div>
+            <div class="bg-white/5 rounded-xl p-3 text-center">
+                <div class="text-xs theme-text-secondary mb-1 flex items-center justify-center gap-1"><i class="fas fa-database text-green-400 text-xs"></i> Boş Alan</div>
+                <div id="sd-disk-free" class="text-lg font-bold text-green-400">—</div>
+                <div class="text-xs theme-text-secondary mt-0.5">kullanılabilir</div>
+            </div>
+            <div class="bg-white/5 rounded-xl p-3 text-center col-span-2 sm:col-span-1">
+                <div class="text-xs theme-text-secondary mb-1 flex items-center justify-center gap-1"><i class="fas fa-robot text-primary text-xs"></i> Bot Uptime</div>
+                <div id="sd-uptime" class="text-base font-bold text-primary leading-tight">—</div>
+            </div>
+            <div class="bg-white/5 rounded-xl p-3 text-center">
+                <div class="text-xs theme-text-secondary mb-1 flex items-center justify-center gap-1"><i class="fas fa-arrow-down text-cyan-400 text-xs"></i> İndirme Hızı</div>
+                <div id="sd-net-dl" class="text-base font-bold text-cyan-400 leading-tight">—</div>
+                <div class="text-xs theme-text-secondary mt-0.5">anlık</div>
+            </div>
+            <div class="bg-white/5 rounded-xl p-3 text-center">
+                <div class="text-xs theme-text-secondary mb-1 flex items-center justify-center gap-1"><i class="fas fa-arrow-up text-pink-400 text-xs"></i> Yükleme Hızı</div>
+                <div id="sd-net-ul" class="text-base font-bold text-pink-400 leading-tight">—</div>
+                <div class="text-xs theme-text-secondary mt-0.5">anlık</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div id="toast" class="fixed top-4 right-4 z-50 hidden px-5 py-3 rounded-lg shadow-xl text-white text-sm font-medium transition-all duration-300 max-w-sm flex items-center gap-2"></div>
+
+    <!-- ═══════════════════════════════════════════════════════════════════
+         Metadata Onay Sayfası  (media_edit benzeri tam ekran overlay)
+    ════════════════════════════════════════════════════════════════════ -->
+    <div id="meta-review-overlay" class="fixed inset-0 z-50 hidden overflow-y-auto bg-black/80 backdrop-blur-sm">
+        <div class="max-w-5xl mx-auto px-4 py-8">
+            <!-- Back button -->
+            <div class="mb-4">
+                <button onclick="closeMetaReview()" class="text-primary hover:underline flex items-center text-sm">
+                    <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/>
+                    </svg>
+                    Dosya Yöneticisine Dön
+                </button>
+            </div>
+
+            <h1 class="text-2xl sm:text-3xl font-bold mb-1 flex items-center gap-3">
+                <span class="inline-flex items-center justify-center w-10 h-10 rounded-full bg-blue-600 text-white">
+                    <i class="fas fa-database text-base"></i>
+                </span>
+                Metadata Önizleme &amp; Onay
+            </h1>
+            <p class="theme-text-secondary text-sm mb-6">Veritabanına kaydetmeden önce bilgileri kontrol edin ve düzenleyin.</p>
+
+            <!-- Media Preview Card -->
+            <div id="mr-preview-card" class="theme-card rounded-xl shadow-lg mb-6 overflow-hidden border border-white/10">
+                <!-- Backdrop -->
+                <div id="mr-backdrop-wrap" class="relative h-48 sm:h-64 bg-gradient-to-r from-gray-900 to-gray-800 hidden">
+                    <img id="mr-backdrop" src="" alt="backdrop" class="w-full h-full object-cover opacity-50">
+                    <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent"></div>
+                </div>
+                <div class="p-5 flex gap-5">
+                    <img id="mr-poster" src="" alt="poster" class="w-24 sm:w-32 h-36 sm:h-48 object-cover rounded-lg shadow-xl border-2 border-white/20 flex-shrink-0 hidden">
+                    <div class="flex-1 min-w-0">
+                        <div class="flex flex-wrap items-center gap-2 mb-1">
+                            <span id="mr-type-badge" class="text-xs px-2 py-0.5 rounded-full bg-blue-600/30 text-blue-300 border border-blue-500/30 font-semibold uppercase tracking-wide"></span>
+                            <span id="mr-year-badge" class="text-xs px-2 py-0.5 rounded-full bg-white/10 theme-text-secondary"></span>
+                            <span id="mr-rating-badge" class="text-xs px-2 py-0.5 rounded-full bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 hidden"></span>
+                        </div>
+                        <h2 id="mr-title-display" class="text-xl sm:text-2xl font-bold mb-1"></h2>
+                        <p id="mr-title-tr-display" class="theme-text-secondary text-sm mb-2 hidden"></p>
+                        <div id="mr-genres" class="flex flex-wrap gap-1 mb-3"></div>
+                        <p id="mr-desc" class="theme-text-secondary text-sm leading-relaxed line-clamp-3"></p>
+                        <div class="mt-3 text-xs theme-text-secondary flex flex-wrap gap-3">
+                            <span><i class="fas fa-file mr-1"></i><span id="mr-filename-display"></span></span>
+                            <span><i class="fas fa-weight-hanging mr-1"></i><span id="mr-size-display"></span></span>
+                            <span><i class="fas fa-fingerprint mr-1"></i>TMDB: <span id="mr-tmdb-display"></span></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Edit Form -->
+            <div class="theme-card rounded-xl shadow-lg p-5 mb-6 border border-white/10">
+                <h3 class="text-base font-bold mb-4 flex items-center gap-2">
+                    <i class="fas fa-edit text-yellow-400"></i> Bilgileri Düzenle
+                </h3>
+                <input type="hidden" id="mr-path">
+                <input type="hidden" id="mr-raw-metadata">
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div class="sm:col-span-2">
+                        <label class="block text-xs font-semibold theme-text-secondary mb-1.5 uppercase tracking-wide">Başlık (Orijinal)</label>
+                        <input id="mr-title" type="text" class="w-full rounded-xl border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary transition">
+                    </div>
+                    <div class="sm:col-span-2">
+                        <label class="block text-xs font-semibold theme-text-secondary mb-1.5 uppercase tracking-wide">Başlık (Türkçe)</label>
+                        <input id="mr-title-tr" type="text" class="w-full rounded-xl border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary transition">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold theme-text-secondary mb-1.5 uppercase tracking-wide">Tür</label>
+                        <select id="mr-media-type" class="w-full rounded-xl border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary transition">
+                            <option value="movie">Film</option>
+                            <option value="tv">Dizi</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold theme-text-secondary mb-1.5 uppercase tracking-wide">Yıl</label>
+                        <input id="mr-year" type="number" class="w-full rounded-xl border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary transition">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold theme-text-secondary mb-1.5 uppercase tracking-wide">Kalite</label>
+                        <input id="mr-quality" type="text" placeholder="1080p, 4K vb." class="w-full rounded-xl border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary transition">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold theme-text-secondary mb-1.5 uppercase tracking-wide">TMDB ID</label>
+                        <input id="mr-tmdb-id" type="number" class="w-full rounded-xl border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary transition">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold theme-text-secondary mb-1.5 uppercase tracking-wide">Puan</label>
+                        <input id="mr-rating" type="text" placeholder="7.5" class="w-full rounded-xl border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary transition">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold theme-text-secondary mb-1.5 uppercase tracking-wide">Dosya Adı (metadata sorgusu için)</label>
+                        <input id="mr-meta-filename" type="text" class="w-full rounded-xl border px-3 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary transition">
+                    </div>
+                    <div class="sm:col-span-2">
+                        <label class="block text-xs font-semibold theme-text-secondary mb-1.5 uppercase tracking-wide">Poster URL</label>
+                        <input id="mr-poster-url" type="url" class="w-full rounded-xl border px-3 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary transition">
+                    </div>
+                    <div class="sm:col-span-2">
+                        <label class="block text-xs font-semibold theme-text-secondary mb-1.5 uppercase tracking-wide">Açıklama</label>
+                        <textarea id="mr-description" rows="4" class="w-full rounded-xl border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary transition resize-none"></textarea>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Result / Error display -->
+            <div id="mr-success" class="hidden mb-4 p-4 rounded-xl bg-green-500/10 border border-green-500/30 text-green-400 text-sm flex items-center gap-2">
+                <i class="fas fa-check-circle text-lg"></i>
+                <span id="mr-success-msg"></span>
+            </div>
+            <div id="mr-error" class="hidden mb-4 p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-sm flex items-center gap-2">
+                <i class="fas fa-exclamation-triangle text-lg"></i>
+                <span id="mr-error-msg"></span>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="flex flex-col sm:flex-row gap-3">
+                <button onclick="closeMetaReview()" class="flex-1 px-4 py-3 rounded-xl border border-white/20 hover:bg-white/5 text-sm transition font-medium">
+                    <i class="fas fa-times mr-2"></i>İptal Et
+                </button>
+                <button onclick="rejectAndDeleteFile()" class="flex-1 px-4 py-3 rounded-xl border border-red-500/40 text-red-400 hover:bg-red-500/10 text-sm transition font-medium">
+                    <i class="fas fa-trash-alt mr-2"></i>Reddet &amp; Dosyayı Sil
+                </button>
+                <button onclick="reQueryMetadata()" class="flex-1 px-4 py-3 rounded-xl border border-blue-500/40 text-blue-400 hover:bg-blue-500/10 text-sm transition font-medium">
+                    <i class="fas fa-redo mr-2"></i>Tekrar Sorgula
+                </button>
+                <button id="mr-save-btn" onclick="confirmAndSaveMetadata()"
+                    class="flex-1 sm:flex-[2] flex items-center justify-center gap-2 px-4 py-3 bg-green-600 text-white rounded-xl hover:opacity-90 transition font-semibold text-sm shadow-lg">
+                    <i class="fas fa-database"></i> Onayla &amp; Veritabanına Kaydet
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Upload Modal -->
+    <div id="upload-modal" class="fixed inset-0 z-40 hidden flex items-center justify-center bg-black/60 backdrop-blur-sm">
+        <div class="theme-card rounded-2xl shadow-2xl w-full max-w-lg mx-4 p-6 border border-white/10">
+            <div class="flex items-center justify-between mb-5">
+                <h2 class="text-lg font-bold flex items-center gap-2">
+                    <i class="fas fa-cloud-download-alt text-primary"></i>
+                    HTTPS'den Dosya İndir
+                </h2>
+                <button onclick="closeUploadModal()" class="text-gray-400 hover:text-white transition-colors">
+                    <i class="fas fa-times text-lg"></i>
+                </button>
+            </div>
+
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-xs font-semibold theme-text-secondary mb-1.5 uppercase tracking-wide">İndirme URL'si (HTTPS)</label>
+                    <input id="upload-url" type="url" placeholder="https://example.com/film.mkv ya da Google Drive linki"
+                        class="w-full rounded-xl border px-3 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary transition"/>
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold theme-text-secondary mb-1.5 uppercase tracking-wide">Özel Dosya Adı <span class="normal-case font-normal">(isteğe bağlı)</span></label>
+                    <input id="upload-filename" type="text" placeholder="Firebrand 2024 1080p WEB-DL.mkv"
+                        class="w-full rounded-xl border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary transition"/>
+                    <p class="text-xs theme-text-secondary mt-1">Boş bırakırsanız URL'deki dosya adı kullanılır. Metadata bu isimden sorgulanır.</p>
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold theme-text-secondary mb-1.5 uppercase tracking-wide">Hedef Klasör</label>
+                    <input id="upload-dest" type="text" placeholder="Filmler/Aksiyon"
+                        class="w-full rounded-xl border px-3 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary transition" readonly/>
+                    <p class="text-xs theme-text-secondary mt-1">Şu an açık olan klasöre indirilir.</p>
+                </div>
+            </div>
+
+            <div id="upload-progress" class="hidden mt-4 space-y-3">
+                <!-- Durum satırı -->
+                <div class="flex items-center gap-2 text-sm">
+                    <i id="upload-spinner" class="fas fa-spinner fa-spin text-primary flex-shrink-0"></i>
+                    <span id="upload-status-text" class="theme-text-secondary truncate">Bağlanıyor...</span>
+                </div>
+                <!-- Progress bar -->
+                <div class="w-full bg-white/10 rounded-full h-2 overflow-hidden">
+                    <div id="upload-progress-bar" class="h-2 rounded-full transition-all duration-300"
+                         style="width:0%; background: linear-gradient(90deg, var(--c-prim), var(--c-acc, var(--c-prim)))"></div>
+                </div>
+                <!-- İstatistikler -->
+                <div class="grid grid-cols-5 gap-2 text-center">
+                    <div class="bg-white/5 rounded-lg px-2 py-1.5">
+                        <div class="text-xs theme-text-secondary mb-0.5">İndirilen</div>
+                        <div id="stat-downloaded" class="text-xs font-bold text-text">—</div>
+                    </div>
+                    <div class="bg-white/5 rounded-lg px-2 py-1.5">
+                        <div class="text-xs theme-text-secondary mb-0.5">Toplam</div>
+                        <div id="stat-total" class="text-xs font-bold" style="color:var(--c-prim)">—</div>
+                    </div>
+                    <div class="bg-white/5 rounded-lg px-2 py-1.5">
+                        <div class="text-xs theme-text-secondary mb-0.5">Hız</div>
+                        <div id="stat-speed" class="text-xs font-bold text-primary">—</div>
+                    </div>
+                    <div class="bg-white/5 rounded-lg px-2 py-1.5">
+                        <div class="text-xs theme-text-secondary mb-0.5">Kalan</div>
+                        <div id="stat-eta" class="text-xs font-bold text-text">—</div>
+                    </div>
+                    <div class="bg-white/5 rounded-lg px-2 py-1.5">
+                        <div class="text-xs theme-text-secondary mb-0.5">Geçen</div>
+                        <div id="stat-elapsed" class="text-xs font-bold text-text">—</div>
+                    </div>
+                </div>
+                <!-- Arşiv / Meta log -->
+                <div id="upload-log" class="hidden text-xs font-mono bg-black/30 rounded-lg px-3 py-2 max-h-28 overflow-y-auto space-y-1"></div>
+            </div>
+
+            <div class="flex gap-3 mt-6">
+                <button onclick="closeUploadModal()" class="flex-1 px-4 py-2.5 rounded-xl border border-white/20 hover:bg-white/5 text-sm transition">
+                    İptal
+                </button>
+                <button id="upload-btn" onclick="startUpload()"
+                    class="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-primary text-white rounded-xl hover:opacity-90 transition font-medium text-sm shadow-md">
+                    <i class="fas fa-download"></i> İndir &amp; Kaydet
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Google Drive Modal -->
+    <div id="gdrive-modal" class="fixed inset-0 z-40 hidden flex items-center justify-center bg-black/60 backdrop-blur-sm">
+        <div class="theme-card rounded-2xl shadow-2xl w-full max-w-xl mx-4 p-6 border border-white/10 flex flex-col" style="max-height:90vh">
+            <!-- Başlık -->
+            <div class="flex items-center justify-between mb-4 flex-shrink-0">
+                <h2 class="text-lg font-bold flex items-center gap-2">
+                    <i class="fab fa-google-drive text-green-400"></i>
+                    <span id="gdrive-folder-name">Google Drive</span>
+                </h2>
+                <button onclick="closeGdriveModal()" class="text-gray-400 hover:text-white transition-colors">
+                    <i class="fas fa-times text-lg"></i>
+                </button>
+            </div>
+
+            <!-- Breadcrumb -->
+            <div id="gdrive-breadcrumb" class="flex items-center gap-1 text-xs theme-text-secondary mb-3 flex-shrink-0 overflow-x-auto flex-wrap"></div>
+
+            <!-- Durum / hata -->
+            <div id="gdrive-status" class="hidden mb-3 flex-shrink-0">
+                <div class="flex items-center gap-2 text-sm theme-text-secondary">
+                    <i class="fas fa-spinner fa-spin text-primary"></i>
+                    <span id="gdrive-status-text">Yükleniyor...</span>
+                </div>
+            </div>
+            <div id="gdrive-error" class="hidden mb-3 p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-sm text-red-400 flex-shrink-0">
+                <i class="fas fa-exclamation-circle mr-2"></i><span id="gdrive-error-text"></span>
+            </div>
+
+            <!-- Dosya listesi -->
+            <div id="gdrive-list" class="flex-1 overflow-y-auto space-y-1 min-h-0 pr-1"></div>
+
+            <!-- Sonraki sayfa -->
+            <div id="gdrive-next-wrap" class="hidden mt-3 flex-shrink-0">
+                <button onclick="gdriveNextPage()"
+                    class="w-full py-2 rounded-xl border border-white/20 hover:bg-white/5 text-sm transition flex items-center justify-center gap-2">
+                    <i class="fas fa-chevron-down text-xs"></i> Daha Fazla Göster
+                </button>
+            </div>
+
+            <!-- Alt buton -->
+            <div class="flex gap-3 mt-4 flex-shrink-0">
+                <button id="gdrive-back-btn" onclick="gdriveGoBack()" class="hidden px-4 py-2.5 rounded-xl border border-white/20 hover:bg-white/5 text-sm transition flex items-center gap-2">
+                    <i class="fas fa-arrow-left text-xs"></i> Geri
+                </button>
+                <button onclick="closeGdriveModal()" class="flex-1 px-4 py-2.5 rounded-xl border border-white/20 hover:bg-white/5 text-sm transition">
+                    Kapat
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Rename Modal -->
+    <div id="rename-modal" class="fixed inset-0 z-40 hidden flex items-center justify-center bg-black/60 backdrop-blur-sm">
+        <div class="theme-card rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6 border border-white/10">
+            <div class="flex items-center justify-between mb-5">
+                <h2 class="text-lg font-bold flex items-center gap-2">
+                    <i class="fas fa-pencil-alt text-yellow-400"></i>
+                    Yeniden Adlandır
+                </h2>
+                <button onclick="closeRenameModal()" class="text-gray-400 hover:text-white transition-colors">
+                    <i class="fas fa-times text-lg"></i>
+                </button>
+            </div>
+            <input id="rename-path" type="hidden"/>
+            <div class="mb-4">
+                <label class="block text-xs font-semibold theme-text-secondary mb-1.5 uppercase tracking-wide">Yeni Ad</label>
+                <input id="rename-newname" type="text" placeholder="yeni_ad.mkv"
+                    class="w-full rounded-xl border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-500 transition"
+                    onkeydown="if(event.key==='Enter') confirmRename()"/>
+            </div>
+            <div id="rename-meta-section" class="hidden mb-4 p-3 rounded-xl border border-white/10 bg-white/5">
+                <label class="flex items-center gap-2 text-sm cursor-pointer">
+                    <input type="checkbox" id="rename-run-meta" class="rounded" checked/>
+                    <span>Yeniden adlandırma sonrası metadata sorgula ve DB'ye kaydet</span>
+                </label>
+            </div>
+            <div class="flex gap-3">
+                <button onclick="closeRenameModal()" class="flex-1 px-4 py-2.5 rounded-xl border border-white/20 hover:bg-white/5 text-sm transition">
+                    İptal
+                </button>
+                <button onclick="confirmRename()"
+                    class="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-yellow-500 text-black rounded-xl hover:opacity-90 transition font-medium text-sm shadow-md">
+                    <i class="fas fa-check"></i> Onayla
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Metadata Modal -->
+    <div id="meta-modal" class="fixed inset-0 z-40 hidden flex items-center justify-center bg-black/60 backdrop-blur-sm">
+        <div class="theme-card rounded-2xl shadow-2xl w-full max-w-lg mx-4 p-6 border border-white/10">
+            <div class="flex items-center justify-between mb-5">
+                <h2 class="text-lg font-bold flex items-center gap-2">
+                    <i class="fas fa-database text-blue-400"></i>
+                    Metadata Sorgula &amp; Kaydet
+                </h2>
+                <button onclick="closeMetaModal()" class="text-gray-400 hover:text-white transition-colors">
+                    <i class="fas fa-times text-lg"></i>
+                </button>
+            </div>
+            <input id="meta-path" type="hidden"/>
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-xs font-semibold theme-text-secondary mb-1.5 uppercase tracking-wide">Dosya Yolu</label>
+                    <p id="meta-path-display" class="text-sm font-mono theme-text-secondary truncate"></p>
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold theme-text-secondary mb-1.5 uppercase tracking-wide">Metadata için kullanılacak dosya adı</label>
+                    <input id="meta-filename" type="text"
+                        class="w-full rounded-xl border px-3 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 transition"/>
+                    <p class="text-xs theme-text-secondary mt-1">Film.2024.1080p.mkv gibi TMDB/IMDB sorgulamasını doğru yapacak bir ad girin.</p>
+                </div>
+            </div>
+            <div id="meta-result" class="hidden mt-4 p-4 rounded-xl border border-white/10 bg-white/5">
+                <div class="flex gap-4">
+                    <img id="meta-poster" src="" alt="poster" class="w-16 h-24 rounded-lg object-cover flex-shrink-0 hidden"/>
+                    <div class="flex-1 min-w-0">
+                        <p id="meta-title" class="font-bold text-sm truncate"></p>
+                        <p id="meta-info" class="text-xs theme-text-secondary mt-0.5"></p>
+                        <p id="meta-db" class="text-xs text-green-400 mt-1 flex items-center gap-1">
+                            <i class="fas fa-check-circle"></i> <span></span>
+                        </p>
+                    </div>
+                </div>
+            </div>
+            <div id="meta-loading" class="hidden mt-4 flex items-center gap-2 text-sm theme-text-secondary">
+                <i class="fas fa-spinner fa-spin text-blue-400"></i> Metadata sorgulanıyor...
+            </div>
+            <div id="meta-error" class="hidden mt-4 p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-sm"></div>
+            <div class="flex gap-3 mt-6">
+                <button onclick="closeMetaModal()" class="flex-1 px-4 py-2.5 rounded-xl border border-white/20 hover:bg-white/5 text-sm transition">
+                    Kapat
+                </button>
+                <button id="meta-submit-btn" onclick="submitMetadata()"
+                    class="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-xl hover:opacity-90 transition font-medium text-sm shadow-md">
+                    <i class="fas fa-search"></i> Sorgula &amp; Önizle
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Yeni Klasör Modal -->
+    <div id="folder-modal" class="fixed inset-0 z-40 hidden flex items-center justify-center bg-black/60 backdrop-blur-sm">
+        <div class="theme-card rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6 border border-white/10">
+            <h2 class="text-lg font-bold mb-4 flex items-center gap-2">
+                <i class="fas fa-folder-plus text-yellow-400"></i> Yeni Klasör
+            </h2>
+            <input id="folder-name" type="text" placeholder="Klasör adı"
+                class="w-full rounded-xl border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary transition mb-4"
+                onkeydown="if(event.key==='Enter') confirmNewFolder()"/>
+            <div class="flex gap-3">
+                <button onclick="closeFolderModal()" class="flex-1 px-4 py-2.5 rounded-xl border border-white/20 hover:bg-white/5 text-sm transition">İptal</button>
+                <button onclick="confirmNewFolder()"
+                    class="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-primary text-white rounded-xl hover:opacity-90 transition font-medium text-sm">
+                    <i class="fas fa-check"></i> Oluştur
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Araç Çubuğu -->
+    <div class="theme-card rounded-2xl shadow-lg p-4 mb-4 flex flex-wrap items-center gap-3">
+        <!-- Breadcrumb -->
+        <nav id="breadcrumb" class="flex items-center gap-1 text-sm flex-1 min-w-0 overflow-x-auto">
+            <button onclick="navigate('')" class="text-primary hover:underline flex-shrink-0 flex items-center gap-1">
+                <i class="fas fa-hdd text-xs"></i> Kök
+            </button>
+        </nav>
+        <!-- Eylemler -->
+        <div class="flex items-center gap-2 flex-shrink-0">
+            <button onclick="openFolderModal()" title="Yeni Klasör"
+                class="flex items-center gap-2 px-3 py-2 rounded-lg border border-white/20 hover:bg-white/5 text-sm transition">
+                <i class="fas fa-folder-plus text-yellow-400"></i>
+                <span class="hidden sm:inline">Yeni Klasör</span>
+            </button>
+            <button onclick="openUploadModal()" title="HTTPS'den İndir"
+                class="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg hover:opacity-90 transition font-medium text-sm shadow-md">
+                <i class="fas fa-cloud-download-alt"></i>
+                <span class="hidden sm:inline">Dosya İndir</span>
+            </button>
+            <button onclick="openGdriveModal()" title="Google Drive'dan Ekle"
+                class="flex items-center gap-2 px-4 py-2 rounded-lg border border-white/20 hover:bg-white/5 text-sm transition font-medium">
+                <i class="fab fa-google-drive text-green-400"></i>
+                <span class="hidden sm:inline">Drive'dan Ekle</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Dosya Listesi -->
+    <div class="theme-card rounded-2xl shadow-lg overflow-hidden border border-white/10">
+        <!-- Tablo başlığı -->
+        <div class="hidden sm:grid grid-cols-12 px-5 py-3 border-b border-white/10 text-xs font-semibold uppercase tracking-wide theme-text-secondary">
+            <div class="col-span-6">Ad</div>
+            <div class="col-span-2 text-right">Boyut</div>
+            <div class="col-span-2 text-center">Değiştirilme</div>
+            <div class="col-span-2 text-right">İşlemler</div>
+        </div>
+
+        <div id="file-list" class="divide-y divide-white/5">
+            <div class="px-5 py-10 text-center theme-text-secondary">
+                <i class="fas fa-spinner fa-spin text-primary text-2xl mb-3 block"></i>
+                Dosyalar yükleniyor...
+            </div>
+        </div>
+
+        <!-- Boş durum -->
+        <div id="empty-state" class="hidden px-5 py-16 text-center">
+            <i class="fas fa-folder-open text-4xl theme-text-secondary mb-3 block"></i>
+            <p class="theme-text-secondary text-sm">Bu klasör boş</p>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════
+         Google Drive Kataloğu (DB'ye eklenmiş Drive içerikleri)
+    ══════════════════════════════════════════════════════════════ -->
+    <div class="theme-card rounded-2xl shadow-lg overflow-hidden border border-white/10 mt-6">
+        <div class="flex items-center justify-between px-5 py-4 border-b border-white/10">
+            <h2 class="text-sm font-bold flex items-center gap-2 theme-text-secondary uppercase tracking-wide">
+                <i class="fab fa-google-drive text-green-400"></i> Drive Kataloğu
+                <span id="gdrive-db-count" class="text-xs font-normal normal-case"></span>
+            </h2>
+            <div class="flex items-center gap-3">
+                <button onclick="runGdriveMigration()" id="gdrive-migrate-btn" title="Mevcut DB kayıtlarını kataloğa aktar"
+                    class="text-xs text-yellow-400 hover:underline flex items-center gap-1">
+                    <i class="fas fa-database text-xs"></i> Mevcut Kayıtları Aktar
+                </button>
+                <button onclick="loadGdriveDbList()" title="Yenile"
+                    class="text-xs text-primary hover:underline flex items-center gap-1">
+                    <i id="gdrive-db-refresh-icon" class="fas fa-sync-alt text-xs"></i> Yenile
+                </button>
+            </div>
+        </div>
+
+        <div id="gdrive-db-list" class="divide-y divide-white/5">
+            <div class="px-5 py-8 text-center theme-text-secondary text-sm">
+                <i class="fas fa-spinner fa-spin text-primary text-xl mb-2 block"></i>
+                Drive içerikleri yükleniyor...
+            </div>
+        </div>
+
+        <div id="gdrive-db-empty" class="hidden px-5 py-10 text-center">
+            <i class="fab fa-google-drive text-3xl theme-text-secondary mb-3 block"></i>
+            <p class="theme-text-secondary text-sm">Henüz Drive'dan eklenmiş içerik yok</p>
+        </div>
+    </div>
+</div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+let currentPath = '';
+
+// ── Toast ──────────────────────────────────────────────────────────────────
+function showToast(msg, type = 'success') {
+    const t = document.getElementById('toast');
+    const icons = { success: 'fa-check-circle', error: 'fa-times-circle', info: 'fa-info-circle' };
+    const colors = { success: 'bg-green-600', error: 'bg-red-600', info: 'bg-blue-600' };
+    t.innerHTML = `<i class="fas ${icons[type] || icons.info}"></i><span>${msg}</span>`;
+    t.className = `fixed top-4 right-4 z-50 px-5 py-3 rounded-lg shadow-xl text-white text-sm font-medium transition-all duration-300 max-w-sm flex items-center gap-2 ${colors[type] || colors.info}`;
+    t.classList.remove('hidden');
+    clearTimeout(t._timer);
+    t._timer = setTimeout(() => t.classList.add('hidden'), 3500);
+}
+
+// ── Navigasyon & Listeleme ─────────────────────────────────────────────────
+async function navigate(path) {
+    currentPath = path;
+    document.getElementById('upload-dest').value = path;
+    await loadFiles(path);
+}
+
+async function loadFiles(path = '') {
+    const list = document.getElementById('file-list');
+    const empty = document.getElementById('empty-state');
+    list.innerHTML = `<div class="px-5 py-10 text-center theme-text-secondary"><i class="fas fa-spinner fa-spin text-primary text-xl mb-2 block"></i>Yükleniyor...</div>`;
+    empty.classList.add('hidden');
+
+    try {
+        const res = await fetch('/api/sunucu/listele?path=' + encodeURIComponent(path));
+        if (!res.ok) {
+            list.innerHTML = `<div class="px-5 py-8 text-center text-red-400"><i class="fas fa-exclamation-triangle mr-2"></i>Sunucuya erişilemiyor (${res.status})</div>`;
+            return;
+        }
+        const data = await res.json();
+
+        if (data.error) {
+            list.innerHTML = `<div class="px-5 py-8 text-center text-red-400"><i class="fas fa-exclamation-triangle mr-2"></i>${data.error}</div>`;
+            showToast(data.error, 'error');
+            return;
+        }
+
+        // Breadcrumb güncelle
+        renderBreadcrumb(data.breadcrumbs || []);
+
+        if (!data.entries || data.entries.length === 0) {
+            list.innerHTML = '';
+            empty.classList.remove('hidden');
+            return;
+        }
+
+        list.innerHTML = data.entries.map(e => renderEntry(e)).join('');
+    } catch (err) {
+        list.innerHTML = `<div class="px-5 py-8 text-center text-red-400"><i class="fas fa-exclamation-triangle mr-2"></i>Yükleme hatası</div>`;
+        console.error(err);
+    }
+}
+
+function renderBreadcrumb(crumbs) {
+    const nav = document.getElementById('breadcrumb');
+    let html = `<button onclick="navigate('')" class="text-primary hover:underline flex-shrink-0 flex items-center gap-1 text-sm"><i class="fas fa-hdd text-xs"></i> Kök</button>`;
+    crumbs.forEach(c => {
+        html += `<i class="fas fa-chevron-right text-xs theme-text-secondary mx-1 flex-shrink-0"></i>
+                 <button onclick="navigate('${escHtml(c.path)}')" class="text-primary hover:underline flex-shrink-0 text-sm truncate max-w-[140px]" title="${escHtml(c.name)}">${escHtml(c.name)}</button>`;
+    });
+    nav.innerHTML = html;
+}
+
+function renderEntry(e) {
+    const icon = e.is_dir
+        ? `<i class="fas fa-folder text-yellow-400 text-lg flex-shrink-0"></i>`
+        : `<i class="fas fa-file-video text-blue-400 text-lg flex-shrink-0"></i>`;
+
+    const nameCell = e.is_dir
+        ? `<button onclick="navigate('${escHtml(e.path)}')" class="font-medium text-text hover:text-primary transition-colors truncate text-left">${escHtml(e.name)}</button>`
+        : `<span class="font-medium text-text truncate">${escHtml(e.name)}</span>`;
+
+    const sizeCell = e.is_dir ? '<span class="theme-text-secondary text-xs">—</span>' : `<span class="text-xs theme-text-secondary">${escHtml(e.size || '—')}</span>`;
+    const dateCell = `<span class="text-xs theme-text-secondary">${e.modified ? new Date(e.modified * 1000).toLocaleDateString('tr-TR', {day:'2-digit',month:'2-digit',year:'numeric'}) : '—'}</span>`;
+
+    const metaBtn = !e.is_dir
+        ? `<button onclick="openMetaModal('${escHtml(e.path)}', '${escHtml(e.name)}')"
+                title="Metadata Sorgula"
+                class="p-1.5 rounded-lg text-blue-400 hover:bg-blue-400/10 transition-colors" >
+                <i class="fas fa-database text-sm"></i>
+           </button>` : '';
+
+    const downloadBtn = !e.is_dir
+        ? `<a href="/api/sunucu/indir?path=${encodeURIComponent(e.path)}"
+               download="${escHtml(e.name)}"
+               title="İndir"
+               class="p-1.5 rounded-lg text-green-400 hover:bg-green-400/10 transition-colors inline-flex items-center">
+               <i class="fas fa-download text-sm"></i>
+           </a>` : '';
+
+    return `
+        <div class="grid grid-cols-12 items-center px-5 py-3.5 hover:bg-white/5 transition-colors group">
+            <div class="col-span-8 sm:col-span-6 flex items-center gap-3 min-w-0">
+                ${icon}
+                <div class="min-w-0">${nameCell}</div>
+            </div>
+            <div class="hidden sm:flex col-span-2 justify-end">${sizeCell}</div>
+            <div class="hidden sm:flex col-span-2 justify-center">${dateCell}</div>
+            <div class="col-span-4 sm:col-span-2 flex items-center justify-end gap-1">
+                ${downloadBtn}
+                ${metaBtn}
+                <button onclick="openRenameModal('${escHtml(e.path)}', '${escHtml(e.name)}', ${!e.is_dir})"
+                    title="Yeniden Adlandır"
+                    class="p-1.5 rounded-lg text-yellow-400 hover:bg-yellow-400/10 transition-colors">
+                    <i class="fas fa-pencil-alt text-sm"></i>
+                </button>
+                <button onclick="deleteEntry('${escHtml(e.path)}', '${escHtml(e.name)}', ${e.is_dir})"
+                    title="Sil"
+                    class="p-1.5 rounded-lg text-red-400 hover:bg-red-400/10 transition-colors">
+                    <i class="fas fa-trash text-sm"></i>
+                </button>
+            </div>
+        </div>`;
+}
+
+// ── Upload Modal ───────────────────────────────────────────────────────────
+function openUploadModal() {
+    document.getElementById('upload-url').value = '';
+    document.getElementById('upload-filename').value = '';
+    document.getElementById('upload-dest').value = currentPath;
+    document.getElementById('upload-progress').classList.add('hidden');
+    document.getElementById('upload-btn').disabled = false;
+    document.getElementById('upload-modal').classList.remove('hidden');
+    setTimeout(() => document.getElementById('upload-url').focus(), 100);
+}
+function closeUploadModal() {
+    if (_activeSSE) { _activeSSE.close(); _activeSSE = null; }
+    document.getElementById('upload-modal').classList.add('hidden');
+}
+
+let _activeSSE = null;
+
+function _addLog(msg, color = 'text-gray-300') {
+    const log = document.getElementById('upload-log');
+    log.classList.remove('hidden');
+    const line = document.createElement('div');
+    line.className = color;
+    line.textContent = '› ' + msg;
+    log.appendChild(line);
+    log.scrollTop = log.scrollHeight;
+}
+
+function _resetProgress() {
+    document.getElementById('upload-progress-bar').style.width = '0%';
+    document.getElementById('upload-status-text').textContent = 'Bağlanıyor...';
+    document.getElementById('stat-downloaded').textContent = '—';
+    document.getElementById('stat-total').textContent = '—';
+    document.getElementById('stat-speed').textContent = '—';
+    document.getElementById('stat-eta').textContent = '—';
+    document.getElementById('stat-elapsed').textContent = '0s';
+    document.getElementById('upload-log').innerHTML = '';
+    document.getElementById('upload-log').classList.add('hidden');
+}
+
+async function startUpload() {
+    const url      = document.getElementById('upload-url').value.trim();
+    const filename = document.getElementById('upload-filename').value.trim();
+    const dest     = document.getElementById('upload-dest').value.trim();
+
+    if (!url) { showToast('URL gerekli', 'error'); return; }
+    // Google Drive linkleri de kabul edilir
+    const isGdrive = /drive\.google\.com|docs\.google\.com/.test(url);
+    if (!isGdrive && !url.startsWith('https://')) {
+        showToast('Geçerli bir HTTPS URL ya da Google Drive linki gerekli', 'error');
+        return;
+    }
+
+    const btn  = document.getElementById('upload-btn');
+    const prog = document.getElementById('upload-progress');
+
+    btn.disabled = true;
+    btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> İptal Et`;
+    btn.onclick = cancelUpload;
+    prog.classList.remove('hidden');
+    _resetProgress();
+
+    // SSE bağlantısı
+    const params = new URLSearchParams({
+        url,
+        dest_path: dest,
+        custom_filename: filename,
+        extract: '1',
+    });
+
+    if (_activeSSE) { _activeSSE.close(); }
+    const es = new EventSource('/api/sunucu/yukle-stream?' + params.toString());
+    _activeSSE = es;
+
+    es.addEventListener('info', e => {
+        const d = JSON.parse(e.data);
+        document.getElementById('upload-status-text').textContent =
+            `📥 ${d.filename}  (${d.total_str})` +
+            (d.is_archive ? `  🗜️ ${d.arch_type?.toUpperCase()}` : '');
+        // Toplam boyutu erken göster
+        const totalEl = document.getElementById('stat-total');
+        if (totalEl && d.total_str && d.total_str !== '?') {
+            totalEl.textContent = d.total_str;
+        }
+    });
+
+    es.addEventListener('progress', e => {
+        const d = JSON.parse(e.data);
+        const bar = document.getElementById('upload-progress-bar');
+        bar.style.width = d.percent + '%';
+
+        const totalStr = d.total_str && d.total_str !== '?' ? d.total_str : '?';
+        const pct = d.percent > 0 ? ` ${d.percent.toFixed(1)}%` : '';
+        document.getElementById('upload-status-text').textContent =
+            `⬇️ İndiriliyor${pct}  —  ${d.downloaded_str} / ${totalStr}`;
+
+        document.getElementById('stat-downloaded').textContent = d.downloaded_str;
+        document.getElementById('stat-total').textContent      = totalStr;
+        document.getElementById('stat-speed').textContent      = d.speed;
+        document.getElementById('stat-eta').textContent        = d.eta;
+        document.getElementById('stat-elapsed').textContent    = d.elapsed + 's';
+    });
+
+    es.addEventListener('extract', e => {
+        const d = JSON.parse(e.data);
+        const colors = { start: 'text-yellow-400', done: 'text-green-400', error: 'text-red-400', warn: 'text-orange-400' };
+        _addLog(d.message, colors[d.status] || 'text-gray-300');
+        if (d.status === 'start') {
+            document.getElementById('upload-status-text').textContent = '🗜️ ' + d.message;
+        }
+    });
+
+    es.addEventListener('meta', e => {
+        const d = JSON.parse(e.data);
+        if (d.error) {
+            _addLog('⚠ Metadata: ' + d.error, 'text-orange-400');
+        } else if (d.needs_review) {
+            // İndirme bitti, metadata bulundu — otomatik kaydetme, onay sayfası aç
+            const title = d.title_tr || d.title || d.meta_filename || '—';
+            _addLog(`🔍 Metadata bulundu: ${title} — onay bekleniyor`, 'text-blue-400');
+            // done eventi gelince zaten modal kapanıp review açılacak, burada sadece logluyoruz
+            // Datayı sakla — done handler'ında kullan
+            es._pendingMeta = d;
+        }
+    });
+
+    es.addEventListener('done', e => {
+        const d = JSON.parse(e.data);
+        const pendingMeta = es._pendingMeta || null;
+        es.close();
+        _activeSSE = null;
+        document.getElementById('upload-progress-bar').style.width = '100%';
+        document.getElementById('upload-status-text').textContent = `✅ Tamamlandı: ${d.filename} (${d.size})`;
+        _addLog('Tamamlandı → ' + d.dest_path, 'text-green-400');
+
+        if (pendingMeta) {
+            // Metadata var — onay sayfasını aç
+            _addLog('📋 Metadata onay sayfası açılıyor...', 'text-blue-300');
+            setTimeout(() => {
+                closeUploadModal();
+                loadFiles(currentPath);
+                // path bilgisini meta'dan al
+                openMetaReview({
+                    ...pendingMeta,
+                    path:     pendingMeta.meta_path,
+                    filename: pendingMeta.meta_filename,
+                });
+            }, 800);
+        } else {
+            setTimeout(async () => {
+                closeUploadModal();
+                await loadFiles(currentPath);
+                showToast(`İndirildi: ${d.filename} (${d.size})`, 'success');
+            }, 1200);
+        }
+
+        _resetBtn();
+    });
+
+    es.addEventListener('error', e => {
+        let msg = 'Bağlantı hatası';
+        try { msg = JSON.parse(e.data).message; } catch (_) {}
+        document.getElementById('upload-status-text').textContent = '❌ ' + msg;
+        _addLog(msg, 'text-red-400');
+        showToast(msg, 'error');
+        es.close();
+        _activeSSE = null;
+        _resetBtn();
+    });
+
+    // SSE native hata (bağlantı kopması vb.)
+    es.onerror = () => {
+        if (es.readyState === EventSource.CLOSED) {
+            _resetBtn();
+        }
+    };
+}
+
+function cancelUpload() {
+    if (_activeSSE) { _activeSSE.close(); _activeSSE = null; }
+    _addLog('İndirme iptal edildi.', 'text-yellow-400');
+    _resetBtn();
+}
+
+function _resetBtn() {
+    const btn = document.getElementById('upload-btn');
+    btn.disabled = false;
+    btn.innerHTML = `<i class="fas fa-download"></i> İndir & Kaydet`;
+    btn.onclick = startUpload;
+}
+
+// ── Sil ───────────────────────────────────────────────────────────────────
+async function deleteEntry(path, name, isDir) {
+    const tip = isDir ? 'klasörü ve içindeki tüm dosyaları' : 'dosyayı';
+    if (!confirm(`"${name}" adlı ${tip} silmek istediğinizden emin misiniz?\n\nBu işlem geri alınamaz.`)) return;
+
+    try {
+        const res = await fetch('/api/sunucu/sil', {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path })
+        });
+        const data = await res.json();
+        if (data.error) { showToast(data.error, 'error'); return; }
+        showToast(data.message, 'success');
+
+        // Silinen klasör, içinde bulunduğumuz yol veya üst yolu ise yukarı çık
+        if (isDir && (currentPath === path || currentPath.startsWith(path + '/') || currentPath.startsWith(path + '\\'))) {
+            // Üst dizine git
+            const parts = path.split('/').filter(Boolean);
+            parts.pop();
+            await navigate(parts.join('/'));
+        } else {
+            await loadFiles(currentPath);
+        }
+    } catch (err) {
+        showToast('Silme hatası: ' + err.message, 'error');
+    }
+}
+
+// ── Rename Modal ───────────────────────────────────────────────────────────
+function openRenameModal(path, name, isFile) {
+    document.getElementById('rename-path').value = path;
+    document.getElementById('rename-newname').value = name;
+    const metaSection = document.getElementById('rename-meta-section');
+    if (isFile) {
+        metaSection.classList.remove('hidden');
+        document.getElementById('rename-run-meta').checked = true;
+    } else {
+        metaSection.classList.add('hidden');
+    }
+    document.getElementById('rename-modal').classList.remove('hidden');
+    setTimeout(() => {
+        const inp = document.getElementById('rename-newname');
+        inp.focus();
+        const dot = inp.value.lastIndexOf('.');
+        inp.setSelectionRange(0, dot > 0 ? dot : inp.value.length);
+    }, 100);
+}
+function closeRenameModal() {
+    document.getElementById('rename-modal').classList.add('hidden');
+}
+
+async function confirmRename() {
+    const path = document.getElementById('rename-path').value;
+    const newName = document.getElementById('rename-newname').value.trim();
+    const runMeta = document.getElementById('rename-run-meta').checked;
+
+    if (!newName) { showToast('Yeni ad boş olamaz', 'error'); return; }
+
+    try {
+        const res = await fetch('/api/sunucu/yeniden-adlandir', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path, new_name: newName })
+        });
+        const data = await res.json();
+        if (data.error) { showToast(data.error, 'error'); return; }
+        showToast(`Yeniden adlandırıldı: ${data.new_name}`, 'success');
+        closeRenameModal();
+        await loadFiles(currentPath);
+
+        // Metadata sorgusu
+        if (runMeta && document.getElementById('rename-meta-section') && !document.getElementById('rename-meta-section').classList.contains('hidden')) {
+            openMetaModal(data.new_path, data.new_name);
+        }
+    } catch (err) {
+        showToast('Hata: ' + err.message, 'error');
+    }
+}
+
+// ── Metadata Modal ─────────────────────────────────────────────────────────
+function openMetaModal(path, name) {
+    document.getElementById('meta-path').value = path;
+    document.getElementById('meta-path-display').textContent = path;
+    document.getElementById('meta-filename').value = name;
+    document.getElementById('meta-result').classList.add('hidden');
+    document.getElementById('meta-loading').classList.add('hidden');
+    document.getElementById('meta-error').classList.add('hidden');
+    document.getElementById('meta-submit-btn').disabled = false;
+    document.getElementById('meta-submit-btn').innerHTML = `<i class="fas fa-search"></i> Sorgula & Kaydet`;
+    document.getElementById('meta-modal').classList.remove('hidden');
+}
+function closeMetaModal() {
+    document.getElementById('meta-modal').classList.add('hidden');
+}
+
+async function submitMetadata() {
+    const path = document.getElementById('meta-path').value;
+    const filename = document.getElementById('meta-filename').value.trim();
+    const btn = document.getElementById('meta-submit-btn');
+    const loading = document.getElementById('meta-loading');
+    const resultDiv = document.getElementById('meta-result');
+    const errorDiv = document.getElementById('meta-error');
+
+    resultDiv.classList.add('hidden');
+    errorDiv.classList.add('hidden');
+    loading.classList.remove('hidden');
+    btn.disabled = true;
+    btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Sorgulanıyor...`;
+
+    try {
+        const res = await fetch('/api/sunucu/metadata-sorgu', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path, custom_filename: filename || null })
+        });
+        const data = await res.json();
+
+        loading.classList.add('hidden');
+
+        if (data.error) {
+            errorDiv.textContent = data.error;
+            errorDiv.classList.remove('hidden');
+            btn.disabled = false;
+            btn.innerHTML = `<i class="fas fa-redo"></i> Tekrar Dene`;
+            return;
+        }
+
+        // Önizleme sonuç göster (mini)
+        document.getElementById('meta-title').textContent = data.title_tr || data.title || filename;
+        document.getElementById('meta-info').textContent = [
+            data.media_type === 'tv' ? 'Dizi' : 'Film',
+            data.year,
+            data.quality
+        ].filter(Boolean).join(' · ');
+        document.getElementById('meta-db').querySelector('span').textContent = `Onay bekleniyor — henüz kaydedilmedi`;
+        document.getElementById('meta-db').className = 'text-xs text-yellow-400 mt-1 flex items-center gap-1';
+        document.getElementById('meta-db').innerHTML = `<i class="fas fa-clock"></i> <span>Onay bekleniyor — henüz kaydedilmedi</span>`;
+
+        const poster = document.getElementById('meta-poster');
+        if (data.poster) { poster.src = data.poster; poster.classList.remove('hidden'); }
+        else { poster.classList.add('hidden'); }
+
+        resultDiv.classList.remove('hidden');
+        btn.disabled = false;
+        btn.innerHTML = `<i class="fas fa-eye"></i> Önizle &amp; Onayla`;
+        btn.onclick = () => openMetaReview(data);
+
+    } catch (err) {
+        loading.classList.add('hidden');
+        errorDiv.textContent = 'Sunucu hatası: ' + err.message;
+        errorDiv.classList.remove('hidden');
+        btn.disabled = false;
+        btn.innerHTML = `<i class="fas fa-search"></i> Sorgula &amp; Önizle`;
+    }
+}
+
+// ── Metadata Onay Sayfası ────────────────────────────────────────────────────
+function openMetaReview(data) {
+    // Kapat meta modal
+    document.getElementById('meta-modal').classList.add('hidden');
+
+    // Alanları doldur
+    document.getElementById('mr-path').value = data.path || document.getElementById('meta-path').value;
+    document.getElementById('mr-meta-filename').value = data.filename || '';
+    document.getElementById('mr-raw-metadata').value = JSON.stringify(data.metadata || data);
+
+    document.getElementById('mr-title').value = data.title || '';
+    document.getElementById('mr-title-tr').value = data.title_tr || '';
+    document.getElementById('mr-media-type').value = data.media_type || 'movie';
+    document.getElementById('mr-year').value = data.year || '';
+    document.getElementById('mr-quality').value = data.quality || '';
+    document.getElementById('mr-tmdb-id').value = data.tmdb_id || '';
+    document.getElementById('mr-rating').value = data.rating || '';
+    document.getElementById('mr-description').value = data.description || '';
+    document.getElementById('mr-poster-url').value = data.poster || '';
+
+    // Preview card
+    document.getElementById('mr-title-display').textContent = data.title_tr || data.title || data.filename;
+    const titleTrEl = document.getElementById('mr-title-tr-display');
+    if (data.title_tr && data.title_tr !== data.title) {
+        titleTrEl.textContent = data.title;
+        titleTrEl.classList.remove('hidden');
+    } else {
+        titleTrEl.classList.add('hidden');
+    }
+    document.getElementById('mr-type-badge').textContent = data.media_type === 'tv' ? 'Dizi' : 'Film';
+    document.getElementById('mr-year-badge').textContent = data.year || '';
+    const ratingBadge = document.getElementById('mr-rating-badge');
+    if (data.rating) { ratingBadge.textContent = '⭐ ' + data.rating; ratingBadge.classList.remove('hidden'); }
+    else { ratingBadge.classList.add('hidden'); }
+
+    const genres = document.getElementById('mr-genres');
+    genres.innerHTML = (data.genres || []).slice(0, 6).map(g =>
+        `<span class="text-xs bg-white/10 px-2 py-0.5 rounded-full theme-text-secondary">${escHtml(g)}</span>`
+    ).join('');
+
+    document.getElementById('mr-desc').textContent = data.description || '';
+    document.getElementById('mr-filename-display').textContent = data.filename || '';
+    document.getElementById('mr-size-display').textContent = data.size || '';
+    document.getElementById('mr-tmdb-display').textContent = data.tmdb_id || '—';
+
+    const poster = document.getElementById('mr-poster');
+    if (data.poster) { poster.src = data.poster; poster.classList.remove('hidden'); }
+    else { poster.classList.add('hidden'); }
+
+    const backdropWrap = document.getElementById('mr-backdrop-wrap');
+    const backdrop = document.getElementById('mr-backdrop');
+    if (data.backdrop) { backdrop.src = data.backdrop; backdropWrap.classList.remove('hidden'); }
+    else { backdropWrap.classList.add('hidden'); }
+
+    document.getElementById('mr-success').classList.add('hidden');
+    document.getElementById('mr-error').classList.add('hidden');
+    const saveBtn = document.getElementById('mr-save-btn');
+    saveBtn.disabled = false;
+    saveBtn.innerHTML = `<i class="fas fa-database"></i> Onayla &amp; Veritabanına Kaydet`;
+    // Drive akışından kalma onclick override'ını her zaman sıfırla
+    saveBtn.onclick = confirmAndSaveMetadata;
+    // Drive hidden input'larını temizle — yanlış akışa düşmesin
+    const _hfid = document.getElementById('mr-gdrive-file-id');
+    if (_hfid) _hfid.value = '';
+    _pendingGdriveFile = null;
+
+    document.getElementById('meta-review-overlay').classList.remove('hidden');
+    document.documentElement.style.overflow = 'hidden';
+}
+
+function closeMetaReview() {
+    document.getElementById('meta-review-overlay').classList.add('hidden');
+    document.documentElement.style.overflow = '';
+}
+
+async function rejectAndDeleteFile() {
+    const path = document.getElementById('mr-path').value;
+    if (!path) { closeMetaReview(); return; }
+    if (!confirm(`Dosyayı reddetmek ve sunucudan silmek istediğinizden emin misiniz?\n\nDosya: ${path}\n\nBu işlem geri alınamaz.`)) return;
+
+    document.getElementById('mr-error').classList.add('hidden');
+    try {
+        const res = await fetch('/api/sunucu/metadata-sil', {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path })
+        });
+        const data = await res.json();
+        if (data.error) {
+            document.getElementById('mr-error-msg').textContent = data.error;
+            document.getElementById('mr-error').classList.remove('hidden');
+            return;
+        }
+        showToast('Dosya reddedildi ve silindi.', 'info');
+        closeMetaReview();
+        await loadFiles(currentPath);
+    } catch (err) {
+        document.getElementById('mr-error-msg').textContent = 'Silme hatası: ' + err.message;
+        document.getElementById('mr-error').classList.remove('hidden');
+    }
+}
+
+async function reQueryMetadata() {
+    const path = document.getElementById('mr-path').value;
+    const filename = document.getElementById('mr-meta-filename').value.trim();
+    document.getElementById('mr-error').classList.add('hidden');
+    document.getElementById('mr-success').classList.add('hidden');
+
+    try {
+        const res = await fetch('/api/sunucu/metadata-sorgu', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path, custom_filename: filename || null })
+        });
+        const data = await res.json();
+        if (data.error) {
+            document.getElementById('mr-error-msg').textContent = data.error;
+            document.getElementById('mr-error').classList.remove('hidden');
+            return;
+        }
+        openMetaReview(data);
+    } catch (err) {
+        document.getElementById('mr-error-msg').textContent = 'Sunucu hatası: ' + err.message;
+        document.getElementById('mr-error').classList.remove('hidden');
+    }
+}
+
+async function confirmAndSaveMetadata() {
+    const btn = document.getElementById('mr-save-btn');
+    btn.disabled = true;
+    btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Kaydediliyor...`;
+
+    document.getElementById('mr-success').classList.add('hidden');
+    document.getElementById('mr-error').classList.add('hidden');
+
+    // Güncel formdaki değerlerle metadata'yı güncelle
+    let meta = {};
+    try { meta = JSON.parse(document.getElementById('mr-raw-metadata').value); } catch {}
+    meta.title       = document.getElementById('mr-title').value.trim();
+    meta.title_tr    = document.getElementById('mr-title-tr').value.trim();
+    meta.media_type  = document.getElementById('mr-media-type').value;
+    meta.year        = document.getElementById('mr-year').value;
+    meta.quality     = document.getElementById('mr-quality').value.trim();
+    meta.tmdb_id     = document.getElementById('mr-tmdb-id').value;
+    meta.rating      = document.getElementById('mr-rating').value;
+    meta.description = document.getElementById('mr-description').value.trim();
+    meta.poster      = document.getElementById('mr-poster-url').value.trim();
+
+    try {
+        const res = await fetch('/api/sunucu/metadata-kaydet', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                path: document.getElementById('mr-path').value,
+                filename: document.getElementById('mr-meta-filename').value.trim(),
+                metadata: meta
+            })
+        });
+        const data = await res.json();
+
+        if (data.error) {
+            document.getElementById('mr-error-msg').textContent = data.error;
+            document.getElementById('mr-error').classList.remove('hidden');
+            btn.disabled = false;
+            btn.innerHTML = `<i class="fas fa-database"></i> Onayla &amp; Veritabanına Kaydet`;
+            return;
+        }
+
+        const title = data.title_tr || data.title || 'İçerik';
+        document.getElementById('mr-success-msg').textContent =
+            `✓ "${title}" başarıyla kaydedildi! (DB ID: ${data.db_id || '—'})`;
+        document.getElementById('mr-success').classList.remove('hidden');
+        btn.innerHTML = `<i class="fas fa-check"></i> Kaydedildi`;
+        showToast(`Metadata kaydedildi: ${title}`, 'success');
+        setTimeout(async () => {
+            closeMetaReview();
+            await loadFiles(currentPath);
+        }, 2000);
+
+    } catch (err) {
+        document.getElementById('mr-error-msg').textContent = 'Sunucu hatası: ' + err.message;
+        document.getElementById('mr-error').classList.remove('hidden');
+        btn.disabled = false;
+        btn.innerHTML = `<i class="fas fa-database"></i> Onayla &amp; Veritabanına Kaydet`;
+    }
+}
+
+// ── Sistem Durumu ────────────────────────────────────────────────────────────
+async function loadSistemDurumu() {
+    const icon = document.getElementById('sistem-refresh-icon');
+    icon.classList.add('fa-spin');
+    try {
+        const res = await fetch('/api/sunucu/sistem-durumu');
+        if (!res.ok) {
+            console.warn('Sistem durumu HTTP hatası:', res.status);
+            return;
+        }
+        const d = await res.json();
+        if (d.error) { console.warn('Sistem durumu:', d.error); return; }
+
+        const cpu = parseFloat(d.cpu_percent) || 0;
+        const ram = parseFloat(d.ram_percent) || 0;
+        const disk = parseFloat(d.disk_percent) || 0;
+
+        document.getElementById('sd-cpu').textContent = cpu.toFixed(1) + '%';
+        document.getElementById('sd-cpu-bar').style.width = cpu + '%';
+        document.getElementById('sd-cpu-bar').style.background =
+            cpu > 80 ? '#f87171' : cpu > 50 ? '#fb923c' : '#60a5fa';
+
+        document.getElementById('sd-ram').textContent = ram.toFixed(1) + '%';
+        document.getElementById('sd-ram-detail').textContent = (d.ram_used || '—') + ' / ' + (d.ram_total || '—');
+        document.getElementById('sd-ram-bar').style.width = ram + '%';
+        document.getElementById('sd-ram-bar').style.background =
+            ram > 85 ? '#f87171' : '#c084fc';
+
+        document.getElementById('sd-disk-used').textContent = d.disk_used || '—';
+        document.getElementById('sd-disk-total').textContent = '/ ' + (d.disk_total || '—') + ' (' + disk.toFixed(1) + '%)';
+        document.getElementById('sd-disk-bar').style.width = disk + '%';
+        document.getElementById('sd-disk-bar').style.background =
+            disk > 90 ? '#f87171' : '#fb923c';
+
+        document.getElementById('sd-disk-free').textContent = d.disk_free || '—';
+        document.getElementById('sd-uptime').textContent = d.bot_uptime || '—';
+
+        document.getElementById('sd-net-dl').textContent = d.net_download || '—';
+        document.getElementById('sd-net-ul').textContent = d.net_upload   || '—';
+    } catch(e) {
+        console.warn('Sistem durumu yüklenemedi:', e);
+    } finally {
+        icon.classList.remove('fa-spin');
+    }
+}
+
+// ── Yeni Klasör Modal ──────────────────────────────────────────────────────
+function openFolderModal() {
+    document.getElementById('folder-name').value = '';
+    document.getElementById('folder-modal').classList.remove('hidden');
+    setTimeout(() => document.getElementById('folder-name').focus(), 100);
+}
+function closeFolderModal() {
+    document.getElementById('folder-modal').classList.add('hidden');
+}
+
+async function confirmNewFolder() {
+    const name = document.getElementById('folder-name').value.trim();
+    if (!name) { showToast('Klasör adı boş olamaz', 'error'); return; }
+
+    try {
+        const res = await fetch('/api/sunucu/klasor-olustur', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path: currentPath, name })
+        });
+        const data = await res.json();
+        if (data.error) { showToast(data.error, 'error'); return; }
+        showToast(`Klasör oluşturuldu: ${name}`, 'success');
+        closeFolderModal();
+        await loadFiles(currentPath);
+    } catch (err) {
+        showToast('Hata: ' + err.message, 'error');
+    }
+}
+
+// ── Yardımcı ──────────────────────────────────────────────────────────────
+// ── Google Drive ─────────────────────────────────────────────────────────────
+
+let _gdriveStack = [];        // [{folder_id, folder_name}] — geri tuşu için
+let _gdriveNextToken = '';    // sayfalama
+let _gdriveCurFolder = 'root';
+
+async function openGdriveModal() {
+    _gdriveStack = [];
+    _gdriveNextToken = '';
+    _gdriveCurFolder = 'root';
+    document.getElementById('gdrive-back-btn').classList.add('hidden');
+    document.getElementById('gdrive-breadcrumb').innerHTML = '';
+    document.getElementById('gdrive-modal').classList.remove('hidden');
+    await _gdriveLoad('root', false);
+}
+
+function closeGdriveModal() {
+    document.getElementById('gdrive-modal').classList.add('hidden');
+}
+
+async function _gdriveLoad(folderId, append = false) {
+    const statusEl = document.getElementById('gdrive-status');
+    const errorEl  = document.getElementById('gdrive-error');
+    const listEl   = document.getElementById('gdrive-list');
+    const nextWrap = document.getElementById('gdrive-next-wrap');
+
+    errorEl.classList.add('hidden');
+    statusEl.classList.remove('hidden');
+    document.getElementById('gdrive-status-text').textContent = 'Yükleniyor...';
+    if (!append) {
+        listEl.innerHTML = '';
+        nextWrap.classList.add('hidden');
+    }
+
+    const params = new URLSearchParams({ folder_id: folderId });
+    if (append && _gdriveNextToken) params.set('page_token', _gdriveNextToken);
+
+    try {
+        const res  = await fetch('/api/sunucu/gdrive-listele?' + params);
+        const data = await res.json();
+        statusEl.classList.add('hidden');
+
+        if (data.error) {
+            document.getElementById('gdrive-error-text').textContent = data.error;
+            errorEl.classList.remove('hidden');
+            return;
+        }
+
+        _gdriveCurFolder = folderId;
+        _gdriveNextToken = data.next_page_token || '';
+        document.getElementById('gdrive-folder-name').textContent = data.folder_name || 'Google Drive';
+
+        // Geri butonu
+        document.getElementById('gdrive-back-btn').classList.toggle('hidden', _gdriveStack.length === 0);
+
+        // Breadcrumb
+        _gdriveRenderBreadcrumb(data.folder_name);
+
+        // Liste
+        const items = data.items || [];
+        if (!append && items.length === 0) {
+            listEl.innerHTML = '<div class="py-8 text-center theme-text-secondary text-sm"><i class="fas fa-folder-open text-2xl mb-2 block"></i>Bu klasör boş</div>';
+        }
+        for (const it of items) {
+            listEl.appendChild(_gdriveRenderItem(it));
+        }
+
+        nextWrap.classList.toggle('hidden', !_gdriveNextToken);
+
+    } catch (e) {
+        statusEl.classList.add('hidden');
+        document.getElementById('gdrive-error-text').textContent = 'Sunucu hatası: ' + e.message;
+        errorEl.classList.remove('hidden');
+    }
+}
+
+function _gdriveRenderBreadcrumb(folderName) {
+    const el = document.getElementById('gdrive-breadcrumb');
+    const parts = [{ name: '📂 Kök', id: 'root' }, ..._gdriveStack, { name: folderName, id: _gdriveCurFolder }];
+    el.innerHTML = parts.map((p, i) => {
+        if (i === parts.length - 1)
+            return `<span class="font-semibold text-text">${escHtml(p.name)}</span>`;
+        return `<button onclick="gdriveCrumbNav(${i})" class="hover:text-primary transition">${escHtml(p.name)}</button><i class="fas fa-chevron-right text-[10px] mx-1 opacity-40"></i>`;
+    }).join('');
+}
+
+async function gdriveCrumbNav(idx) {
+    const parts = [{ name: 'Kök', id: 'root' }, ..._gdriveStack];
+    const target = parts[idx];
+    _gdriveStack = _gdriveStack.slice(0, idx);          // stack'i kırp
+    _gdriveNextToken = '';
+    await _gdriveLoad(target.id, false);
+}
+
+function _gdriveRenderItem(it) {
+    const isFolder = it.mimeType === 'application/vnd.google-apps.folder';
+    const div = document.createElement('div');
+    div.className = 'flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/5 transition cursor-pointer group';
+
+    const size = it.size ? _gdriveHumanSize(parseInt(it.size)) : '';
+
+    div.innerHTML = isFolder
+        ? `<i class="fas fa-folder text-yellow-400 w-5 text-center flex-shrink-0"></i>
+           <span class="flex-1 text-sm truncate">${escHtml(it.name)}</span>
+           <i class="fas fa-chevron-right text-xs opacity-30 group-hover:opacity-70 transition flex-shrink-0"></i>`
+        : `<i class="fas fa-film text-primary w-5 text-center flex-shrink-0"></i>
+           <span class="flex-1 text-sm truncate">${escHtml(it.name)}</span>
+           <span class="text-xs theme-text-secondary flex-shrink-0 mr-2">${size}</span>
+           <button onclick="event.stopPropagation(); gdriveAddFile('${escHtml(it.id)}','${escHtml(it.name.replace(/'/g,"\\\'"))}','${size}')"
+               class="flex-shrink-0 px-3 py-1 bg-primary text-white rounded-lg text-xs hover:opacity-90 transition font-medium">
+               Ekle
+           </button>`;
+
+    if (isFolder) {
+        div.onclick = async () => {
+            _gdriveStack.push({ name: document.getElementById('gdrive-folder-name').textContent, id: _gdriveCurFolder });
+            _gdriveNextToken = '';
+            await _gdriveLoad(it.id, false);
+        };
+    }
+    return div;
+}
+
+async function gdriveNextPage() {
+    await _gdriveLoad(_gdriveCurFolder, true);
+}
+
+async function gdriveGoBack() {
+    if (_gdriveStack.length === 0) return;
+    const prev = _gdriveStack.pop();
+    _gdriveNextToken = '';
+    await _gdriveLoad(prev.id, false);
+}
+
+// Pending gdrive ekleme bilgisi (metadata onayı için saklanır)
+let _pendingGdriveFile = null;
+
+async function gdriveAddFile(fileId, fileName, size) {
+    const statusEl = document.getElementById('gdrive-status');
+    const errorEl  = document.getElementById('gdrive-error');
+
+    statusEl.classList.remove('hidden');
+    document.getElementById('gdrive-status-text').textContent = `"${fileName}" için metadata sorgulanıyor...`;
+    errorEl.classList.add('hidden');
+
+    // Butonu devre dışı bırak
+    const addBtns = document.querySelectorAll(`[onclick*="${fileId}"]`);
+    addBtns.forEach(b => { b.disabled = true; b.style.opacity = '0.5'; });
+
+    try {
+        const res = await fetch('/api/sunucu/gdrive-meta-sorgu', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ file_id: fileId, file_name: fileName, size })
+        });
+        const data = await res.json();
+        statusEl.classList.add('hidden');
+
+        if (data.error) {
+            document.getElementById('gdrive-error-text').textContent = data.error;
+            errorEl.classList.remove('hidden');
+            addBtns.forEach(b => { b.disabled = false; b.style.opacity = ''; });
+            return;
+        }
+
+        // Metadata bulundu — onay sayfasını aç (sunucu dosyaları ile aynı akış)
+        _pendingGdriveFile = { file_id: fileId, file_name: fileName, size };
+        closeGdriveModal();
+        openGdriveMetaReview(data);
+
+    } catch (e) {
+        statusEl.classList.add('hidden');
+        document.getElementById('gdrive-error-text').textContent = 'Sunucu hatası: ' + e.message;
+        errorEl.classList.remove('hidden');
+        addBtns.forEach(b => { b.disabled = false; b.style.opacity = ''; });
+    }
+}
+
+// Drive'a özel metadata onay sayfası (sunucu dosyaları ile aynı overlay, farklı kaydetme)
+function openGdriveMetaReview(data) {
+    const gf = _pendingGdriveFile;
+    // Genel meta-review overlay'ini kullan ama kaydet butonunu override et
+    openMetaReview({
+        ...data,
+        path: '__gdrive__',      // özel işaret
+        filename: data.filename || gf?.file_name || '',
+    });
+
+    // file_id ve file_name'i hidden input'lara göm (sayfa yenileme/null koruması)
+    let hiddenFileId = document.getElementById('mr-gdrive-file-id');
+    if (!hiddenFileId) {
+        hiddenFileId = document.createElement('input');
+        hiddenFileId.type = 'hidden';
+        hiddenFileId.id = 'mr-gdrive-file-id';
+        document.getElementById('meta-review-overlay').appendChild(hiddenFileId);
+    }
+    let hiddenFileName = document.getElementById('mr-gdrive-file-name');
+    if (!hiddenFileName) {
+        hiddenFileName = document.createElement('input');
+        hiddenFileName.type = 'hidden';
+        hiddenFileName.id = 'mr-gdrive-file-name';
+        document.getElementById('meta-review-overlay').appendChild(hiddenFileName);
+    }
+    let hiddenSize = document.getElementById('mr-gdrive-size');
+    if (!hiddenSize) {
+        hiddenSize = document.createElement('input');
+        hiddenSize.type = 'hidden';
+        hiddenSize.id = 'mr-gdrive-size';
+        document.getElementById('meta-review-overlay').appendChild(hiddenSize);
+    }
+    hiddenFileId.value   = gf?.file_id   || data.gdrive_file_id || '';
+    hiddenFileName.value = gf?.file_name || data.filename        || '';
+    hiddenSize.value     = gf?.size      || data.size            || '';
+
+    // Kaydet butonunu override et
+    const saveBtn = document.getElementById('mr-save-btn');
+    saveBtn.onclick = confirmAndSaveGdriveMeta;
+    saveBtn.innerHTML = `<i class="fab fa-google-drive"></i> Drive İçeriğini Kataloğa Ekle`;
+}
+
+async function confirmAndSaveGdriveMeta() {
+    const btn = document.getElementById('mr-save-btn');
+    btn.disabled = true;
+    btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Ekleniyor...`;
+    document.getElementById('mr-success').classList.add('hidden');
+    document.getElementById('mr-error').classList.add('hidden');
+
+    let meta = {};
+    try { meta = JSON.parse(document.getElementById('mr-raw-metadata').value); } catch {}
+    meta.title       = document.getElementById('mr-title').value.trim();
+    meta.title_tr    = document.getElementById('mr-title-tr').value.trim();
+    meta.media_type  = document.getElementById('mr-media-type').value;
+    meta.year        = document.getElementById('mr-year').value;
+    meta.quality     = document.getElementById('mr-quality').value.trim();
+    meta.tmdb_id     = document.getElementById('mr-tmdb-id').value;
+    meta.rating      = document.getElementById('mr-rating').value;
+    meta.description = document.getElementById('mr-description').value.trim();
+    meta.poster      = document.getElementById('mr-poster-url').value.trim();
+
+    // _pendingGdriveFile null ise hidden input'lardan kurtar
+    const gf = _pendingGdriveFile || {
+        file_id:   (document.getElementById('mr-gdrive-file-id')?.value   || ''),
+        file_name: (document.getElementById('mr-gdrive-file-name')?.value || ''),
+        size:      (document.getElementById('mr-gdrive-size')?.value      || ''),
+    };
+    if (!gf.file_id) {
+        document.getElementById('mr-error-msg').textContent = 'Drive dosya bilgisi kayboldu. Lütfen tekrar deneyin.';
+        document.getElementById('mr-error').classList.remove('hidden');
+        btn.disabled = false;
+        btn.innerHTML = `<i class="fab fa-google-drive"></i> Drive İçeriğini Kataloğa Ekle`;
+        return;
+    }
+
+    try {
+        const res = await fetch('/api/sunucu/gdrive-ekle-onay', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                file_id:   gf.file_id,
+                file_name: gf.file_name,
+                size:      gf.size,
+                metadata:  meta,
+            })
+        });
+        const data = await res.json();
+        if (data.error) {
+            document.getElementById('mr-error-msg').textContent = data.error;
+            document.getElementById('mr-error').classList.remove('hidden');
+            btn.disabled = false;
+            btn.innerHTML = `<i class="fab fa-google-drive"></i> Drive İçeriğini Kataloğa Ekle`;
+            return;
+        }
+        const title = data.title_tr || data.title || gf.file_name;
+        document.getElementById('mr-success-msg').textContent = `✓ "${title}" kataloğa eklendi! (DB ID: ${data.db_id || '—'})`;
+        document.getElementById('mr-success').classList.remove('hidden');
+        btn.innerHTML = `<i class="fab fa-check"></i> Eklendi`;
+        showToast(`Drive içeriği eklendi: ${title}`, 'success');
+        _pendingGdriveFile = null;
+        setTimeout(() => { closeMetaReview(); loadGdriveDbList(); }, 2000);
+    } catch (e) {
+        document.getElementById('mr-error-msg').textContent = 'Sunucu hatası: ' + e.message;
+        document.getElementById('mr-error').classList.remove('hidden');
+        btn.disabled = false;
+        btn.innerHTML = `<i class="fab fa-google-drive"></i> Drive İçeriğini Kataloğa Ekle`;
+    }
+}
+
+function _gdriveHumanSize(bytes) {
+    if (!bytes) return '';
+    const units = ['B','KB','MB','GB'];
+    let i = 0;
+    while (bytes >= 1024 && i < units.length - 1) { bytes /= 1024; i++; }
+    return bytes.toFixed(i > 0 ? 1 : 0) + ' ' + units[i];
+}
+
+function escHtml(str) {
+    return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// Modal dışına tıklama ile kapat
+['upload-modal','rename-modal','meta-modal','folder-modal'].forEach(id => {
+    document.getElementById(id).addEventListener('click', function(e) {
+        if (e.target === this) this.classList.add('hidden');
+    });
+});
+
+// ── Google Drive Katalog Listesi (DB'deki Drive içerikleri) ──────────────────
+
+async function runGdriveMigration() {
+    const btn = document.getElementById('gdrive-migrate-btn');
+    if (!confirm(`Stremio DB'deki mevcut Google Drive içerikleri kataloğa aktarılacak.\nBu işlem bir kez çalıştırılması yeterlidir. Devam edilsin mi?`)) return;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin text-xs"></i> Aktarılıyor...';
+    btn.disabled = true;
+    try {
+        const res = await fetch('/api/sunucu/gdrive-migrate', { method: 'POST' });
+        const data = await res.json();
+        if (data.error) { showToast('Hata: ' + data.error, 'error'); }
+        else { showToast(data.message, 'success'); await loadGdriveDbList(); }
+    } catch (e) {
+        showToast('Migration hatası: ' + e.message, 'error');
+    } finally {
+        btn.innerHTML = '<i class="fas fa-database text-xs"></i> Mevcut Kayıtları Aktar';
+        btn.disabled = false;
+    }
+}
+
+async function loadGdriveDbList() {
+    const listEl  = document.getElementById('gdrive-db-list');
+    const emptyEl = document.getElementById('gdrive-db-empty');
+    const icon    = document.getElementById('gdrive-db-refresh-icon');
+    if (icon) icon.classList.add('fa-spin');
+
+    listEl.innerHTML = `<div class="px-5 py-8 text-center theme-text-secondary text-sm"><i class="fas fa-spinner fa-spin text-primary text-xl mb-2 block"></i>Yükleniyor...</div>`;
+    emptyEl.classList.add('hidden');
+
+    try {
+        const res  = await fetch('/api/sunucu/gdrive-db-listele');
+        const data = await res.json();
+
+        if (data.error) {
+            listEl.innerHTML = `<div class="px-5 py-6 text-center text-red-400 text-sm"><i class="fas fa-exclamation-triangle mr-2"></i>${data.error}</div>`;
+            return;
+        }
+
+        const countEl = document.getElementById('gdrive-db-count');
+        if (countEl) countEl.textContent = data.total ? `(${data.total} içerik)` : '';
+
+        const items = data.items || [];
+        if (!items.length) {
+            listEl.innerHTML = '';
+            emptyEl.classList.remove('hidden');
+            return;
+        }
+
+        // Tablo başlığı
+        const header = `<div class="hidden sm:grid grid-cols-12 px-5 py-2 border-b border-white/10 text-xs font-semibold uppercase tracking-wide theme-text-secondary">
+            <div class="col-span-5">Dosya Adı / Başlık</div>
+            <div class="col-span-3 text-center">Eklenme</div>
+            <div class="col-span-2 text-center">Boyut</div>
+            <div class="col-span-2 text-right">İşlem</div>
+        </div>`;
+
+        listEl.innerHTML = header + items.map(it => renderGdriveDbEntry(it)).join('');
+
+    } catch (e) {
+        listEl.innerHTML = `<div class="px-5 py-6 text-center text-red-400 text-sm"><i class="fas fa-exclamation-triangle mr-2"></i>Yükleme hatası: ${e.message}</div>`;
+    } finally {
+        if (icon) icon.classList.remove('fa-spin');
+    }
+}
+
+function renderGdriveDbEntry(it) {
+    const addedDate = it.added_at
+        ? new Date(it.added_at * 1000).toLocaleString('tr-TR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' })
+        : '—';
+
+    const displayName = it.file_name || it.title || '—';
+    const titleLine   = it.title && it.title !== it.file_name
+        ? `<div class="text-xs theme-text-secondary truncate">${escHtml(it.title)}</div>` : '';
+
+    const driveId = it.gdrive_file_id || '';
+    const driveLink = driveId
+        ? `<a href="https://drive.google.com/file/d/${encodeURIComponent(driveId)}/view" target="_blank"
+              class="flex items-center gap-1 mt-0.5 hover:underline"
+              title="${escHtml(driveId)}">
+              <i class="fab fa-google-drive text-green-400 text-xs"></i>
+              <span class="text-xs theme-text-secondary truncate max-w-[140px]">${escHtml(driveId.slice(0,16))}…</span>
+           </a>`
+        : '';
+
+    return `<div class="grid grid-cols-12 items-center px-5 py-3 hover:bg-white/5 transition-colors">
+        <div class="col-span-8 sm:col-span-5 flex items-center gap-3 min-w-0">
+            <div class="w-8 h-8 rounded bg-green-500/10 border border-green-500/20 flex items-center justify-center flex-shrink-0">
+                <i class="fab fa-google-drive text-green-400 text-sm"></i>
+            </div>
+            <div class="min-w-0">
+                <div class="text-sm font-medium truncate" title="${escHtml(displayName)}">${escHtml(displayName)}</div>
+                ${titleLine}
+                ${driveLink}
+            </div>
+        </div>
+        <div class="hidden sm:flex col-span-3 justify-center">
+            <span class="text-xs theme-text-secondary">${addedDate}</span>
+        </div>
+        <div class="hidden sm:flex col-span-2 justify-center">
+            <span class="text-xs theme-text-secondary">${escHtml(it.size || '—')}</span>
+        </div>
+        <div class="col-span-4 sm:col-span-2 flex items-center justify-end gap-1">
+            <button onclick="deleteGdriveDbEntry('${escHtml(it.doc_id)}', '${escHtml(displayName)}')"
+                title="Katalogdan Kaldır"
+                class="p-1.5 rounded-lg text-red-400 hover:bg-red-400/10 transition-colors">
+                <i class="fas fa-trash text-sm"></i>
+            </button>
+        </div>
+    </div>`;
+}
+
+async function deleteGdriveDbEntry(docId, title) {
+    if (!confirm(`"${title}" içeriğini katalogdan kaldırmak istediğinizden emin misiniz?\n\nBu işlem Drive dosyasını silmez, yalnızca Stremio kataloğundan kaldırır.`)) return;
+    try {
+        const res = await fetch('/api/sunucu/gdrive-db-sil', {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ doc_id: docId })
+        });
+        let data;
+        try {
+            data = await res.json();
+        } catch {
+            showToast(`Silme hatası: Sunucu geçersiz yanıt döndürdü (HTTP ${res.status})`, 'error');
+            return;
+        }
+        if (!res.ok || data.error) { showToast(data.error || 'Silme işlemi başarısız.', 'error'); return; }
+        showToast(`"${title}" katalogdan kaldırıldı.`, 'success');
+        await loadGdriveDbList();
+    } catch (e) {
+        showToast('Silme hatası: ' + e.message, 'error');
+    }
+}
+
+// İlk yükleme
+navigate('');
+loadSistemDurumu();
+loadGdriveDbList();
+// Her 30 saniyede sistem durumunu güncelle
+setInterval(loadSistemDurumu, 30000);
+</script>
+{% endblock %}

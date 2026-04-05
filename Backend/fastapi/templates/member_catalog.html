@@ -1,0 +1,2017 @@
+<!DOCTYPE html>
+<html lang="{{ lang }}">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title id="page-title">{{ app_name }}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"/>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/flag-icons/7.2.3/css/flag-icons.min.css" crossorigin="anonymous"/>
+  <style>
+    :root{--c-bg:#0a0a0f;--c-card:#13131a;--c-text:#e2e2f0;--c-text2:#8b8ba8;--c-prim:#6366f1;--c-border:#2d2d3d}
+    body{background:var(--c-bg);color:var(--c-text);font-family:system-ui,sans-serif;transition:background .3s,color .3s}
+    .tc{background:var(--c-card)}.ts{color:var(--c-text2)}
+    .input-field{background:var(--c-card);color:var(--c-text);border:1px solid var(--c-border)}
+    .input-field:focus{border-color:var(--c-prim);outline:none}
+    .btn-prim{background:var(--c-prim);color:#fff}.btn-prim:hover{opacity:.85}
+    .btn-outline{background:transparent;border:1px solid var(--c-border);color:var(--c-text2)}
+    .btn-outline:hover{border-color:var(--c-prim);color:var(--c-text)}
+    .media-card{cursor:pointer;transition:transform .2s,box-shadow .2s;border:1px solid var(--c-border);border-radius:.75rem;overflow:hidden}
+    .media-card:hover{transform:translateY(-4px) scale(1.02);box-shadow:0 12px 32px rgba(0,0,0,.6);border-color:var(--c-prim)}
+    .media-card-wrap{position:relative}
+    .poster-wrap{aspect-ratio:2/3;overflow:hidden;background:#0d0d14;position:relative}
+    .poster-wrap img{object-fit:cover;width:100%;height:100%}
+    .lang-overlay{position:absolute;top:4px;left:4px;z-index:5;display:flex;flex-direction:column;gap:2px;pointer-events:none}
+    .res-badge{position:absolute;bottom:5px;right:5px;z-index:5;font-size:.6rem;font-weight:700;letter-spacing:.03em;padding:2px 5px;border-radius:3px;line-height:1.3;pointer-events:none;text-transform:uppercase}
+    .res-multi-wrap{position:absolute;bottom:4px;right:4px;z-index:5;display:flex;flex-direction:column;align-items:flex-end;gap:2px;pointer-events:none}
+    .res-multi-wrap .res-badge{position:static;display:inline-block}
+    .tv-res-overlay{position:absolute;bottom:5px;right:5px;z-index:5;pointer-events:none}
+    .tv-flag-overlay{position:absolute;top:4px;left:4px;z-index:5;display:flex;flex-direction:column;gap:2px;pointer-events:none}
+    .res-4k  {background:#a855f7;color:#fff}
+    .res-1080 {background:#3b82f6;color:#fff}
+    .res-720  {background:#22c55e;color:#fff}
+    .res-480  {background:#f59e0b;color:#000}
+    .res-sd   {background:#6b7280;color:#fff}
+    .lang-flag{display:block;width:1.4em;height:1.05em;border-radius:2px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.9);flex-shrink:0;transform:translateZ(0);isolation:isolate;-webkit-transform:translateZ(0);image-rendering:auto}
+    /* Tüm bayrak ikonlarında renk bozulmasını önle (dark-mode filtresi, mix-blend-mode vb.) */
+    .fi{color-scheme:light !important;forced-color-adjust:none !important;-webkit-forced-color-adjust:none !important;mix-blend-mode:normal !important;filter:none !important;-webkit-filter:none !important}
+    /* Türk Bayrağı — SVG data URI, tema/dark-mode'dan etkilenmez */
+    .css-flag-tr{display:inline-block;width:1.4em;height:1.05em;border-radius:2px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.9);flex-shrink:0;transform:translateZ(0);isolation:isolate;vertical-align:middle;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 20'%3E%3Crect width='30' height='20' fill='%23E30A17'/%3E%3Ccircle cx='11.5' cy='10' r='5' fill='%23fff'/%3E%3Ccircle cx='13' cy='10' r='4' fill='%23E30A17'/%3E%3Cpolygon points='19,12.1 16.5,13.6 17.2,10.8 15,9.1 17.9,9.1 19,6.4 20.1,9.1 23,9.1 20.8,10.8 21.5,13.6' fill='%23fff'/%3E%3C/svg%3E");background-size:100% 100%;background-repeat:no-repeat;background-color:#E30A17}
+    /* Yatay scroll satırı */
+    .scroll-row-wrap{overflow-x:hidden;overflow-y:visible}
+    .scroll-row{display:flex;gap:.75rem;overflow-x:auto;overflow-y:visible;scroll-behavior:smooth;padding-bottom:8px;-ms-overflow-style:none;scrollbar-width:none}
+    .scroll-row::-webkit-scrollbar{display:none}
+    .scroll-row .media-card{flex:0 0 130px;width:130px}
+    @media(min-width:640px){.scroll-row .media-card{flex:0 0 150px;width:150px}}
+    @media(min-width:1024px){.scroll-row .media-card{flex:0 0 160px;width:160px}}
+    .scroll-btn{position:absolute;top:50%;transform:translateY(-60%);z-index:10;background:rgba(0,0,0,.7);border:1px solid var(--c-border);color:#fff;width:32px;height:48px;border-radius:8px;font-size:1.4rem;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .2s,opacity .2s;padding:0}
+    .scroll-btn:hover{background:var(--c-prim);border-color:var(--c-prim)}
+    .scroll-btn-l{left:0}
+    .scroll-btn-r{right:0}
+    .modal-box{max-height:90vh;overflow-y:hidden;border-radius:1rem;border:1px solid var(--c-border)}
+    .theme-dot{width:18px;height:18px;border-radius:50%;border:2px solid transparent;cursor:pointer;flex-shrink:0;transition:transform .2s,border-color .2s}
+    .theme-dot:hover{transform:scale(1.3)}.theme-dot.active{border-color:var(--c-text);transform:scale(1.2)}
+    .lbar-bg{background:var(--c-border);border-radius:9999px;height:5px}
+    .lbar-fill{height:5px;border-radius:9999px;transition:width .5s}
+    @keyframes spin{to{transform:rotate(360deg)}}.spinner{animation:spin .8s linear infinite}
+    .chip{display:inline-flex;align-items:center;gap:4px;font-size:.7rem;padding:2px 8px;border-radius:9999px;border:1px solid var(--c-border)}
+    .chip-genre{border-color:rgba(99,102,241,.4);color:var(--c-prim)}
+    .chip-year{border-color:rgba(245,158,11,.4);color:#f59e0b}
+    .chip-rating{color:#facc15}
+    .cc-badge{display:inline-flex;align-items:center;justify-content:center;font-size:.55rem;font-weight:800;letter-spacing:.04em;padding:1px 4px;border-radius:3px;background:#facc15;color:#000;line-height:1.3;pointer-events:none;text-transform:uppercase;vertical-align:middle;box-shadow:0 1px 3px rgba(0,0,0,.5)} 
+    .cc-flag{display:flex;align-items:center;justify-content:center;width:2.2em;height:1.7em;border-radius:3px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.9);flex-shrink:0;background:#facc15;color:#000;font-size:10px;font-weight:900;letter-spacing:.04em;text-transform:uppercase;pointer-events:none;line-height:1}
+    ::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-thumb{background:var(--c-border);border-radius:3px}
+
+    /* ── HOVER PREVIEW CARD ── */
+    .media-card-wrap{position:relative}
+    .hover-preview{
+      position:absolute;left:50%;top:0;
+      transform:translateX(-50%) translateY(-8px) scale(0.92);
+      width:220px;z-index:200;
+      background:var(--c-card);border:1px solid var(--c-border);
+      border-radius:.85rem;box-shadow:0 20px 60px rgba(0,0,0,.85);
+      padding:.9rem;pointer-events:none;
+      opacity:0;transition:opacity .18s ease,transform .18s ease;
+    }
+    .hover-preview.hp-above{top:auto;bottom:0}
+    .media-card-wrap:hover .hover-preview{
+      opacity:1;transform:translateX(-50%) translateY(-12px) scale(1);
+      pointer-events:auto;
+    }
+    /* sağ kenarda taşmasin */
+    .media-card-wrap.hp-right .hover-preview{left:auto;right:0;transform:translateY(-8px) scale(.92)}
+    .media-card-wrap.hp-right:hover .hover-preview{transform:translateY(-12px) scale(1)}
+    .media-card-wrap.hp-left .hover-preview{left:0;transform:translateY(-8px) scale(.92)}
+    .media-card-wrap.hp-left:hover .hover-preview{transform:translateY(-12px) scale(1)}
+    .hp-title{font-size:.78rem;font-weight:700;line-height:1.25;margin-bottom:.4rem;color:var(--c-text)}
+    .hp-meta{display:flex;align-items:center;gap:.4rem;flex-wrap:wrap;margin-bottom:.45rem}
+    .hp-imdb{display:inline-flex;align-items:center;gap:.25rem;font-size:.7rem;font-weight:700;color:#facc15}
+    .hp-year{font-size:.68rem;color:var(--c-text2)}
+    .hp-desc{font-size:.68rem;color:var(--c-text2);line-height:1.45;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;margin-bottom:.55rem}
+    .hp-trailer-btn{display:flex;align-items:center;justify-content:center;gap:.4rem;width:100%;padding:.38rem .5rem;border-radius:.5rem;background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.4);color:#f87171;font-size:.7rem;font-weight:700;cursor:pointer;transition:background .15s,border-color .15s}
+    .hp-trailer-btn:hover{background:rgba(239,68,68,.3);border-color:#f87171}
+    .hp-trailer-btn i{font-size:.85rem}
+
+    /* ── TRAILER MODAL ── */
+    #trailer-overlay{position:fixed;inset:0;z-index:80;background:rgba(0,0,0,.88);display:none;align-items:center;justify-content:center;padding:1rem}
+    .trailer-box{width:100%;max-width:800px;border-radius:1rem;overflow:hidden;border:1px solid var(--c-border);background:#000;position:relative}
+    .trailer-header{display:flex;align-items:center;justify-content:space-between;padding:.65rem 1rem;background:var(--c-card);border-bottom:1px solid var(--c-border)}
+    .trailer-header span{font-size:.85rem;font-weight:700;color:var(--c-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:80%}
+    .trailer-close{color:var(--c-text2);font-size:1.25rem;cursor:pointer;line-height:1;background:none;border:none;padding:.2rem .4rem;border-radius:.4rem;transition:color .15s,background .15s}
+    .trailer-close:hover{color:#fff;background:rgba(255,255,255,.1)}
+    .trailer-embed{position:relative;padding-top:56.25%;background:#000}
+    .trailer-embed iframe{position:absolute;inset:0;width:100%;height:100%;border:none}
+    .trailer-loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#000}
+    .trailer-no-video{padding:2.5rem;text-align:center;color:var(--c-text2);font-size:.85rem}
+  </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+<!-- NAVBAR -->
+<nav class="tc border-b sticky top-0 z-30 shadow-lg" style="border-color:var(--c-border)">
+  <div class="max-w-7xl mx-auto px-3 py-2 flex items-center gap-2 min-h-[52px] overflow-hidden">
+
+    <!-- SOL: Logo + Badge (badge logo ile bitisik, gap-2) -->
+    <div class="flex items-center gap-2 shrink-0 min-w-0" style="max-width:40%;">
+      <a href="/uye/katalog" class="font-extrabold tracking-tight hover:opacity-80 transition shrink-0 truncate" style="color:var(--c-prim);text-decoration:none;font-size:clamp(.8rem,2.5vw,1.125rem);">{{ app_name }}</a>
+      <!-- Gunluk kalan badge — hem pc hem mobilde gorunur -->
+      <span id="navbar-daily-rem" class="text-xs font-semibold px-2 py-0.5 rounded-full shrink-0"
+            style="color:var(--c-prim);background:color-mix(in srgb,var(--c-prim) 12%,transparent);border:1px solid color-mix(in srgb,var(--c-prim) 30%,transparent)">…</span>
+    </div>
+
+    <!-- SPACER -->
+    <div class="flex-1"></div>
+
+    <!-- PC ORTA: Film / Dizi / Toplam — sadece md+ -->
+    <div class="hidden md:flex items-center gap-2.5 text-xs ts mr-1">
+      <span class="flex items-center gap-1"><i class="fas fa-film" style="color:var(--c-prim)"></i><span id="t-nav-film">Film</span>: <span id="db-movies-gb" class="font-medium" style="color:var(--c-text)">…</span></span>
+      <span class="flex items-center gap-1"><i class="fas fa-tv" style="color:#a78bfa"></i><span id="t-nav-dizi">Dizi</span>: <span id="db-tv-gb" class="font-medium" style="color:var(--c-text)">…</span></span>
+      <span class="flex items-center gap-1 font-semibold"><i class="fas fa-database" style="color:#f59e0b"></i><span id="t-nav-toplam">Toplam</span>: <span id="db-total-gb" style="color:#f59e0b">…</span></span>
+    </div>
+
+    <!-- SAG GRUP: tema (pc) | kullanici (pc) | bayrak (pc) | dil | cikis -->
+    <div class="flex items-center gap-1.5">
+
+      <!-- Tema secici — sadece md+ -->
+      <div class="hidden md:flex items-center gap-1 px-2 py-1 rounded-full" style="background:var(--c-bg);border:1px solid var(--c-border)">
+        <i class="fas fa-palette ts" style="font-size:.6rem"></i>
+        <div id="theme-dots" class="flex gap-1 items-center"></div>
+      </div>
+
+      <!-- Kullanici ikonu + isim — her ekranda gorunur -->
+      <button onclick="openProfileModal()"
+              class="flex items-center gap-1 hover:opacity-80 transition cursor-pointer text-xs ts"
+              style="background:none;border:none;padding:0">
+        <i class="fas fa-user-circle" style="font-size:1rem;color:var(--c-prim)"></i>
+        <span class="max-w-[60px] truncate" style="color:var(--c-text)">{{ member_name }}</span>
+      </button>
+
+      <!-- Baglanti konumu bayragi — sadece md+ -->
+      {% if country_flag %}
+      <span class="hidden md:inline" style="font-size:1rem;line-height:1;cursor:default" title="Bağlantı konumu">{{ country_flag }}</span>
+      {% endif %}
+
+      <!-- Dil (her zaman gorunur, sagda) -->
+      <select id="lang-select" onchange="setLang(this.value)"
+              class="input-field rounded-lg px-1.5 py-1 text-xs cursor-pointer"
+              style="min-width:4rem">
+        <option value="tr" {% if lang=='tr' %}selected{% endif %}>🇹🇷 TR</option>
+        <option value="en" {% if lang=='en' %}selected{% endif %}>🇬🇧 EN</option>
+        <option value="de" {% if lang=='de' %}selected{% endif %}>🇩🇪 DE</option>
+      </select>
+
+      <!-- Abonelik bitis navbar ikonu kaldirildi -->
+
+      <!-- Cikis (her zaman gorunur, sagda) -->
+      <a href="/uye/cikis"
+         class="flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-lg transition"
+         style="background:rgba(239,68,68,.15);color:#f87171;border:1px solid rgba(239,68,68,.3)"
+         onmouseover="this.style.background='rgba(239,68,68,.3)'"
+         onmouseout="this.style.background='rgba(239,68,68,.15)'">
+        <i class="fas fa-power-off"></i>
+        <span id="t-logout">Çıkış</span>
+      </a>
+
+    </div>
+  </div>
+
+  <!-- Mobil: Film/Dizi/Toplam alt satir — ortada, md altinda -->
+  <div class="md:hidden flex items-center justify-center gap-3 px-3 pb-2 text-xs ts border-t" style="border-color:var(--c-border);padding-top:.35rem">
+    <span class="flex items-center gap-1"><i class="fas fa-film" style="color:var(--c-prim)"></i><span id="t-nav-film-m">Film</span>: <span id="db-movies-gb-m" class="font-medium" style="color:var(--c-text)">…</span></span>
+    <span class="flex items-center gap-1"><i class="fas fa-tv" style="color:#a78bfa"></i><span id="t-nav-dizi-m">Dizi</span>: <span id="db-tv-gb-m" class="font-medium" style="color:var(--c-text)">…</span></span>
+    <span class="flex items-center gap-1 font-semibold"><i class="fas fa-database" style="color:#f59e0b"></i><span id="db-total-gb-m" style="color:#f59e0b">…</span></span>
+  </div>
+</nav>
+
+<!-- KULLANIM ÇUBUĞU -->
+<div class="tc border-b py-3 px-4" style="border-color:var(--c-border)">
+  <div class="max-w-7xl mx-auto grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-4 text-sm">
+    <div>
+      <div class="flex justify-between mb-1"><span class="ts text-xs" id="t-daily-lbl">Günlük</span><span id="usage-daily-text" class="text-xs font-medium">…</span></div>
+      <div class="lbar-bg"><div id="bar-daily" class="lbar-fill" style="background:var(--c-prim);width:0%"></div></div>
+    </div>
+    <div>
+      <div class="flex justify-between mb-1"><span class="ts text-xs" id="t-monthly-lbl">Aylık</span><span id="usage-monthly-text" class="text-xs font-medium">…</span></div>
+      <div class="lbar-bg"><div id="bar-monthly" class="lbar-fill" style="background:#f59e0b;width:0%"></div></div>
+    </div>
+    <div class="flex flex-col justify-center">
+      <div class="flex items-center gap-1">
+        <span class="ts text-xs" id="t-daily-rem-lbl">Günlük Kalan</span>
+        <span id="daily-reset-badge" class="text-xs ts" style="display:none;font-size:.6rem;opacity:.7">(<span id="daily-reset-str">…</span> sonra sıfır)</span>
+      </div>
+      <span id="usage-daily-rem" class="text-base font-bold" style="color:var(--c-prim)">…</span>
+    </div>
+    <div class="flex flex-col justify-center">
+      <span class="ts text-xs" id="t-monthly-rem-lbl">Aylık Kalan</span>
+      <span id="usage-monthly-rem" class="text-base font-bold text-yellow-400">…</span>
+    </div>
+    {% if subscription_end %}
+    <div class="flex flex-col justify-center">
+      <span class="ts text-xs" id="t-sub-end-lbl">Abonelik Bitiş</span>
+      <span class="text-base font-bold" style="color:#f59e0b">
+        <i class="fas fa-calendar-alt mr-1" style="font-size:.75rem"></i><span id="sub-end-days2">…</span>
+      </span>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- FİLTRELER + ARAMA -->
+<div class="max-w-7xl mx-auto w-full px-4 pt-5 pb-2">
+  <div class="flex items-center gap-2 flex-wrap">
+    <button onclick="setType('movie')" id="btn-movie" class="btn-prim px-4 py-2 rounded-lg text-sm font-medium transition">
+      <i class="fas fa-film mr-1"></i><span id="t-movies">Filmler</span>
+    </button>
+    <button onclick="setType('tv')" id="btn-tv" class="btn-outline px-4 py-2 rounded-lg text-sm font-medium transition">
+      <i class="fas fa-tv mr-1"></i><span id="t-series">Diziler</span>
+    </button>
+    <!-- Platform sekmeleri -->
+    <div id="platform-tabs" class="flex gap-1.5 flex-wrap items-center">
+      <button onclick="setPlatform('')"   id="plt-all"     class="plt-btn active px-3 py-1.5 rounded-lg text-xs font-medium transition btn-prim">Tümü</button>
+      <button onclick="setPlatform('netflix')" id="plt-netflix" class="plt-btn px-3 py-1.5 rounded-lg text-xs font-medium transition btn-outline" style="--plt:#e50914">
+        <span style="color:#e50914;font-weight:700">N</span> Netflix
+      </button>
+      <button onclick="setPlatform('amazon')" id="plt-amazon" class="plt-btn px-3 py-1.5 rounded-lg text-xs font-medium transition btn-outline" style="--plt:#00a8e1">
+        <span style="color:#00a8e1;font-weight:700">P</span> Prime
+      </button>
+      <button onclick="setPlatform('disney')" id="plt-disney" class="plt-btn px-3 py-1.5 rounded-lg text-xs font-medium transition btn-outline" style="--plt:#113ccf">
+        <span style="color:#113ccf;font-weight:700">Disney+</span>
+      </button>
+      <button onclick="setPlatform('hbo')" id="plt-hbo" class="plt-btn px-3 py-1.5 rounded-lg text-xs font-medium transition btn-outline" style="--plt:#a855f7">
+        <span style="color:#a855f7;font-weight:700">MAX</span>
+      </button>
+      <button onclick="setPlatform('apple')" id="plt-apple" class="plt-btn px-3 py-1.5 rounded-lg text-xs font-medium transition btn-outline" style="--plt:#aaaaaa">
+        <span style="color:#aaaaaa;font-weight:700">Apple TV</span>
+      </button>
+      <button onclick="setPlatform('exxen')" id="plt-exxen" class="plt-btn px-3 py-1.5 rounded-lg text-xs font-medium transition btn-outline" style="--plt:#ff5a1f">
+        <span style="color:#ff5a1f;font-weight:700">E</span> EXXEN
+      </button>
+      <button onclick="setPlatform('bein')" id="plt-bein" class="plt-btn px-3 py-1.5 rounded-lg text-xs font-medium transition btn-outline" style="--plt:#f5a623">
+        <span style="color:#f5a623;font-weight:700">TOD</span>
+      </button>
+      <button onclick="setPlatform('gain')" id="plt-gain" class="plt-btn px-3 py-1.5 rounded-lg text-xs font-medium transition btn-outline" style="--plt:#ff4500">
+        <span style="color:#ff4500;font-weight:700">G</span> Gain
+      </button>
+      <button onclick="setPlatform('tabii')" id="plt-tabii" class="plt-btn px-3 py-1.5 rounded-lg text-xs font-medium transition btn-outline" style="--plt:#c0392b">
+        <span style="color:#c0392b;font-weight:700">T</span> Tabii
+      </button>
+      <button onclick="setPlatform('tvplus')" id="plt-tvplus" class="plt-btn px-3 py-1.5 rounded-lg text-xs font-medium transition btn-outline" style="--plt:#0066cc">
+        <span style="color:#0066cc;font-weight:700">TV+</span>
+      </button>
+    </div>
+    <button onclick="toggleFilters()" id="btn-filter" class="btn-outline px-3 py-2 rounded-lg text-sm transition flex items-center gap-1.5">
+      <i class="fas fa-sliders-h"></i><span id="t-filter">Filtrele</span>
+      <span id="filter-badge" class="hidden text-xs btn-prim px-1.5 rounded-full leading-tight">0</span>
+    </button>
+    <select id="sort-select" onchange="onSortChange()" class="input-field rounded-lg px-3 py-2 text-sm cursor-pointer">
+      <option value="newest" id="so-newest">⬇ Yeni Eklenenler</option>
+      <option value="rating_desc" id="so-rating-desc">⭐ IMDB Yüksek → Düşük</option>
+      <option value="rating_asc" id="so-rating-asc">⭐ IMDB Düşük → Yüksek</option>
+      <option value="year_desc" id="so-year-desc">📅 Yıl Yeni → Eski</option>
+      <option value="year_asc" id="so-year-asc">📅 Yıl Eski → Yeni</option>
+      <option value="az" id="so-az">🔤 A → Z</option>
+      <option value="za" id="so-za">🔤 Z → A</option>
+      <option value="collection" id="so-collection">🎬 Seri Filmler</option>
+      <option value="yerli_film" id="so-yerli-film">🇹🇷 Yerli Filmler</option>
+      <option value="yerli_dizi" id="so-yerli-dizi">🇹🇷 Yerli Diziler</option>
+    </select>
+    <div class="flex-1 min-w-[220px] flex gap-2 ml-auto flex-wrap">
+      <div class="flex flex-1 gap-1 min-w-[180px]">
+        <button id="search-mode-btn" onclick="toggleSearchMode()" class="btn-outline px-2.5 py-2 rounded-lg text-xs transition shrink-0" title="Arama modunu değiştir">
+          <i class="fas fa-film" id="search-mode-icon"></i>
+        </button>
+        <input type="text" id="search-input" placeholder="Film veya dizi ara…" oninput="debouncedSearch()" class="input-field flex-1 rounded-lg px-3 py-2 text-sm">
+        <button onclick="clearSearch()" class="btn-outline px-3 py-2 rounded-lg text-sm transition"><i class="fas fa-times"></i></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Filtre Paneli -->
+  <div id="filter-panel" class="hidden mt-3 p-4 tc rounded-xl" style="border:1px solid var(--c-border)">
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
+      <div>
+        <label class="block ts text-xs mb-1.5" id="t-fl-genre">Türe Göre</label>
+        <select id="filter-genre" onchange="applyFilters()" class="input-field w-full rounded-lg px-3 py-2 text-sm cursor-pointer">
+          <option value="">Tüm Türler</option>
+          <option>Aksiyon</option><option>Dram</option><option>Komedi</option>
+          <option>Korku</option><option>Gerilim</option><option>Bilim-Kurgu</option>
+          <option>Bilim Kurgu &amp; Fantazi</option><option>Romantik</option>
+          <option>Macera</option><option>Suç</option><option>Fantastik</option>
+          <option>Aile</option><option>Animasyon</option><option>Belgesel</option>
+          <option>Müzik</option><option>Vahşi Batı</option>
+        </select>
+      </div>
+      <div>
+        <label class="block ts text-xs mb-1.5" id="t-fl-platform">Platforma Göre</label>
+        <select id="filter-platform" onchange="applyFilters()" class="input-field w-full rounded-lg px-3 py-2 text-sm cursor-pointer">
+          <option value="">Tüm Platformlar</option>
+          <option value="netflix">🔴 Netflix</option>
+          <option value="amazon">🔵 Amazon Prime</option>
+          <option value="disney">🟦 Disney+</option>
+          <option value="hbo">🟣 HBO Max</option>
+          <option value="apple">⬛ Apple TV+</option>
+          <option value="exxen">🟠 EXXEN</option>
+          <option value="bein">🟡 TOD</option>
+          <option value="gain">🟠 Gain</option>
+          <option value="tabii">🔴 Tabii</option>
+          <option value="tvplus">🔵 TV+</option>
+        </select>
+      </div>
+      <div>
+        <label class="block ts text-xs mb-1.5" id="t-fl-year">Yıla Göre</label>
+        <select id="filter-year" onchange="applyFilters()" class="input-field w-full rounded-lg px-3 py-2 text-sm cursor-pointer">
+          <option value="">Tüm Yıllar</option>
+          <option>2026</option>
+          <option>2025</option>
+          <option>2024</option>
+          <option>2023</option>
+          <option>2022</option>
+          <option>2021</option>
+          <option>2020</option>
+          <option>2019</option>
+          <option>2018</option>
+          <option>2017</option>
+          <option>2016</option>
+          <option>2015</option>
+          <option>2014</option>
+          <option>2013</option>
+          <option>2012</option>
+          <option>2011</option>
+          <option>2010</option>
+          <option>2009</option>
+          <option>2008</option>
+          <option>2007</option>
+          <option>2006</option>
+          <option>2005</option>
+          <option>2004</option>
+          <option>2003</option>
+          <option>2002</option>
+          <option>2001</option>
+          <option>2000</option>
+          <option>1999</option>
+          <option>1998</option>
+          <option>1997</option>
+          <option>1996</option>
+          <option>1995</option>
+          <option>1994</option>
+          <option>1993</option>
+          <option>1992</option>
+          <option>1991</option>
+          <option>1990</option>
+          <option>1989</option>
+          <option>1988</option>
+          <option>1987</option>
+          <option>1986</option>
+          <option>1985</option>
+          <option>1984</option>
+          <option>1983</option>
+          <option>1982</option>
+          <option>1981</option>
+          <option>1980</option>
+          <option>1979</option>
+          <option>1978</option>
+          <option>1977</option>
+          <option>1976</option>
+          <option>1975</option>
+          <option>1974</option>
+          <option>1973</option>
+          <option>1972</option>
+          <option>1971</option>
+          <option>1970</option>
+          <option>1969</option>
+          <option>1968</option>
+          <option>1967</option>
+          <option>1966</option>
+          <option>1965</option>
+          <option>1964</option>
+          <option>1963</option>
+          <option>1962</option>
+          <option>1961</option>
+          <option>1960</option>
+          <option>1959</option>
+          <option>1958</option>
+          <option>1957</option>
+          <option>1956</option>
+          <option>1955</option>
+          <option>1954</option>
+          <option>1953</option>
+          <option>1952</option>
+          <option>1951</option>
+          <option>1950</option>
+          <option>1949</option>
+          <option>1948</option>
+          <option>1947</option>
+          <option>1946</option>
+          <option>1945</option>
+          <option>1944</option>
+          <option>1943</option>
+          <option>1942</option>
+          <option>1941</option>
+          <option>1940</option>
+          <option>1939</option>
+          <option>1938</option>
+          <option>1937</option>
+          <option>1936</option>
+          <option>1935</option>
+          <option>1934</option>
+          <option>1933</option>
+          <option>1932</option>
+          <option>1931</option>
+          <option>1930</option>
+          <option>1929</option>
+          <option>1928</option>
+          <option>1927</option>
+          <option>1926</option>
+          <option>1925</option>
+          <option>1924</option>
+          <option>1923</option>
+          <option>1922</option>
+          <option>1921</option>
+          <option>1920</option>
+          <option>1919</option>
+        </select>
+      </div>
+      <div>
+        <label class="block ts text-xs mb-1.5" id="t-fl-cast">Oyuncuya Göre</label>
+        <div class="flex gap-2">
+          <input type="text" id="filter-cast" placeholder="Oyuncu adı…" oninput="debouncedFilter()" class="input-field flex-1 rounded-lg px-3 py-2 text-sm">
+          <button onclick="clearFilters()" class="btn-outline px-3 py-2 rounded-lg text-sm transition" title="Temizle"><i class="fas fa-undo text-xs"></i></button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- TMDB ÖNE ÇIKANLAR BÖLÜMÜ -->
+<div id="tmdb-section" class="max-w-7xl mx-auto w-full px-4 pt-4">
+
+  <!-- Trendler — yatay scroll satırı -->
+  <div id="trending-section" class="mb-5 hidden">
+    <div class="flex items-center gap-2 mb-2">
+      <span class="text-base font-bold" style="color:var(--c-prim)">🔥</span>
+      <span class="text-sm font-semibold" id="t-trending-lbl">Trendler</span>
+      <div class="flex-1 h-px" style="background:var(--c-border)"></div>
+    </div>
+    <div class="scroll-row-wrap" style="position:relative">
+      <button class="scroll-btn scroll-btn-l" onclick="scrollRow('trending-grid',-1)" aria-label="Geri">&#8249;</button>
+      <div id="trending-grid" class="scroll-row"></div>
+      <button class="scroll-btn scroll-btn-r" onclick="scrollRow('trending-grid',1)" aria-label="İleri">&#8250;</button>
+    </div>
+  </div>
+
+  <!-- Yeni Çıkanlar — yatay scroll satırı -->
+  <div id="new-releases-section" class="mb-5 hidden">
+    <div class="flex items-center gap-2 mb-2">
+      <span class="text-base font-bold" style="color:#f59e0b">🆕</span>
+      <span class="text-sm font-semibold" id="t-newrel-lbl">Yeni Çıkanlar</span>
+      <div class="flex-1 h-px" style="background:var(--c-border)"></div>
+    </div>
+    <div class="scroll-row-wrap" style="position:relative">
+      <button class="scroll-btn scroll-btn-l" onclick="scrollRow('new-releases-grid',-1)" aria-label="Geri">&#8249;</button>
+      <div id="new-releases-grid" class="scroll-row"></div>
+      <button class="scroll-btn scroll-btn-r" onclick="scrollRow('new-releases-grid',1)" aria-label="İleri">&#8250;</button>
+    </div>
+  </div>
+
+  <!-- Yerli Diziler — yatay scroll satırı (sadece dizi modunda görünür) -->
+  <div id="yerli-dizi-section" class="mb-5 hidden">
+    <div class="flex items-center gap-2 mb-2">
+      <span class="text-base font-bold">🇹🇷</span>
+      <span class="text-sm font-semibold" id="t-yerli-dizi-lbl">Yerli Diziler</span>
+      <div class="flex-1 h-px" style="background:var(--c-border)"></div>
+      <button onclick="setType('tv');document.getElementById('sort-select').value='za';onSortChange();"
+        class="text-xs ts hover:text-white transition" style="font-size:.7rem" id="t-see-all">Tümünü Gör →</button>
+    </div>
+    <div class="scroll-row-wrap" style="position:relative">
+      <button class="scroll-btn scroll-btn-l" onclick="scrollRow('yerli-dizi-grid',-1)" aria-label="Geri">&#8249;</button>
+      <div id="yerli-dizi-grid" class="scroll-row"></div>
+      <button class="scroll-btn scroll-btn-r" onclick="scrollRow('yerli-dizi-grid',1)" aria-label="İleri">&#8250;</button>
+    </div>
+  </div>
+
+</div>
+
+<!-- GRID -->
+<div class="max-w-7xl mx-auto w-full px-4 flex-1">
+  <div id="loading" class="py-20 text-center hidden">
+    <div class="w-10 h-10 border-4 rounded-full spinner mx-auto mb-3" style="border-color:var(--c-border);border-top-color:var(--c-prim)"></div>
+    <p class="ts text-sm" id="t-loading">Yükleniyor…</p>
+  </div>
+  <div id="media-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 pb-8"></div>
+  <div id="no-results" class="py-20 text-center hidden">
+    <i class="fas fa-search text-4xl ts mb-3"></i>
+    <p class="ts" id="t-no-result">Sonuç bulunamadı.</p>
+  </div>
+  <div id="pagination" class="flex items-center justify-center gap-3 pb-10 hidden">
+    <button onclick="changePage(-1)" id="btn-prev" class="btn-outline px-4 py-2 rounded-lg text-sm transition disabled:opacity-30">
+      <i class="fas fa-chevron-left mr-1"></i><span id="t-prev">Önceki</span>
+    </button>
+    <span id="page-info" class="ts text-sm">1 / 1</span>
+    <button onclick="changePage(1)" id="btn-next" class="btn-outline px-4 py-2 rounded-lg text-sm transition disabled:opacity-30">
+      <span id="t-next">Sonraki</span><i class="fas fa-chevron-right ml-1"></i>
+    </button>
+  </div>
+</div>
+
+<!-- DETAY MODALI -->
+<div id="modal-overlay" class="fixed inset-0 z-50 flex items-center justify-center hidden" style="background:rgba(0,0,0,.82)" onclick="handleOverlayClick(event)">
+  <div id="modal-box" class="modal-box tc w-full max-w-2xl mx-4 shadow-2xl flex flex-col">
+    <div class="flex items-start justify-between p-5 border-b" style="border-color:var(--c-border)">
+      <div class="flex-1 pr-4">
+        <h2 id="modal-title" class="text-xl font-bold leading-snug"></h2>
+        <div class="flex flex-wrap gap-1.5 mt-2" id="modal-chips"></div>
+      </div>
+      <button onclick="event.stopPropagation();closeModal()" class="ts hover:text-white text-2xl leading-none flex items-center justify-center w-9 h-9 rounded-lg hover:bg-white hover:bg-opacity-10 transition shrink-0" style="cursor:pointer" aria-label="Kapat"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="p-5 overflow-y-auto flex-1">
+      <div class="flex gap-4 mb-4">
+        <img id="modal-poster" class="w-24 rounded-lg object-cover shrink-0 hidden" src="" alt="">
+        <p id="modal-desc" class="text-sm ts leading-relaxed"></p>
+      </div>
+      <div id="modal-cast-wrap" class="hidden mb-3">
+        <p class="text-xs ts mb-1.5" id="t-cast-label">Oyuncular</p>
+        <div id="modal-cast" class="flex flex-wrap gap-1.5"></div>
+      </div>
+      <!-- Fragman İzle butonu (poster hover ile aynı overlay'i açar) -->
+      <div id="modal-trailer-wrap" class="hidden mb-3">
+        <button id="modal-trailer-btn" onclick="_modalOpenTrailer()" style="display:inline-flex;align-items:center;gap:.45rem;background:none;border:none;cursor:pointer;padding:.3rem 0;color:#f87171;font-size:.8rem;font-weight:600;transition:opacity .15s" onmouseover="this.style.opacity='.7'" onmouseout="this.style.opacity='1'">
+          <i class="fab fa-youtube" style="font-size:1rem"></i>
+          <span id="t-modal-trailer-lbl">Fragman İzle</span>
+        </button>
+      </div>
+      <div id="movie-qualities" class="hidden">
+        <h3 class="text-sm font-semibold mb-2" id="t-dl-title">İndir</h3>
+        <div id="quality-list" class="space-y-2"></div>
+      </div>
+      <div id="tv-seasons" class="hidden">
+        <div id="seasons-loading" class="py-6 text-center">
+          <div class="w-8 h-8 border-4 rounded-full spinner mx-auto" style="border-color:var(--c-border);border-top-color:var(--c-prim)"></div>
+        </div>
+        <div id="seasons-content"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- İNDİRME OVERLAY -->
+<div id="dl-overlay" class="fixed inset-0 z-[60] flex items-center justify-center hidden" style="background:rgba(0,0,0,.82)">
+  <div class="tc rounded-2xl p-8 text-center max-w-sm mx-4 shadow-2xl" style="border:1px solid var(--c-border)">
+    <div class="w-12 h-12 border-4 rounded-full spinner mx-auto mb-4" style="border-color:var(--c-border);border-top-color:var(--c-prim)"></div>
+    <p class="font-semibold mb-1" id="t-dl-prep">İndirme hazırlanıyor…</p>
+    <p class="ts text-sm" id="t-dl-desc">Güvenli link oluşturuluyor.</p>
+    <div id="dl-size-info" class="hidden mt-3 px-4 py-2.5 rounded-xl" style="background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.25)">
+      <div class="flex items-center justify-center gap-2 text-sm">
+        <i class="fas fa-weight-hanging" style="color:var(--c-prim);font-size:.8rem"></i>
+        <span class="ts text-xs" id="t-dl-size">Dosya Boyutu:</span>
+        <span id="dl-size-val" class="font-bold" style="color:var(--c-prim)">—</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div id="toast" class="fixed bottom-6 left-1/2 -translate-x-1/2 z-[70] hidden px-5 py-3 rounded-xl shadow-lg text-sm font-medium text-white transition-all"></div>
+
+<script>
+"use strict";
+const APP_NAME="{{ app_name }}";
+
+// ── Global reset-time helper (LIMIT_SIFIRLAMA — Turkiye saati UTC+3) ──
+// Her iki geri sayim (badge + profil modali) bu fonksiyonu kullanir → daima senkron.
+// Saat backend'den (member_routes → LIMIT_SIFIRLAMA) dinamik olarak alinir.
+const RESET_HOUR={{ usage.reset_clock_hour|default(0) }}, RESET_MIN={{ usage.reset_clock_min|default(0) }};
+function _secsToReset(){
+  const now=new Date();
+  const istOffset=3*60;
+  const nowMs=now.getTime()+now.getTimezoneOffset()*60000+istOffset*60000;
+  const nowIST=new Date(nowMs);
+  const target=new Date(nowIST);
+  target.setHours(RESET_HOUR,RESET_MIN,0,0);
+  if(nowIST>=target) target.setDate(target.getDate()+1);
+  return Math.floor((target-nowIST)/1000);
+}
+const I18N={
+  tr:{title:APP_NAME,movies:"Filmler",series:"Diziler",loading:"Yükleniyor…",noResult:"Sonuç bulunamadı.",prev:"Önceki",next:"Sonraki",logout:"Çıkış",dlTitle:"İndir",dlPrep:"İndirme hazırlanıyor…",dlDesc:"Güvenli link oluşturuluyor.",dlSize:"Dosya Boyutu",dailyLbl:"Günlük",monthlyLbl:"Aylık",dailyRem:"Günlük Kalan",monthlyRem:"Aylık Kalan",unlimited:"Sınırsız",limitErr:"Günlük / aylık limitiniz doldu.",season:"Sezon",episode:"Bölüm",noEp:"Bölüm bulunamadı.",searchPh:"Film veya dizi ara…",searchCastPh:"Oyuncu adı ara…",filter:"Filtrele",flGenre:"Türe Göre",flYear:"Yıla Göre",flCast:"Oyuncuya Göre",castLabel:"Oyuncular",flPlatform:"Platforma Göre",expiry:"Son Kullanma",expiryLbl:"Son:",subEndLbl:"Abonelik Bitiş",noDownload:"İndirme linki bulunamadı.",searchModeTitle:"Film/Dizi Arama",searchModeCast:"Oyuncu Arama",
+    navFilm:"Film",navDizi:"Dizi",navToplam:"Toplam",
+    sortNewest:"⬇ Yeni Eklenenler",sortRatingDesc:"⭐ IMDB Yüksek → Düşük",sortRatingAsc:"⭐ IMDB Düşük → Yüksek",sortYearDesc:"📅 Yıl Yeni → Eski",sortYearAsc:"📅 Yıl Eski → Yeni",sortAZ:"🔤 A → Z",sortZA:"🔤 Z → A",sortCollection:"🎬 Seri Filmler",sortYerliFilm:"🇹🇷 Yerli Filmler",sortYerliDizi:"🇹🇷 Yerli Diziler",
+    fragman:"Fragman",trailerWatch:"Fragman İzle",pmMemberInfo:"Üyelik Bilgileri",pmMemberSince:"Üyelik Başlangıcı",pmExpiry:"Bitiş Tarihi",pmDuration:"Süre",pmDataUsage:"Veri Kullanımı",pmDaily:"Günlük",pmMonthly:"Aylık",pmRemaining:"Kalan:",pmResetIn:"Sıfırlanmaya:",pmTotalDl:"Toplam İndirilen",pmLast30:"Son 30 Gün Veri Kullanımı",pm30DaysAgo:"← 30 gün önce · Bugün →",pmDaysLeft:"gün kaldı",pmSoonReset:"Az sonra sıfırlanıyor…",yerliDiziler:"Yerli Diziler",trendler:"Trendler",yeniCikanlar:"Yeni Çıkanlar",seeAll:"Tümünü Gör →"},
+  en:{title:APP_NAME,movies:"Movies",series:"Series",loading:"Loading…",noResult:"No results found.",prev:"Previous",next:"Next",logout:"Sign Out",dlTitle:"Download",dlPrep:"Preparing…",dlDesc:"Generating secure link.",dlSize:"File Size",dailyLbl:"Daily",monthlyLbl:"Monthly",dailyRem:"Daily Remaining",monthlyRem:"Monthly Remaining",unlimited:"Unlimited",limitErr:"Your limit has been reached.",season:"Season",episode:"Episode",noEp:"No episodes found.",searchPh:"Search movies or series…",searchCastPh:"Search by actor name…",filter:"Filter",flGenre:"By Genre",flYear:"By Year",flCast:"By Actor",castLabel:"Cast",flPlatform:"By Platform",expiry:"Expiry",expiryLbl:"Exp:",subEndLbl:"Subscription End",noDownload:"No download link available.",searchModeTitle:"Movie/Series Search",searchModeCast:"Actor Search",
+    navFilm:"Movies",navDizi:"Series",navToplam:"Total",
+    sortNewest:"⬇ Newly Added",sortRatingDesc:"⭐ IMDB High → Low",sortRatingAsc:"⭐ IMDB Low → High",sortYearDesc:"📅 Year Newest → Oldest",sortYearAsc:"📅 Year Oldest → Newest",sortAZ:"🔤 A → Z",sortZA:"🔤 Z → A",sortCollection:"🎬 Movie Series",sortYerliFilm:"🇹🇷 Turkish Movies",sortYerliDizi:"🇹🇷 Turkish Series",
+    fragman:"Trailer",trailerWatch:"Watch Trailer",pmMemberInfo:"Membership Info",pmMemberSince:"Member Since",pmExpiry:"Expiry Date",pmDuration:"Duration",pmDataUsage:"Data Usage",pmDaily:"Daily",pmMonthly:"Monthly",pmRemaining:"Remaining:",pmResetIn:"Resets in:",pmTotalDl:"Total Downloaded",pmLast30:"Last 30 Days Data Usage",pm30DaysAgo:"← 30 days ago · Today →",pmDaysLeft:"days left",pmSoonReset:"Resetting soon…",yerliDiziler:"Turkish Series",trendler:"Trending",yeniCikanlar:"New Releases",seeAll:"See All →"},
+  de:{title:APP_NAME,movies:"Filme",series:"Serien",loading:"Laden…",noResult:"Keine Ergebnisse.",prev:"Zurück",next:"Weiter",logout:"Abmelden",dlTitle:"Herunterladen",dlPrep:"Wird vorbereitet…",dlDesc:"Sicherer Link.",dlSize:"Dateigröße",dailyLbl:"Täglich",monthlyLbl:"Monatlich",dailyRem:"Täglich verbleibend",monthlyRem:"Monatlich verbleibend",unlimited:"Unbegrenzt",limitErr:"Limit erreicht.",season:"Staffel",episode:"Episode",noEp:"Keine Episoden.",searchPh:"Suchen…",searchCastPh:"Schauspieler suchen…",filter:"Filter",flGenre:"Nach Genre",flYear:"Nach Jahr",flCast:"Nach Schauspieler",castLabel:"Besetzung",flPlatform:"Nach Plattform",expiry:"Ablauf",expiryLbl:"Bis:",subEndLbl:"Abo-Ende",noDownload:"Kein Download-Link.",searchModeTitle:"Film/Serien-Suche",searchModeCast:"Schauspieler-Suche",
+    navFilm:"Filme",navDizi:"Serien",navToplam:"Gesamt",
+    sortNewest:"⬇ Neu hinzugefügt",sortRatingDesc:"⭐ IMDB Hoch → Niedrig",sortRatingAsc:"⭐ IMDB Niedrig → Hoch",sortYearDesc:"📅 Jahr Neu → Alt",sortYearAsc:"📅 Jahr Alt → Neu",sortAZ:"🔤 A → Z",sortZA:"🔤 Z → A",sortCollection:"🎬 Filmreihen",sortYerliFilm:"🇹🇷 Türkische Filme",sortYerliDizi:"🇹🇷 Türkische Serien",
+    fragman:"Trailer",trailerWatch:"Trailer ansehen",pmMemberInfo:"Mitgliedschaftsinfo",pmMemberSince:"Mitglied seit",pmExpiry:"Ablaufdatum",pmDuration:"Laufzeit",pmDataUsage:"Datennutzung",pmDaily:"Täglich",pmMonthly:"Monatlich",pmRemaining:"Verbleibend:",pmResetIn:"Zurücksetzung in:",pmTotalDl:"Gesamt heruntergeladen",pmLast30:"Datennutzung der letzten 30 Tage",pm30DaysAgo:"← Vor 30 Tagen · Heute →",pmDaysLeft:"Tage verbleibend",pmSoonReset:"Wird bald zurückgesetzt…",yerliDiziler:"Türkische Serien",trendler:"Trends",yeniCikanlar:"Neuerscheinungen",seeAll:"Alle anzeigen →"}
+};
+let CUR_LANG="{{ lang }}"||"tr",CUR_TYPE="movie",CUR_PAGE=1,TOTAL_PAGES=1,SEARCH_Q="",CUR_SORT="newest",CUR_GENRE="",CUR_YEAR="",CUR_CAST="",CUR_PLATFORM="";
+let _sTimer=null,_fTimer=null,_yerliDiziLoaded=false;
+
+// KRITIK DUZELTME: onclick icine JSON.stringify yerine key-based store
+// Turkce/Japonca/Korece karakterler ve tek tirnak onclick'i kirar
+const _STORE={};let _idx=0;
+const _TMDB_STORE={};let _tidx=0;
+function store(item){const k="k"+(_idx++);_STORE[k]=item;return k;}
+function tmdbStore(item){const k="t"+(_tidx++);_TMDB_STORE[k]=item;return k;}
+function t(k){return(I18N[CUR_LANG]||I18N.tr)[k]||k;}
+
+function setLang(l){CUR_LANG=l;document.documentElement.lang=l;applyI18n();const u=new URL(location);u.searchParams.set("lang",l);history.replaceState({},"",u);CUR_PAGE=1;loadMedia();reRenderTmdbSections();}
+
+function applyI18n(){
+  document.title=t("title");
+  const m={"t-movies":"movies","t-series":"series","t-loading":"loading","t-no-result":"noResult","t-prev":"prev","t-next":"next","t-logout":"logout","t-dl-title":"dlTitle","t-dl-prep":"dlPrep","t-dl-desc":"dlDesc","t-dl-size":"dlSize","t-daily-lbl":"dailyLbl","t-monthly-lbl":"monthlyLbl","t-daily-rem-lbl":"dailyRem","t-monthly-rem-lbl":"monthlyRem","t-filter":"filter","t-fl-genre":"flGenre","t-fl-year":"flYear","t-fl-cast":"flCast","t-cast-label":"castLabel","t-expiry-label":"expiryLbl","t-sub-end-lbl":"subEndLbl",
+    "t-nav-film":"navFilm","t-nav-dizi":"navDizi","t-nav-toplam":"navToplam",
+    "t-nav-film-m":"navFilm","t-nav-dizi-m":"navDizi",
+    "t-yerli-dizi-lbl":"yerliDiziler","t-trending-lbl":"trendler","t-newrel-lbl":"yeniCikanlar","t-see-all":"seeAll","t-modal-trailer-lbl":"trailerWatch"};
+  for(const[id,k]of Object.entries(m)){const el=document.getElementById(id);if(el)el.textContent=t(k);}
+  const si=document.getElementById("search-input");if(si)si.placeholder=t("searchPh");
+  // Sort options
+  const soMap={"so-newest":"sortNewest","so-rating-desc":"sortRatingDesc","so-rating-asc":"sortRatingAsc","so-year-desc":"sortYearDesc","so-year-asc":"sortYearAsc","so-az":"sortAZ","so-za":"sortZA","so-collection":"sortCollection","so-yerli-film":"sortYerliFilm","so-yerli-dizi":"sortYerliDizi"};
+  for(const[id,k]of Object.entries(soMap)){const el=document.getElementById(id);if(el)el.textContent=t(k);}
+  // Profile modal static labels
+  const pmMap={"pm-section-member":"pmMemberInfo","pm-section-data":"pmDataUsage","pm-section-last30":"pmLast30"};
+  for(const[id,k]of Object.entries(pmMap)){const el=document.getElementById(id);if(el)el.textContent=t(k);}
+  const pmStatMap={"pm-label-since":"pmMemberSince","pm-label-expiry":"pmExpiry","pm-label-duration":"pmDuration","pm-label-daily":"pmDaily","pm-label-monthly":"pmMonthly","pm-label-total":"pmTotalDl","pm-label-remaining":"pmRemaining","pm-label-remaining2":"pmRemaining","pm-label-reset-in":"pmResetIn"};
+  for(const[id,k]of Object.entries(pmStatMap)){const el=document.getElementById(id);if(el)el.textContent=t(k);}
+  const el30=document.getElementById("pm-30days-ago");if(el30)el30.textContent=t("pm30DaysAgo");
+  // TMDB media type badges in renderTmdbGrid — updated on next render
+}
+
+async function loadUsage(){
+  try{
+    const r=await fetch("/api/uye/kullanim");
+    if(!r.ok){renderUsageFallback();return;}
+    renderUsage(await r.json());
+  }catch(e){renderUsageFallback();}
+}
+
+// Abonelik bitiş gün sayısını profil API'sinden çek
+async function loadSubDays(){
+  try{
+    const r=await fetch("/api/uye/profil");
+    if(!r.ok) return;
+    const d=await r.json();
+    // Bitiş tarihini GG.AA.YYYY formatında hesapla
+    function _fmtExpiry(daysLeft){
+      if(daysLeft==null) return "";
+      const exp=new Date();
+      exp.setDate(exp.getDate()+daysLeft);
+      const dd=String(exp.getDate()).padStart(2,"0");
+      const mm=String(exp.getMonth()+1).padStart(2,"0");
+      const yyyy=exp.getFullYear();
+      return `${dd}.${mm}.${yyyy}`;
+    }
+    // Navbar "X gün kaldı (GG.AA.YYYY)"
+    const el=document.getElementById("sub-end-days");
+    if(el&&d.days_left!=null){
+      const col=d.days_left<=7?"#ef4444":d.days_left<=30?"#f59e0b":"#f59e0b";
+      const dateStr=_fmtExpiry(d.days_left);
+      el.innerHTML=`<i class="fas fa-calendar-alt"></i> <span style="color:${col}">${d.days_left} ${t("pmDaysLeft")}${dateStr?" ("+dateStr+")":""}</span>`;
+    }
+    // Kullanım çubuğundaki abonelik alanı "X gün (GG.AA.YYYY)"
+    const el2=document.getElementById("sub-end-days2");
+    if(el2&&d.days_left!=null){
+      const col2=d.days_left<=7?"#ef4444":d.days_left<=30?"#f59e0b":"#f59e0b";
+      const dateStr2=_fmtExpiry(d.days_left);
+      el2.innerHTML=`<span style="color:${col2}">${d.days_left} ${t("pmDaysLeft")}${dateStr2?" ("+dateStr2+")":""}</span>`;
+    }
+  }catch(e){}
+  // Veritabanı boyutunu çek
+  try{
+    const r2=await fetch("/api/uye/db-boyut");
+    if(!r2.ok) return;
+    const s=await r2.json();
+    function _fmtGb2(bytes){
+      if(!bytes) return "0 GB";
+      const gb=bytes/1073741824;
+      return gb>=1?gb.toFixed(2)+" GB":(bytes/1048576).toFixed(0)+" MB";
+    }
+    const mEl=document.getElementById("db-movies-gb");
+    const tEl=document.getElementById("db-tv-gb");
+    const totEl=document.getElementById("db-total-gb");
+    if(mEl) mEl.textContent=_fmtGb2(s.movies_bytes);
+    if(tEl) tEl.textContent=_fmtGb2(s.tv_bytes);
+    if(totEl) totEl.textContent=_fmtGb2(s.total_bytes);
+    // Mobil satır
+    const mElM=document.getElementById("db-movies-gb-m");
+    const tElM=document.getElementById("db-tv-gb-m");
+    const totElM=document.getElementById("db-total-gb-m");
+    if(mElM) mElM.textContent=_fmtGb2(s.movies_bytes);
+    if(tElM) tElM.textContent=_fmtGb2(s.tv_bytes);
+    if(totElM) totElM.textContent=_fmtGb2(s.total_bytes);
+  }catch(e){}
+}
+function renderUsageFallback(){
+  // Server-side rendered verileri kullan (Jinja2'den geliyor)
+  const d={
+    daily_gb:      parseFloat("{{ usage.daily_gb|default(0) }}")||0,
+    monthly_gb:    parseFloat("{{ usage.monthly_gb|default(0) }}")||0,
+    daily_limit:   parseFloat("{{ usage.daily_limit|default(0) }}")||0,
+    monthly_limit: parseFloat("{{ usage.monthly_limit|default(0) }}")||0,
+    daily_remaining:   {% if usage.daily_remaining is not none %}parseFloat("{{ usage.daily_remaining }}"){% else %}null{% endif %},
+    monthly_remaining: {% if usage.monthly_remaining is not none %}parseFloat("{{ usage.monthly_remaining }}"){% else %}null{% endif %}
+  };
+  renderUsage(d);
+}
+function renderUsage(d){
+  const gb=v=>v!=null?(v<1?(v*1024).toFixed(0)+" MB":v.toFixed(2)+" GB"):t("unlimited");
+  const pct=(u,l)=>l>0?Math.min(100,Math.round(u/l*100)):0;
+  document.getElementById("bar-daily").style.width=pct(d.daily_gb||0,d.daily_limit)+"%";
+  document.getElementById("bar-monthly").style.width=pct(d.monthly_gb||0,d.monthly_limit)+"%";
+  document.getElementById("usage-daily-text").textContent=d.daily_limit>0?`${gb(d.daily_gb)} / ${gb(d.daily_limit)}`:gb(d.daily_gb);
+  document.getElementById("usage-monthly-text").textContent=d.monthly_limit>0?`${gb(d.monthly_gb)} / ${gb(d.monthly_limit)}`:gb(d.monthly_gb);
+  document.getElementById("usage-daily-rem").textContent=d.daily_remaining!=null?gb(d.daily_remaining):t("unlimited");
+  const _navRem=document.getElementById("navbar-daily-rem");if(_navRem)_navRem.textContent=d.daily_remaining!=null?gb(d.daily_remaining):t("unlimited");
+  document.getElementById("usage-monthly-rem").textContent=d.monthly_remaining!=null?gb(d.monthly_remaining):t("unlimited");
+  const b=document.getElementById("badge-text");if(b)b.textContent=`${t("dailyRem")}: ${d.daily_remaining!=null?gb(d.daily_remaining):t("unlimited")}`;
+  document.getElementById("usage-badge").classList.remove("hidden");
+
+  // Reset countdown (LIMIT_SIFIRLAMA — Turkiye saati UTC+3, dinamik) — global _secsToReset ile senkron
+  const resetBadge=document.getElementById("daily-reset-badge");
+  const resetStr=document.getElementById("daily-reset-str");
+  if(resetBadge&&resetStr){
+    function tickReset(){
+      const secsLeft=_secsToReset();
+      if(secsLeft<=0){resetStr.textContent="az sonra";setTimeout(tickReset,5000);return;}
+      const h=Math.floor(secsLeft/3600),m=Math.floor((secsLeft%3600)/60);
+      resetStr.textContent=(h>0?h+"s ":"")+m+"dk";
+      setTimeout(tickReset,60000);
+    }
+    tickReset();
+    resetBadge.style.display="";
+  }
+}
+
+function setType(type){
+  CUR_TYPE=type;CUR_PAGE=1;
+  document.getElementById("btn-movie").className=type==="movie"?"btn-prim px-4 py-2 rounded-lg text-sm font-medium transition":"btn-outline px-4 py-2 rounded-lg text-sm font-medium transition";
+  document.getElementById("btn-tv").className=type==="tv"?"btn-prim px-4 py-2 rounded-lg text-sm font-medium transition":"btn-outline px-4 py-2 rounded-lg text-sm font-medium transition";
+  // Seri Filmler ve Yerli Filmler sadece film modunda, Yerli Diziler sadece dizi modunda görünür
+  const collOpt=document.querySelector('#sort-select option[value="collection"]');
+  const yerliOpt=document.querySelector('#sort-select option[value="yerli_film"]');
+  const yerliDiziOpt=document.querySelector('#sort-select option[value="yerli_dizi"]');
+  if(collOpt){
+    collOpt.style.display=type==="tv"?"none":"";
+    if(type==="tv"&&document.getElementById("sort-select").value==="collection"){
+      document.getElementById("sort-select").value="newest";
+      CUR_SORT="newest";
+    }
+  }
+  if(yerliOpt){
+    yerliOpt.style.display=type==="tv"?"none":"";
+    if(type==="tv"&&document.getElementById("sort-select").value==="yerli_film"){
+      document.getElementById("sort-select").value="newest";
+      CUR_SORT="newest";
+    }
+  }
+  if(yerliDiziOpt){
+    yerliDiziOpt.style.display=type==="movie"?"none":"";
+    if(type==="movie"&&document.getElementById("sort-select").value==="yerli_dizi"){
+      document.getElementById("sort-select").value="newest";
+      CUR_SORT="newest";
+    }
+  }
+  loadMedia();
+}
+function onSortChange(){CUR_SORT=document.getElementById("sort-select").value;CUR_PAGE=1;loadMedia();}
+function applyFilters(){CUR_GENRE=document.getElementById("filter-genre").value;const fp=document.getElementById("filter-platform");if(fp&&fp.value)CUR_PLATFORM=fp.value;CUR_YEAR=document.getElementById("filter-year").value;CUR_CAST=document.getElementById("filter-cast").value.trim();CUR_PAGE=1;updatePlatformTabs();updateBadge();loadMedia();}
+function debouncedFilter(){clearTimeout(_fTimer);_fTimer=setTimeout(applyFilters,500);}
+function clearFilters(){document.getElementById("filter-genre").value="";const fp=document.getElementById("filter-platform");if(fp)fp.value="";document.getElementById("filter-year").value="";document.getElementById("filter-cast").value="";CUR_GENRE="";CUR_PLATFORM="";updatePlatformTabs();CUR_YEAR="";CUR_CAST="";CUR_PAGE=1;updateBadge();loadMedia();}
+function updateBadge(){const n=[CUR_GENRE,CUR_PLATFORM,CUR_YEAR,CUR_CAST].filter(Boolean).length;const b=document.getElementById("filter-badge");if(n>0){b.textContent=n;b.classList.remove("hidden");}else b.classList.add("hidden");}
+function toggleFilters(){document.getElementById("filter-panel").classList.toggle("hidden");}
+function debouncedSearch(){clearTimeout(_sTimer);_sTimer=setTimeout(()=>{SEARCH_Q=document.getElementById("search-input").value.trim();CUR_PAGE=1;loadMedia();},400);}
+function clearSearch(){document.getElementById("search-input").value="";SEARCH_Q="";CUR_PAGE=1;loadMedia();}
+function changePage(d){const np=CUR_PAGE+d;if(np<1||np>TOTAL_PAGES)return;CUR_PAGE=np;loadMedia();window.scrollTo({top:0,behavior:"smooth"});}
+
+async function loadMedia(){
+  showLoading(true);
+  const p=new URLSearchParams({media_type:CUR_TYPE,page:CUR_PAGE,page_size:24,lang:CUR_LANG,sort:CUR_SORT});
+  if(SEARCH_Q){
+    if(typeof SEARCH_MODE!=="undefined"&&SEARCH_MODE==="cast"){p.set("cast_name",SEARCH_Q);}
+    else{p.set("search",SEARCH_Q);}
+  }
+  if(CUR_GENRE)p.set("genre",CUR_GENRE);
+  if(CUR_PLATFORM)p.set("platform",CUR_PLATFORM);
+  if(CUR_YEAR)p.set("year",CUR_YEAR);
+  if(CUR_CAST)p.set("cast_name",CUR_CAST);
+  try{
+    const r=await fetch(`/api/uye/medya?${p}`);
+    if(r.status===401){location.href="/uye/giris";return;}
+    if(r.status===403){showToast(t("limitErr"),"red");showLoading(false);return;}
+    const d=await r.json();
+    const items=d.movies||d.tv_shows||[];
+    TOTAL_PAGES=d.total_pages||1;
+    renderGrid(items);
+    renderPagination(d.current_page||1,TOTAL_PAGES);
+    // TV dizisi olan kartlar için poster overlay'lerini yükle (arama sonuçlarında da çalışır)
+    prefetchTvOverlays(items);
+  }catch(e){showToast("Hata: "+e.message,"red");}
+  finally{showLoading(false);}
+  refreshTmdbVisibility();
+}
+
+// Dizi listesindeki tüm kartların bayrak+çözünürlük verisini arka planda toplu çek
+// Rate limit'e takılmamak için sırayla (concurrency=3) işle
+async function prefetchTvOverlays(items){
+  const tvItems=items.filter(i=>i.media_type==="tv"&&i.tmdb_id&&!_TV_POSTER_DATA[i.tmdb_id]);
+  if(!tvItems.length)return;
+  const CONCURRENCY=3;
+  let idx=0;
+  async function worker(){
+    while(idx<tvItems.length){
+      const item=tvItems[idx++];
+      try{
+        const dbIdx=(item.db_index!=null&&item.db_index>=0)?item.db_index:-1;
+        const r=await fetch(`/api/uye/tv-detay?tmdb_id=${item.tmdb_id}&db_index=${dbIdx}&lang=${CUR_LANG}`);
+        if(!r.ok)continue;
+        const seasons=(await r.json()).seasons||[];
+        collectTvPosterData(item.tmdb_id,seasons,item.original_language||"");
+        updateTvCardOverlay(item.tmdb_id);
+      }catch(e){}
+    }
+  }
+  // CONCURRENCY kadar paralel worker başlat
+  await Promise.all(Array.from({length:CONCURRENCY},worker));
+}
+
+function poster(item){if(CUR_LANG==="tr"&&item.poster_tr)return item.poster_tr;if(CUR_LANG==="de"&&item.poster_de)return item.poster_de;return item.poster||"";}
+function title(item){if(CUR_LANG==="tr"&&item.title_tr)return item.title_tr;if(CUR_LANG==="de"&&item.title_de)return item.title_de;return item.title||"—";}
+function desc(item){if(CUR_LANG==="tr"&&item.description_tr)return item.description_tr;if(CUR_LANG==="de"&&item.description_de)return item.description_de;return item.description||"";}
+function cert(item){if(CUR_LANG==="de")return item.certification_de||item.certification_us||"";if(CUR_LANG==="tr")return item.certification_tr||item.certification_us||"";return item.certification_us||"";}
+function genres(item){if(CUR_LANG==="tr"&&item.genres_tr&&item.genres_tr.length)return item.genres_tr;if(CUR_LANG==="de"&&item.genres_de&&item.genres_de.length)return item.genres_de;return item.genres||[];}
+function epTitle(ep){if(CUR_LANG==="tr"&&ep.title_tr)return ep.title_tr;if(CUR_LANG==="de"&&ep.title_de)return ep.title_de;return ep.title||"—";}
+
+function escAttr(s){return String(s).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/'/g,"&#39;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
+
+function renderGrid(items){
+  const grid=document.getElementById("media-grid"),noR=document.getElementById("no-results");
+  if(!items.length){grid.innerHTML="";noR.classList.remove("hidden");return;}
+  noR.classList.add("hidden");
+  Object.keys(_STORE).forEach(k=>delete _STORE[k]);_idx=0;
+  grid.innerHTML=items.map(item=>{
+    const key=store(item);
+    const p=poster(item),tl=escAttr(title(item)),c=cert(item),yr=item.release_year||"",rt=item.rating?item.rating.toFixed(1):"",sc=item.season_count?item.season_count+" "+t("season"):"";
+    const gs=genres(item).slice(0,2);
+    const isTV=item.media_type==="tv";
+    // Film: qualities'ten direkt bayrak+çözünürlük üret
+    // Dizi: poster-wrap içine boş placeholder div'leri koy, DOM sonradan doldurulur
+    let flagHtml="",resBadgeHtml="",ccFlagHtml="";
+    if(!isTV){
+      const flags=langFlag(item);
+      flagHtml=flags?flags.split(" ").filter(Boolean).map(f=>f==="tr"?`<span class="css-flag-tr lang-flag"></span>`:`<span class="lang-flag fi fi-${f}"></span>`).join(""):"";
+      resBadgeHtml=resBadge(item);
+      // trsub veya turkce.altyazi varsa sol üst köşeye CC rozeti ekle
+      const qs=item.qualities||[];
+      if(qs.some(q=>/trsub|t[uü]rk[cç]e\.altyaz[iı]/i.test(q.name||"")))
+        ccFlagHtml=`<span class="cc-flag">CC</span>`;
+    }
+    // Dizi için tmdb_id'yi data attribute ile tut; overlay sonradan updateTvCardOverlay ile doldurulur
+    const isYerli=isTV&&(item.original_language||"").toLowerCase()==="tr";
+    const dataAttr=isTV&&item.tmdb_id?` data-tmdbid="${item.tmdb_id}" data-origlang="${item.original_language||""}"` :"";
+    const tvInitialFlag=isYerli?`<span class="css-flag-tr lang-flag"></span>`:"";
+    // Hover Preview içeriği
+    const shortDesc=(CUR_LANG==="tr"&&item.description_tr?item.description_tr:CUR_LANG==="de"&&item.description_de?item.description_de:item.description)||"";
+    const hpDesc=shortDesc?`<div class="hp-desc">${escAttr(shortDesc)}</div>`:"";
+    const hpImdb=rt?`<span class="hp-imdb"><i class="fas fa-star" style="font-size:.6rem"></i>${rt}</span>`:"";
+    const hpYear=yr?`<span class="hp-year">${yr}</span>`:"";
+    const hpTrailerBtn=item.tmdb_id?`<button class="hp-trailer-btn" onclick="openTrailer('${item.tmdb_id}','${isTV?"tv":"movie"}','${tl}',event)"><i class="fab fa-youtube"></i> ${t("trailerWatch")}</button>`:"";
+    const hoverPreview=`<div class="hover-preview"><div class="hp-title">${tl}</div><div class="hp-meta">${hpImdb}${hpYear}</div>${hpDesc}${hpTrailerBtn}</div>`;
+    return `<div class="media-card-wrap"><div class="media-card"${dataAttr} onclick="openModal('${key}')">
+      <div class="poster-wrap">${p?`<img src="${escAttr(p)}" alt="${tl}" loading="lazy" onerror="this.style.display='none'">`:`<div style="display:flex;align-items:center;justify-content:center;height:100%"><i class="fas fa-film" style="font-size:2rem;opacity:.2"></i></div>`}${isTV?`<div class="lang-overlay tv-flag-overlay">${tvInitialFlag}</div><span class="tv-res-overlay"></span>`:(flagHtml||ccFlagHtml?`<div class="lang-overlay">${flagHtml}${ccFlagHtml}</div>`:"")+(resBadgeHtml||"")}</div>
+      <div class="p-2 tc" style="border-top:1px solid var(--c-border)">
+        <div class="text-xs font-semibold leading-snug mb-1 line-clamp-2">${tl}</div>
+        <div class="flex flex-wrap gap-1 text-xs ts">
+          ${yr?`<span>${yr}</span>`:""}${rt?`<span class="chip-rating">⭐${rt}</span>`:""}${c?`<span class="chip">${c}</span>`:""}${sc?`<span>${sc}</span>`:""}
+        </div>
+        ${gs.length?`<div class="flex flex-wrap gap-1 mt-1">${gs.map(g=>`<span class="chip chip-genre" style="font-size:.6rem;padding:1px 6px">${g}</span>`).join("")}</div>`:""}
+      </div>
+    </div>${hoverPreview}</div>`;
+  }).join("");
+  positionHoverPreviews();
+}
+
+// Hover preview'in ekran kenarından taşmasını önle
+function positionHoverPreviews(){
+  requestAnimationFrame(()=>{
+    const wraps=document.querySelectorAll(".media-card-wrap");
+    const vw=window.innerWidth;
+    wraps.forEach(w=>{
+      w.classList.remove("hp-right","hp-left");
+      const r=w.getBoundingClientRect();
+      const center=r.left+r.width/2;
+      if(center+110>vw-16) w.classList.add("hp-right");
+      else if(center-110<16) w.classList.add("hp-left");
+    });
+  });
+}
+
+function renderPagination(cur,total){
+  const pg=document.getElementById("pagination");
+  if(total<=1){pg.classList.add("hidden");return;}
+  pg.classList.remove("hidden");
+  document.getElementById("page-info").textContent=`${cur} / ${total}`;
+  document.getElementById("btn-prev").disabled=cur<=1;
+  document.getElementById("btn-next").disabled=cur>=total;
+}
+
+function openModal(key){
+  const item=_STORE[key]||_TMDB_STORE[key];if(!item)return;
+  document.getElementById("modal-title").textContent=title(item);
+  document.getElementById("modal-desc").textContent=desc(item)||"";
+  const p=poster(item),img=document.getElementById("modal-poster");
+  if(p){img.src=p;img.classList.remove("hidden");}else img.classList.add("hidden");
+  // Chip'ler
+  const c=cert(item),gs=genres(item);
+  let ch="";
+  if(item.release_year)ch+=`<span class="chip chip-year" style="cursor:pointer" onclick="closeModal();filterByYear(${item.release_year})" title="Bu yılın içeriklerini göster"><i class="fas fa-calendar mr-1"></i>${item.release_year}</span>`;
+  if(item.rating)ch+=`<span class="chip chip-rating">⭐${item.rating.toFixed(1)}</span>`;
+  if(c)ch+=`<span class="chip">${c}</span>`;
+  gs.slice(0,3).forEach(g=>{ch+=`<span class="chip chip-genre" style="cursor:pointer" onclick="closeModal();filterByGenre('${escAttr(g)}')" title="Bu türün içeriklerini göster">${g}</span>`;});
+  document.getElementById("modal-chips").innerHTML=ch;
+  // Oyuncular
+  const cast=item.cast||[],cw=document.getElementById("modal-cast-wrap");
+  if(cast.length){document.getElementById("modal-cast").innerHTML=cast.slice(0,10).map(ac=>`<span class="chip" style="cursor:pointer" onclick="closeModal();filterByCast('${escAttr(ac)}')" title="Bu oyuncunun içeriklerini göster">${ac}</span>`).join("");cw.classList.remove("hidden");}
+  else cw.classList.add("hidden");
+  // Film / Dizi
+  const isTV=item.media_type==="tv";
+  document.getElementById("movie-qualities").classList.toggle("hidden",isTV);
+  document.getElementById("tv-seasons").classList.toggle("hidden",!isTV);
+  if(isTV)loadTvSeasons(item);else renderMovieQualities(item.qualities||[]);
+  document.getElementById("modal-overlay").classList.remove("hidden");
+  // ── Modal içi Fragman butonu ─────────────────────────────────────────
+  _modalTrailerItem = item;
+  const mtw = document.getElementById("modal-trailer-wrap");
+  if(mtw){ if(item.tmdb_id) mtw.classList.remove("hidden"); else mtw.classList.add("hidden"); }
+}
+
+// Modal içi fragman butonu — poster hover ile aynı openTrailer overlay'ini kullanır
+let _modalTrailerItem = null;
+function _modalOpenTrailer(){
+  const item = _modalTrailerItem;
+  if(!item || !item.tmdb_id) return;
+  const isTV = item.media_type === "tv";
+  openTrailer(item.tmdb_id, isTV ? "tv" : "movie", title(item), null);
+}
+function handleOverlayClick(e){
+  // Overlay'in kendisine veya modal-box DIŞINA tıklanınca kapat
+  const box=document.getElementById("modal-box");
+  if(e.target===document.getElementById("modal-overlay")||!box.contains(e.target))closeModal();
+}
+function closeModal(){
+  document.getElementById("modal-overlay").classList.add("hidden");
+  document.getElementById("tv-seasons").classList.add("hidden");
+  document.getElementById("movie-qualities").classList.add("hidden");
+  const tw = document.getElementById("modal-trailer-wrap");
+  if(tw) tw.classList.add("hidden");
+}
+
+// ── Dosya sıralama yardımcıları ────────────────────────────────────────
+function _resolutionRank(q){
+  const raw=(q.quality||q.name||"").toLowerCase();
+  if(/\b(2160p|4k|uhd)\b/.test(raw))return 4;
+  if(/\bm?1080p?\b|\bfhd\b/.test(raw))return 3;
+  if(/\bm?720p?\b|\bhd\b/.test(raw))return 2;
+  if(/\b(480p|576p)\b/.test(raw))return 1;
+  return 0;
+}
+function _sizeBytes(sizeStr){
+  if(!sizeStr)return 0;
+  const m=sizeStr.match(/([\d.,]+)\s*(TB|GB|MB|KB|B)/i);
+  if(!m)return 0;
+  const v=parseFloat(m[1].replace(",","."));
+  const u=m[2].toUpperCase();
+  const map={B:1,KB:1024,MB:1024**2,GB:1024**3,TB:1024**4};
+  return v*(map[u]||0);
+}
+function _isArchive(name){
+  const n=(name||"").toLowerCase();
+  return /\.(zip|7z|rar)(\.(\d+))?$/.test(n)||/\.z\d+$/.test(n)||/\.part\d+\.rar$/.test(n);
+}
+function _partNumber(name){
+  // .part001.mkv, .part01.mkv, .zip.001, .7z.001, .z01
+  const n=(name||"").toLowerCase();
+  let m=n.match(/\.part(\d+)\./);if(m)return parseInt(m[1],10);
+  m=n.match(/\.(zip|7z|rar|z)\.(\d+)$/);if(m)return parseInt(m[2],10);
+  m=n.match(/\.z(\d+)$/);if(m)return parseInt(m[1],10);
+  return -1;  // not multipart
+}
+function _baseGroupKey(name){
+  // Sıralama için temel grup anahtarı: uzantı + parça numarasını çıkar
+  // Örn: "Film.1080p.AMZN.zip.003" -> "Film.1080p.AMZN.zip"
+  //      "Film.1080p.AMZN.WEB-DL.part002.mkv" -> "Film.1080p.AMZN.WEB-DL.mkv"
+  const n=(name||"");
+  // zip/7z parçası: .zip.001
+  let s=n.replace(/\.(zip|7z|rar)\.\d+$/i,(m,ext)=>"."+ext);
+  // .z01, .z02 → .zip
+  s=s.replace(/\.z\d+$/i,".zip");
+  // .part001.mkv → .mkv
+  s=s.replace(/\.part\d+\.(\w+)$/i,".$1");
+  return s.toLowerCase();
+}
+function sortQualities(qs){
+  // Her öğeye sıralama anahtarları ekle
+  const annotated=qs.map(q=>{
+    const name=q.name||"";
+    return {
+      q,
+      resRank:_resolutionRank(q),
+      sizeB:_sizeBytes(q.size),
+      isArchive:_isArchive(name)?0:1,   // arşiv önce (0), mkv sonra (1)
+      groupKey:_baseGroupKey(name),
+      partNum:_partNumber(name),
+    };
+  });
+
+  // Grupları belirle: aynı groupKey bir grup
+  const groupOrder={};
+  let gIdx=0;
+  // Önce tüm grupları bul ve grubun çözünürlük + boyutuna göre sırala
+  const groups={};
+  annotated.forEach(a=>{
+    if(!groups[a.groupKey])groups[a.groupKey]={items:[],resRank:0,maxSize:0};
+    groups[a.groupKey].items.push(a);
+    if(a.resRank>groups[a.groupKey].resRank)groups[a.groupKey].resRank=a.resRank;
+    if(a.sizeB>groups[a.groupKey].maxSize)groups[a.groupKey].maxSize=a.sizeB;
+  });
+
+  // Grupları sırala: çözünürlük desc, sonra maxSize desc
+  const sortedGroupKeys=Object.keys(groups).sort((ak,bk)=>{
+    const a=groups[ak],b=groups[bk];
+    if(b.resRank!==a.resRank)return b.resRank-a.resRank;
+    return b.maxSize-a.maxSize;
+  });
+
+  // Her gruba sıra numarası ata
+  sortedGroupKeys.forEach((k,i)=>{groupOrder[k]=i;});
+
+  // Tüm öğeleri sırala
+  annotated.sort((a,b)=>{
+    // 1. Grup sırası
+    const gDiff=groupOrder[a.groupKey]-groupOrder[b.groupKey];
+    if(gDiff!==0)return gDiff;
+    // 2. Aynı grup içinde: arşiv önce, mkv sonra
+    const aDiff=a.isArchive-b.isArchive;
+    if(aDiff!==0)return aDiff;
+    // 3. Aynı tür içinde: parça numarasına göre artan
+    if(a.partNum>=0&&b.partNum>=0)return a.partNum-b.partNum;
+    return 0;
+  });
+
+  return annotated.map(a=>a.q);
+}
+
+function renderMovieQualities(qs){
+  const list=document.getElementById("quality-list");
+  document.getElementById("t-dl-title").textContent=t("dlTitle");
+  if(!qs.length){list.innerHTML=`<p class="ts text-sm">${t("noDownload")}</p>`;return;}
+  const sorted=sortQualities(qs);
+  list.innerHTML=sorted.map(q=>{
+    const fn=encodeURIComponent(q.name||"video.mkv");
+    // Bu quality'nin diline göre bayrak
+    const qFlags=extractLangFlags(q.name||"");
+    const qFlagHtml=qFlags?qFlags.split(" ").filter(Boolean).map(f=>`<span class="fi fi-${f}" style="width:1.3em;height:1em;border-radius:2px;display:inline-block;box-shadow:0 1px 3px rgba(0,0,0,.7);flex-shrink:0;transform:translateZ(0);isolation:isolate;color-scheme:light;filter:none;-webkit-filter:none"></span>`).join(""):"";
+    const hasTrSub=/trsub|t[uü]rk[cç]e\.altyaz[iı]/i.test(q.name||"");
+    return `<div class="flex items-start gap-3 p-3 rounded-xl" style="border:1px solid var(--c-border)">
+      <div class="flex-1 min-w-0">
+        <div class="font-mono text-xs break-all text-gray-300 mb-1">${q.name||"—"}</div>
+        <div class="flex flex-wrap gap-2 text-xs ts">
+          ${q.quality?`<span class="chip" style="border-color:rgba(59,130,246,.5);color:#93c5fd">${q.quality}</span>`:""}
+          ${q.size?`<span><i class="fas fa-hdd mr-1"></i>${q.size}</span>`:""}
+        </div>
+      </div>
+      <div class="flex items-center gap-2 shrink-0">
+        ${qFlagHtml?`<div class="flex gap-1 items-center">${qFlagHtml}</div>`:""}
+        ${hasTrSub?`<span class="cc-badge" style="font-size:.6rem;padding:3px 6px">CC</span>`:""}
+        <button onclick="startDownload('${q.id}','${fn}',${q.size?`'${escAttr(q.size)}'`:'null'})" class="btn-prim text-xs px-3 py-2 rounded-lg hover:opacity-85 transition">
+          <i class="fas fa-download mr-1"></i>${t("dlTitle")}
+        </button>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+let _tvLoadGen=0; // Race condition onleme: her yeni modal acilisinda artar
+async function loadTvSeasons(item){
+  const myGen=++_tvLoadGen; // Bu fetch hangi nesle ait
+  document.getElementById("seasons-loading").classList.remove("hidden");
+  document.getElementById("seasons-content").innerHTML="";
+  try{
+    const dbIdx=(item.db_index!=null&&item.db_index>=0)?item.db_index:-1;
+    const r=await fetch(`/api/uye/tv-detay?tmdb_id=${item.tmdb_id}&db_index=${dbIdx}&lang=${CUR_LANG}`);
+    if(!r.ok)throw new Error("tv-detay "+r.status);
+    if(myGen!==_tvLoadGen)return; // Daha yeni bir modal acildi, bu sonucu yoksay
+    const seasons=(await r.json()).seasons||[];
+    // Poster overlay için veri topla
+    collectTvPosterData(item.tmdb_id, seasons, item.original_language||"");
+    // Grid'deki kartı güncelle (poster üzerinde bayrak+çözünürlük)
+    updateTvCardOverlay(item.tmdb_id);
+    renderSeasons(seasons);
+  }catch(e){
+    if(myGen!==_tvLoadGen)return;
+    document.getElementById("seasons-content").innerHTML=`<p class="ts text-sm">${t("noEp")}</p>`;
+  }finally{
+    if(myGen===_tvLoadGen)document.getElementById("seasons-loading").classList.add("hidden");
+  }
+}
+
+// Dizi kartının poster overlay'ini DOM'da direkt güncelle
+function updateTvCardOverlay(tmdbId){
+  const data=_TV_POSTER_DATA[tmdbId];
+  document.querySelectorAll(`.media-card[data-tmdbid="${tmdbId}"]`).forEach(card=>{
+    const origLang=(card.dataset.origlang||"").toLowerCase();
+    const isYerli=origLang==="tr";
+
+    // --- Bayraklar + CC ---
+    const flagWrap=card.querySelector(".tv-flag-overlay");
+    if(flagWrap){
+      if(data&&data.flags.size>0){
+        // API'dan gelen bayrakları göster; TR varsa css-flag-tr, diğerleri fi-*
+        flagWrap.innerHTML=[...data.flags].slice(0,4).map(f=>
+          f==="tr"?`<span class="css-flag-tr lang-flag"></span>`
+                 :`<span class="lang-flag fi fi-${f}"></span>`
+        ).join("");
+      } else if(isYerli&&!flagWrap.querySelector(".css-flag-tr")){
+        // Henüz API verisi gelmedi ama original_language=tr — bayrağı DOM'dan yaz
+        flagWrap.innerHTML=`<span class="css-flag-tr lang-flag"></span>`;
+      }
+      // Veri yoksa ve yerli değilse: mevcut içeriği (boş) koru, dokunma
+      // trsub/turkce.altyazi varsa CC rozeti bayrakların altına ekle (sol üst köşe)
+      if(data&&data.allHaveTrSub&&!flagWrap.querySelector(".cc-flag")){
+        flagWrap.innerHTML+=`<span class="cc-flag">CC</span>`;
+      }
+    }
+
+    // --- Çözünürlükler ---
+    if(!data)return;
+    const resWrap=card.querySelector(".tv-res-overlay");
+    if(resWrap&&data.resMap.size>0){
+      const order=["4K","1080p","720p","HD","480p","576p","SD"];
+      const sorted=[...data.resMap.entries()].sort((a,b)=>{
+        const ai=order.indexOf(a[0]),bi=order.indexOf(b[0]);
+        return(ai<0?99:ai)-(bi<0?99:bi);
+      });
+      if(sorted.length===1){
+        resWrap.className=`res-badge ${sorted[0][1]} tv-res-overlay`;
+        resWrap.textContent=sorted[0][0];
+      }else{
+        resWrap.className="res-multi-wrap tv-res-overlay";
+        resWrap.innerHTML=sorted.map(([lbl,cls])=>`<span class="res-badge ${cls}" style="position:static;display:inline-block;margin:1px 0">${lbl}</span>`).join("");
+      }
+    }
+  });
+}
+
+function fmtDate(v){
+  if(!v)return v;
+  var d=new Date(v);
+  if(isNaN(d.getTime()))return v;
+  return String(d.getDate()).padStart(2,"0")+"."+String(d.getMonth()+1).padStart(2,"0")+"."+d.getFullYear();
+}
+function renderSeasons(seasons){
+  const cont=document.getElementById("seasons-content");
+  if(!seasons.length){cont.innerHTML=`<p class="ts text-sm">${t("noEp")}</p>`;return;}
+  // Sezonları sezon numarasına göre sırala
+  const sortedSeasons=[...seasons].sort((a,b)=>(a.season_number||0)-(b.season_number||0));
+  cont.innerHTML=sortedSeasons.map((s,si)=>{
+    // Bölümleri bölüm numarasına göre sırala
+    const sortedEps=[...(s.episodes||[])].sort((a,b)=>(a.episode_number||0)-(b.episode_number||0));
+    return `<details class="mb-3 rounded-xl overflow-hidden" style="border:1px solid var(--c-border)" ${si===0?"open":""}>
+      <summary class="px-4 py-3 font-semibold text-sm cursor-pointer tc hover:opacity-80 select-none" style="border-bottom:1px solid var(--c-border)">
+        ${t("season")} ${s.season_number} <span class="ts font-normal ml-2 text-xs">(${sortedEps.length} ${t("episode")})</span>
+      </summary>
+      <div>${sortedEps.map(ep=>renderEp(ep)).join("")}</div>
+    </details>`;
+  }).join("");
+}
+function renderEp(ep){
+  const qs=sortQualities(ep.qualities||[]);
+  // Tüm çözünürlükleri chip olarak listele (başlık alanından kaldırıldı)
+  const _PAT=[
+    {re:/\b(2160p|4k|uhd)\b/i,cls:"res-4k",lbl:"4K"},
+    {re:/\bm?1080p\b/i,cls:"res-1080",lbl:"1080p"},
+    {re:/\bm?1080\b/i,cls:"res-1080",lbl:"1080p"},
+    {re:/\bfhd\b/i,cls:"res-1080",lbl:"1080p"},
+    {re:/\bm?720p\b/i,cls:"res-720",lbl:"720p"},
+    {re:/\bm?720\b/i,cls:"res-720",lbl:"720p"},
+    {re:/\bhd\b/i,cls:"res-720",lbl:"HD"},
+    {re:/\b480p\b/i,cls:"res-480",lbl:"480p"},
+    {re:/\b576p\b/i,cls:"res-480",lbl:"576p"},
+    {re:/\bsd\b/i,cls:"res-sd",lbl:"SD"},
+  ];
+  return `<div class="px-4 py-3 tc" style="border-top:1px solid var(--c-border)">
+    <div class="text-xs ts font-mono mb-0.5">${t("episode")} ${ep.episode_number}</div>
+    <div class="text-sm font-medium leading-snug mb-1">${epTitle(ep)}</div>
+    ${ep.released?`<div class="text-xs ts mb-2">${fmtDate(ep.released)}</div>`:""}
+    ${qs.map(q=>{
+      const fn=encodeURIComponent(q.name||"video.mkv");
+      // Her quality için dil bayrağı
+      const qFlags=extractLangFlags(q.name||"");
+      const qFlagHtml=qFlags?qFlags.split(" ").filter(Boolean).map(f=>`<span class="fi fi-${f}" style="width:1.3em;height:1em;border-radius:2px;display:inline-block;box-shadow:0 1px 3px rgba(0,0,0,.7);flex-shrink:0;transform:translateZ(0);isolation:isolate;color-scheme:light;filter:none;-webkit-filter:none"></span>`).join(""):"";
+      const hasTrSub=/trsub|t[uü]rk[cç]e\.altyaz[iı]/i.test(q.name||"");
+      return `<div class="flex items-center gap-2 mb-1.5">
+        <div class="flex-1 min-w-0">
+          <div class="font-mono text-xs break-all text-gray-400">${q.name||"—"}</div>
+          <div class="flex gap-2 text-xs ts mt-0.5">
+            ${q.quality?`<span class="chip" style="border-color:rgba(59,130,246,.5);color:#93c5fd">${q.quality}</span>`:""}
+            ${q.size?`<span>${q.size}</span>`:""}
+          </div>
+        </div>
+        <div class="flex items-center gap-2 shrink-0">
+          ${qFlagHtml?`<div class="flex gap-1 items-center">${qFlagHtml}</div>`:""}
+          ${hasTrSub?`<span class="cc-badge" style="font-size:.6rem;padding:3px 6px">CC</span>`:""}
+          <button onclick="startDownload('${q.id}','${fn}',${q.size?`'${escAttr(q.size)}'`:'null'})" class="btn-prim text-xs px-3 py-1.5 rounded-lg hover:opacity-85 transition">
+            <i class="fas fa-download mr-1"></i>${t("dlTitle")}
+          </button>
+        </div>
+      </div>`;
+    }).join("")}
+  </div>`;
+}
+
+// Bir dizi item'ının tüm sezonlarındaki bölümlerden bayrak ve çözünürlükleri topla
+// Bu veriler loadTvSeasons'dan gelen seasons array'inden alınır ve poster üzerinde gösterilir
+const _TV_POSTER_DATA={}; // tmdb_id -> {flags:Set, resolutions:Map, originalLang:string}
+function collectTvPosterData(tmdbId, seasons, originalLang){
+  const flags=new Set();
+  const resMap=new Map();
+  const _PAT=[
+    {re:/\b(2160p|4k|uhd)\b/i,cls:"res-4k",lbl:"4K"},
+    {re:/\bm?1080p\b/i,cls:"res-1080",lbl:"1080p"},
+    {re:/\bm?1080\b/i,cls:"res-1080",lbl:"1080p"},
+    {re:/\bfhd\b/i,cls:"res-1080",lbl:"1080p"},
+    {re:/\bm?720p\b/i,cls:"res-720",lbl:"720p"},
+    {re:/\bm?720\b/i,cls:"res-720",lbl:"720p"},
+    {re:/\bhd\b/i,cls:"res-720",lbl:"HD"},
+    {re:/\b480p\b/i,cls:"res-480",lbl:"480p"},
+    {re:/\b576p\b/i,cls:"res-480",lbl:"576p"},
+    {re:/\bsd\b/i,cls:"res-sd",lbl:"SD"},
+  ];
+  // original_language=tr ise TR bayrağını garantile
+  if((originalLang||"").toLowerCase()==="tr") flags.add("tr");
+  let totalQualities=0;
+  let trSubCount=0;
+  seasons.forEach(s=>{
+    (s.episodes||[]).forEach(ep=>{
+      (ep.qualities||[]).forEach(q=>{
+        // Bayraklar
+        const qf=extractLangFlags(q.name||"");
+        qf.split(" ").filter(Boolean).forEach(f=>flags.add(f));
+        // Çözünürlükler
+        const raw=(q.quality||q.name||"").toLowerCase();
+        for(const p of _PAT){if(p.re.test(raw)&&!resMap.has(p.lbl)){resMap.set(p.lbl,p.cls);break;}}
+        // trsub sayacı
+        totalQualities++;
+        if(/trsub|t[uü]rk[cç]e\.altyaz[iı]/i.test(q.name||"")) trSubCount++;
+      });
+    });
+  });
+  const allHaveTrSub=totalQualities>0&&trSubCount>0;
+  _TV_POSTER_DATA[tmdbId]={flags,resMap,originalLang:originalLang||"",allHaveTrSub};
+}
+
+// İNDİRME — gercek dosya adi ile, boyut gösterimi dahil
+async function startDownload(fileId,encodedFilename,fileSize){
+  if(!fileId){showToast("Geçersiz dosya.","red");return;}
+  let filename="video.mkv";
+  try{filename=decodeURIComponent(encodedFilename||"video.mkv");}catch(e){}
+
+  // Overlay'i göster ve boyutu hemen yaz
+  const dlOverlay=document.getElementById("dl-overlay");
+  const dlSizeInfo=document.getElementById("dl-size-info");
+  const dlSizeVal=document.getElementById("dl-size-val");
+  dlOverlay.classList.remove("hidden");
+  if(fileSize&&dlSizeInfo&&dlSizeVal){
+    dlSizeVal.textContent=fileSize;
+    dlSizeInfo.classList.remove("hidden");
+  }else if(dlSizeInfo){
+    dlSizeInfo.classList.add("hidden");
+  }
+
+  try{
+    const r=await fetch(`/api/uye/stream-url?${new URLSearchParams({file_id:fileId,filename:filename})}`);
+    if(r.status===401){location.href="/uye/giris";return;}
+    if(r.status===429){showToast(t("limitErr"),"red");return;}
+    if(!r.ok)throw new Error("stream-url "+r.status);
+    const d=await r.json();
+    if(!d.url)throw new Error("URL alınamadı");
+    // <a download> ile indir — Drive dahil tüm URL'lerde oynatma yerine indirme tetiklenir
+    const _a=document.createElement("a");
+    _a.href=d.url;
+    _a.download=filename;
+    // Drive linkleri cross-origin olduğunda download attribute çalışmayabilir;
+    // bu durumda yeni sekmede aç ki tarayıcı oynatma yerine indirsin
+    if(d.is_gdrive||d.url.includes("drive.google")||(d.gdrive_direct)){
+      _a.target="_blank";_a.rel="noopener noreferrer";
+    }
+    document.body.appendChild(_a);_a.click();document.body.removeChild(_a);
+    showToast(t("dlTitle")+" başlatıldı ✓","green");
+  }catch(e){showToast("İndirme hatası: "+e.message,"red");}
+  finally{
+    setTimeout(()=>{
+      dlOverlay.classList.add("hidden");
+      if(dlSizeInfo)dlSizeInfo.classList.add("hidden");
+    },1200);
+  }
+}
+
+let _toastT=null;
+function showToast(msg,color="green"){
+  const el=document.getElementById("toast");el.textContent=msg;
+  el.style.background=color==="red"?"#991b1b":"#065f46";
+  el.classList.remove("hidden");clearTimeout(_toastT);
+  _toastT=setTimeout(()=>el.classList.add("hidden"),3500);
+}
+function showLoading(on){
+  document.getElementById("loading").classList.toggle("hidden",!on);
+  document.getElementById("media-grid").classList.toggle("hidden",on);
+}
+
+// TEMA SİSTEMİ — 7 tema
+const THEMES={
+  dark_cinema:{label:"Sinema",dot:"#6366f1",vars:{"--c-bg":"#0a0a0f","--c-card":"#13131a","--c-text":"#e2e2f0","--c-text2":"#8b8ba8","--c-prim":"#6366f1","--c-border":"#2d2d3d"}},
+  pure_black:{label:"Saf Siyah",dot:"#22c55e",vars:{"--c-bg":"#000000","--c-card":"#0d0d0d","--c-text":"#f0f0f0","--c-text2":"#666","--c-prim":"#22c55e","--c-border":"#1f1f1f"}},
+  midnight_blue:{label:"Gece Mavisi",dot:"#3b82f6",vars:{"--c-bg":"#060d1a","--c-card":"#0d1628","--c-text":"#d1deff","--c-text2":"#6b80a8","--c-prim":"#3b82f6","--c-border":"#1a2540"}},
+  crimson:{label:"Kırmızı",dot:"#ef4444",vars:{"--c-bg":"#0d0505","--c-card":"#1a0a0a","--c-text":"#f5e0e0","--c-text2":"#8a5f5f","--c-prim":"#ef4444","--c-border":"#2d1414"}},
+  amber:{label:"Amber",dot:"#f59e0b",vars:{"--c-bg":"#0c0900","--c-card":"#1a1200","--c-text":"#fef3c7","--c-text2":"#a08030","--c-prim":"#f59e0b","--c-border":"#2a1f00"}},
+  light_white:{label:"Beyaz",dot:"#6366f1",vars:{"--c-bg":"#f5f5f7","--c-card":"#ffffff","--c-text":"#1a1a2e","--c-text2":"#6b7280","--c-prim":"#6366f1","--c-border":"#e5e7eb"}},
+  light_warm:{label:"Krem",dot:"#d97706",vars:{"--c-bg":"#fdf6ec","--c-card":"#fff9f0","--c-text":"#1c1008","--c-text2":"#78553a","--c-prim":"#d97706","--c-border":"#e8d9c0"}},
+};
+function applyTheme(key){
+  const th=THEMES[key]||THEMES.dark_cinema;
+  for(const[k,v]of Object.entries(th.vars))document.documentElement.style.setProperty(k,v);
+  localStorage.setItem("bflix_theme",key);
+  document.querySelectorAll(".theme-dot").forEach(b=>b.classList.toggle("active",b.dataset.theme===key));
+}
+function buildThemeDots(){
+  const wrap=document.getElementById("theme-dots");if(!wrap)return;
+  for(const[key,th]of Object.entries(THEMES)){
+    const btn=document.createElement("button");
+    btn.className="theme-dot";btn.dataset.theme=key;btn.title=th.label;btn.style.background=th.dot;
+    btn.addEventListener("click",()=>applyTheme(key));wrap.appendChild(btn);
+  }
+}
+
+// ── Platform Sekmeleri ─────────────────────────────────────────────────────
+function setPlatform(key){
+  CUR_PLATFORM=key;CUR_PAGE=1;updatePlatformTabs();updateBadge();
+  const fp=document.getElementById("filter-platform");if(fp)fp.value=key;
+  loadMedia();
+}
+function updatePlatformTabs(){
+  // Tüm plt-btn'leri pasif yap, seçiliyi aktif
+  document.querySelectorAll(".plt-btn").forEach(b=>{
+    const isActive=b.id===(CUR_PLATFORM?"plt-"+CUR_PLATFORM:"plt-all");
+    if(isActive){b.classList.remove("btn-outline");b.classList.add("btn-prim");}
+    else{b.classList.remove("btn-prim");b.classList.add("btn-outline");}
+  });
+}
+// setType'ı override et — tür değişince platform sıfırlanmasın
+const _origSetType=setType;
+
+// ── Dil Bayrağı (stremio_routes.py ile aynı mantık) ─────────────────────────
+const _LANG_FLAGS={
+  "tr":"tr","tur":"tr","turkish":"tr",
+  "en":"gb","eng":"gb","english":"gb",
+  "de":"de","ger":"de","deu":"de","german":"de",
+  "fr":"fr","fre":"fr","fra":"fr","french":"fr",
+  "es":"es","spa":"es","spanish":"es",
+  "it":"it","ita":"it","italian":"it",
+  "pt":"pt","por":"pt","portuguese":"pt",
+  "ru":"ru","rus":"ru","russian":"ru",
+  "ar":"sa","ara":"sa","arabic":"sa",
+  "ja":"jp","jpn":"jp","japanese":"jp",
+  "ko":"kr","kor":"kr","korean":"kr",
+  "zh":"cn","chi":"cn","chinese":"cn",
+  "pl":"pl","pol":"pl","polish":"pl",
+  "nl":"nl","dut":"nl","dutch":"nl",
+  "sv":"se","swe":"se","swedish":"se",
+  "no":"no","nor":"no","norwegian":"no",
+  "da":"dk","dan":"dk","danish":"dk",
+  "fi":"fi","fin":"fi","finnish":"fi",
+  "cs":"cz","cze":"cz","czech":"cz",
+  "hu":"hu","hun":"hu","hungarian":"hu",
+  "ro":"ro","rum":"ro","romanian":"ro",
+  "el":"gr","gre":"gr","greek":"gr",
+  "he":"il","heb":"il","hebrew":"il",
+  "hi":"in","hin":"in","hindi":"in",
+  "fa":"ir","per":"ir","farsi":"ir",
+};
+const _IT_IS_ITUNES=new Set(["it"]);
+
+// Dosya adından dil bayrakları çıkar — DUAL varsa TR+GB otomatik eklenir
+function extractLangFlags(filename){
+  if(!filename) return "";
+  const nameUp=filename.toUpperCase();
+  const flags=[];
+  const addFlag=f=>{if(!flags.includes(f))flags.push(f);};
+
+  // 0. DUAL kontrolü: DUAL kelimesi varsa veya iki dil kodu birlikte geçiyorsa TR+GB ekle
+  if(/DUAL[\s._-]?AUDIO|2AUDIO|\bDUAL\b/.test(nameUp)){
+    addFlag("tr");
+    addFlag("gb");
+  }
+
+  // 1. Tam kelime: GERMAN, TURKISH, ENGLISH vb.
+  if(nameUp.includes("GERMAN"))  addFlag("de");
+  if(nameUp.includes("TURKISH")) addFlag("tr");
+  if(nameUp.includes("ENGLISH")) addFlag("gb");
+  if(nameUp.includes("FRENCH"))  addFlag("fr");
+  if(nameUp.includes("SPANISH")) addFlag("es");
+  if(nameUp.includes("ITALIAN")) addFlag("it");
+  if(nameUp.includes("KOREAN"))  addFlag("kr");
+  if(nameUp.includes("JAPANESE"))addFlag("jp");
+
+  // 2. Köşeli parantez: [TR-EN] veya [TR.EN]
+  const bracketM=nameUp.match(/\[([A-Z]{2,3}(?:[-. ][A-Z]{2,3})*)\]/);
+  if(bracketM){
+    bracketM[1].split(/[-. ]/).forEach(p=>{
+      const key=p.toLowerCase();
+      if(_LANG_FLAGS[key]) addFlag(_LANG_FLAGS[key]);
+    });
+  }
+
+  // 3. Nokta/tire ile ayrılmış kodlar: .TR. .DE. -EN- (boşluk hariç — film adındaki kelimeler eşleşmesin)
+  const inline=[...nameUp.matchAll(/(?<=[.\-_])([A-Z]{2,3})(?=[.\-_])/g)].map(m=>m[1]);
+  inline.forEach(code=>{
+    const key=code.toLowerCase();
+    if(_IT_IS_ITUNES.has(key)) return;
+    if(_LANG_FLAGS[key]) addFlag(_LANG_FLAGS[key]);
+  });
+
+  return flags.join(" ");
+}
+
+// CSS for multiple resolution badges
+// (added via style injection below)
+
+// Qualities listesinden TÜM çözünürlük rozetlerini üret (m720p, m1080p dahil)
+function resBadge(item){
+  const qs=item.qualities||[];
+  // Her quality için çözünürlük tespit et
+  const _PATTERNS=[
+    {re:/\b(2160p|4k|uhd)\b/i,  cls:"res-4k",   label:"4K"},
+    {re:/\bm?1080p\b/i,          cls:"res-1080",  label:"1080p"},
+    {re:/\bm?1080\b/i,           cls:"res-1080",  label:"1080p"},
+    {re:/\bfhd\b/i,              cls:"res-1080",  label:"1080p"},
+    {re:/\bm?720p\b/i,           cls:"res-720",   label:"720p"},
+    {re:/\bm?720\b/i,            cls:"res-720",   label:"720p"},
+    {re:/\bhd\b/i,               cls:"res-720",   label:"HD"},
+    {re:/\b480p\b/i,             cls:"res-480",   label:"480p"},
+    {re:/\b576p\b/i,             cls:"res-480",   label:"576p"},
+    {re:/\bsd\b/i,               cls:"res-sd",    label:"SD"},
+  ];
+  const seen=new Map(); // label -> cls
+  qs.forEach(q=>{
+    const raw=(q.quality||q.name||"").toLowerCase();
+    for(const pat of _PATTERNS){
+      if(pat.re.test(raw)&&!seen.has(pat.label)){
+        seen.set(pat.label,pat.cls);
+        break;
+      }
+    }
+  });
+  if(!seen.size)return"";
+  // Öncelik sırasına göre sırala
+  const order=["4K","1080p","720p","HD","480p","576p","SD"];
+  const sorted=[...seen.entries()].sort((a,b)=>{
+    const ai=order.indexOf(a[0]),bi=order.indexOf(b[0]);
+    return (ai<0?99:ai)-(bi<0?99:bi);
+  });
+  if(sorted.length===1){
+    return`<span class="res-badge ${sorted[0][1]}">${sorted[0][0]}</span>`;
+  }
+  const allBadges=sorted.map(([lbl,cls])=>`<span class="res-badge ${cls}" style="position:static;display:inline-block;margin:1px 0">${lbl}</span>`).join("");
+  return`<span class="res-multi-wrap">${allBadges}</span>`;
+}
+
+// item.language alanından veya qualities dosya adından bayrak üret
+function langFlag(item){
+  const qs=item.qualities||[];
+  const allFlags=new Set();
+
+  // Qualities dosya adlarından bayrak çıkar (extractLangFlags artık DUAL'i de içeriyor)
+  qs.forEach(q=>{
+    extractLangFlags(q.name||"").split(" ").forEach(f=>{if(f)allFlags.add(f);});
+  });
+
+  // original_language=tr ise TR bayrağını garantile (dosya adında yoksa da)
+  if((item.original_language||"").toLowerCase()==="tr") allFlags.add("tr");
+
+  // Qualities'ten bulunduysa onu kullan
+  if(allFlags.size>0) return [...allFlags].slice(0,4).join(" ");
+
+  // Yoksa item.language alanına bak
+  const langRaw=(item.language||"").toLowerCase().trim();
+  if(langRaw){
+    const key=langRaw.split(/[-_]/)[0];
+    if(_LANG_FLAGS[key]) return _LANG_FLAGS[key];
+  }
+  return "";
+}
+
+// ── Arama Modu (Film/Oyuncu) ────────────────────────────────────────────────
+let SEARCH_MODE="title"; // "title" veya "cast"
+function toggleSearchMode(){
+  SEARCH_MODE=SEARCH_MODE==="title"?"cast":"title";
+  const btn=document.getElementById("search-mode-btn");
+  const icon=document.getElementById("search-mode-icon");
+  const input=document.getElementById("search-input");
+  if(SEARCH_MODE==="cast"){
+    btn.title=t("searchModeCast");
+    icon.className="fas fa-user";
+    btn.style.color="var(--c-prim)";
+    input.placeholder=t("searchCastPh");
+  }else{
+    btn.title=t("searchModeTitle");
+    icon.className="fas fa-film";
+    btn.style.color="";
+    input.placeholder=t("searchPh");
+  }
+  if(document.getElementById("search-input").value.trim()){
+    SEARCH_Q=document.getElementById("search-input").value.trim();
+    CUR_PAGE=1;loadMedia();
+  }
+}
+
+
+
+// ── Chip tıklama filtreleme yardımcıları ────────────────────────────────────
+function filterByYear(yr){
+  document.getElementById("filter-year").value=yr;
+  CUR_YEAR=String(yr);CUR_PAGE=1;
+  document.getElementById("filter-panel").classList.remove("hidden");
+  updateBadge();loadMedia();
+}
+function filterByGenre(g){
+  document.getElementById("filter-genre").value=g;
+  CUR_GENRE=g;CUR_PAGE=1;
+  document.getElementById("filter-panel").classList.remove("hidden");
+  updateBadge();loadMedia();
+}
+function filterByCast(actor){
+  SEARCH_MODE="cast";
+  const input=document.getElementById("search-input");
+  input.value=actor;SEARCH_Q=actor;
+  document.getElementById("search-mode-icon").className="fas fa-user";
+  document.getElementById("search-mode-btn").style.color="var(--c-prim)";
+  input.placeholder=t("searchCastPh");
+  CUR_PAGE=1;updateBadge();loadMedia();
+}
+
+// ── FRAGMAN (TRAILER) FONKSİYONLARI ────────────────────────────────────────
+const _TMDB_API_KEY=""; // Boş — TMDB API key yoksa YouTube search URL kullanılır
+const _YT_SEARCH_CACHE={}; // tmdb_id -> {videoId, title} | null
+
+async function fetchTrailerVideoId(tmdbId, mediaType, fallbackTitle){
+  if(_YT_SEARCH_CACHE[tmdbId]!==undefined) return _YT_SEARCH_CACHE[tmdbId];
+  // TMDB /videos endpoint ile dene (key gerektirmez, backend proxy gerekebilir)
+  // Fallback: YouTube embed search URL (autoplay ile)
+  // Burada TMDB videos API'yi /api/uye/tmdb-trailer?tmdb_id=X&type=Y üzerinden çekmeyi dene
+  try{
+    const r=await fetch(`/api/uye/tmdb-trailer?tmdb_id=${encodeURIComponent(tmdbId)}&type=${encodeURIComponent(mediaType||"movie")}&lang=${CUR_LANG}`);
+    if(r.ok){
+      const d=await r.json();
+      if(d.video_id){
+        _YT_SEARCH_CACHE[tmdbId]={videoId:d.video_id,title:d.title||fallbackTitle};
+        return _YT_SEARCH_CACHE[tmdbId];
+      }
+    }
+  }catch(e){}
+  // Fallback: YouTube search embed (API key gerekmez ama otomatik oynatmaz)
+  _YT_SEARCH_CACHE[tmdbId]=null;
+  return null;
+}
+
+function openTrailer(tmdbId, mediaType, itemTitle, event){
+  if(event){event.stopPropagation();}
+
+  // ── Mobil: YouTube uygulamasını aç, overlay gösterme ─────────────────────
+  const isMobile=/Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  if(isMobile){
+    fetchTrailerVideoId(tmdbId, mediaType, itemTitle).then(result=>{
+      let ytUrl;
+      if(result&&result.videoId){
+        ytUrl=`https://www.youtube.com/watch?v=${result.videoId}`;
+      } else {
+        const q=encodeURIComponent((itemTitle||"")+" official trailer");
+        ytUrl=`https://www.youtube.com/results?search_query=${q}`;
+      }
+      window.open(ytUrl,"_blank","noopener,noreferrer");
+    });
+    return;
+  }
+
+  // ── PC: mevcut overlay davranışı ─────────────────────────────────────────
+  document.getElementById("trailer-title").textContent=(itemTitle||"Fragman")+" — Fragman";
+  document.getElementById("trailer-loading").style.display="flex";
+  document.getElementById("trailer-overlay").style.display="flex";
+  // iframe'i sıfırla
+  const existing=document.getElementById("trailer-iframe");
+  if(existing)existing.remove();
+
+  // YouTube arama URL'si — TMDB video_id varsa direkt, yoksa search embed
+  fetchTrailerVideoId(tmdbId, mediaType, itemTitle).then(result=>{
+    const loadingEl=document.getElementById("trailer-loading");
+    if(!loadingEl)return; // Modal kapatılmış olabilir
+    let embedUrl;
+    if(result&&result.videoId){
+      embedUrl=`https://www.youtube.com/embed/${result.videoId}?autoplay=1&rel=0&modestbranding=1`;
+    } else {
+      // YouTube search embed fallback
+      const q=encodeURIComponent((itemTitle||"")+" official trailer");
+      embedUrl=`https://www.youtube.com/embed?listType=search&list=${q}&autoplay=1`;
+    }
+    if(loadingEl)loadingEl.style.display="none";
+    const iframe=document.createElement("iframe");
+    iframe.id="trailer-iframe";
+    iframe.src=embedUrl;
+    iframe.allow="autoplay; encrypted-media; fullscreen";
+    iframe.allowFullscreen=true;
+    iframe.style.cssText="position:absolute;inset:0;width:100%;height:100%;border:none";
+    document.getElementById("trailer-embed").appendChild(iframe);
+  });
+}
+
+function closeTrailer(){
+  document.getElementById("trailer-overlay").style.display="none";
+  const iframe=document.getElementById("trailer-iframe");
+  if(iframe)iframe.remove();
+}
+
+// INIT
+buildThemeDots();
+applyTheme(localStorage.getItem("bflix_theme")||"dark_cinema");
+applyI18n();updatePlatformTabs();loadUsage();loadSubDays();setType('movie');loadTmdbSections();
+setInterval(loadUsage,60000);
+document.addEventListener("keydown",e=>{if(e.key==="Escape")closeModal();});
+
+// ── TMDB ÖNE ÇIKANLAR ────────────────────────────────────────────────────────
+let _tmdbTrendingItems=null,_tmdbNewItems=null;
+
+async function loadTmdbSections(){
+  try{
+    const [tRes,nRes]=await Promise.all([
+      fetch("/api/uye/tmdb?kind=trending"),
+      fetch("/api/uye/tmdb?kind=new")
+    ]);
+    if(tRes.ok){
+      const td=await tRes.json();
+      if(td.items&&td.items.length){
+        _tmdbTrendingItems=td.items;
+        renderTmdbGrid("trending-grid","trending-section",td.items);
+      }
+    }
+    if(nRes.ok){
+      const nd=await nRes.json();
+      if(nd.items&&nd.items.length){
+        _tmdbNewItems=nd.items;
+        renderTmdbGrid("new-releases-grid","new-releases-section",nd.items);
+      }
+    }
+  }catch(e){}
+  // Yerli Diziler bölümünü yükle (original_language=tr, media_type=tv)
+  loadYerliDiziSection();
+}
+
+// Dil değişince fetch yapmadan cache'den yeniden render et
+function reRenderTmdbSections(){
+  if(_tmdbTrendingItems&&_tmdbTrendingItems.length)
+    renderTmdbGrid("trending-grid","trending-section",_tmdbTrendingItems);
+  if(_tmdbNewItems&&_tmdbNewItems.length)
+    renderTmdbGrid("new-releases-grid","new-releases-section",_tmdbNewItems);
+}
+
+async function loadYerliDiziSection(){
+  try{
+    const r=await fetch("/api/uye/medya?media_type=tv&sort=yerli_dizi&page=1&page_size=24&lang="+CUR_LANG);
+    if(!r.ok) return;
+    const d=await r.json();
+    const items=(d.tv_shows||[]).filter(i=>i.original_language==="tr");
+    if(!items.length) return;
+    const sec=document.getElementById("yerli-dizi-section");
+    const grid=document.getElementById("yerli-dizi-grid");
+    if(!sec||!grid) return;
+    grid.innerHTML=items.map(item=>{
+      const key=tmdbStore(item);
+      const p=poster(item),tl=escAttr(title(item)),rt=item.rating?item.rating.toFixed(1):"";
+      const isTV=true;
+      const tDataAttr=item.tmdb_id?` data-tmdbid="${item.tmdb_id}"`:"";
+      // Yerli diziler için TR bayrağını hemen göster (overlay fetch'i bekleme)
+      const trFlagHtml=`<span class="css-flag-tr lang-flag"></span>`;
+      return `<div class="media-card"${tDataAttr} onclick="openModal('${key}')">
+        <div class="poster-wrap" style="position:relative">${p?`<img src="${escAttr(p)}" alt="${tl}" loading="lazy" onerror="this.style.display='none'">`:`<div style="display:flex;align-items:center;justify-content:center;height:100%"><i class="fas fa-tv" style="font-size:1.5rem;opacity:.2"></i></div>`}<div class="lang-overlay tv-flag-overlay">${trFlagHtml}</div><span class="tv-res-overlay"></span></div>
+        <div class="p-1.5 tc" style="border-top:1px solid var(--c-border)">
+          <div class="text-xs font-semibold leading-snug mb-0.5 line-clamp-2">${tl}</div>
+          ${rt?`<div class="text-xs chip-rating">⭐${rt}</div>`:""}
+        </div>
+      </div>`;
+    }).join("");
+    // TV overlay'lerini tetikle
+    items.filter(i=>i.tmdb_id).forEach(item=>{
+      if(_TV_POSTER_DATA[item.tmdb_id])updateTvCardOverlay(item.tmdb_id);
+    });
+    _yerliDiziLoaded=true;
+    // Yükleme bitti — görünürlüğü şu anki moda göre güncelle
+    refreshTmdbVisibility();
+  }catch(e){}
+}
+
+function renderTmdbGrid(gridId,sectionId,items){
+  const sec=document.getElementById(sectionId);
+  const grid=document.getElementById(gridId);
+  if(!sec||!grid)return;
+  grid.innerHTML=items.map(item=>{
+    const key=tmdbStore(item);
+    const p=poster(item),tl=escAttr(title(item)),rt=item.rating?item.rating.toFixed(1):"";
+    const badge=item.media_type==="tv"?`<span style="position:absolute;top:4px;right:4px;font-size:.55rem;background:rgba(0,0,0,.75);color:#a78bfa;border:1px solid rgba(167,139,250,.4);border-radius:4px;padding:1px 4px;line-height:1.4">${t("series").toUpperCase()}</span>`:`<span style="position:absolute;top:4px;right:4px;font-size:.55rem;background:rgba(0,0,0,.75);color:#60a5fa;border:1px solid rgba(96,165,250,.4);border-radius:4px;padding:1px 4px;line-height:1.4">${t("movies").toUpperCase()}</span>`;
+    const isTV=item.media_type==="tv";
+    let tFlagHtml="",tResBadge="",tDataAttr="";
+    if(!isTV){
+      const tFlags=langFlag(item);
+      tFlagHtml=tFlags?tFlags.split(" ").filter(Boolean).map(f=>f==="tr"?`<span class="css-flag-tr lang-flag"></span>`:`<span class="lang-flag fi fi-${f}"></span>`).join(""):"";
+      tResBadge=resBadge(item);
+    } else {
+      const tmdbIsYerli=(item.original_language||"").toLowerCase()==="tr";
+      tDataAttr=item.tmdb_id?` data-tmdbid="${item.tmdb_id}" data-origlang="${item.original_language||""}"` :"";
+      tFlagHtml=tmdbIsYerli?`<span class="css-flag-tr lang-flag"></span>`:"";
+    }
+    const hpDesc2=desc(item)?`<div class="hp-desc">${desc(item).slice(0,110)}${desc(item).length>110?"…":""}</div>`:"";
+    const hpImdb2=rt?`<span class="hp-badge">⭐${rt}</span>`:"";
+    const hpYear2=item.release_year?`<span class="hp-badge">${item.release_year}</span>`:"";
+    const hpTrailerBtn2=item.tmdb_id?`<button class="hp-trailer-btn" onclick="openTrailer('${item.tmdb_id}','${isTV?"tv":"movie"}','${tl}',event)"><i class="fab fa-youtube"></i> ${t("trailerWatch")}</button>`:"";
+    const hoverPreview2=`<div class="hover-preview"><div class="hp-title">${tl}</div><div class="hp-meta">${hpImdb2}${hpYear2}</div>${hpDesc2}${hpTrailerBtn2}</div>`;
+    return `<div class="media-card-wrap"><div class="media-card"${tDataAttr} onclick="openModal('${key}')">
+      <div class="poster-wrap" style="position:relative">${p?`<img src="${escAttr(p)}" alt="${tl}" loading="lazy" onerror="this.style.display='none'">`:`<div style="display:flex;align-items:center;justify-content:center;height:100%"><i class="fas fa-film" style="font-size:1.5rem;opacity:.2"></i></div>`}${badge}${isTV?`<div class="lang-overlay tv-flag-overlay">${tFlagHtml}</div><span class="tv-res-overlay"></span>`:(tFlagHtml?`<div class="lang-overlay">${tFlagHtml}</div>`:"")+tResBadge}</div>
+      <div class="p-1.5 tc" style="border-top:1px solid var(--c-border)">
+        <div class="text-xs font-semibold leading-snug mb-0.5 line-clamp-2">${tl}</div>
+        ${rt?`<div class="text-xs chip-rating">⭐${rt}</div>`:""}
+      </div>
+    </div>${hoverPreview2}</div>`;
+  }).join("");
+  sec.classList.remove("hidden");
+  // TV dizileri için overlay'leri tetikle (bayrak+çözünürlük)
+  items.filter(item=>item.media_type==="tv"&&item.tmdb_id).forEach(item=>{
+    if(_TV_POSTER_DATA[item.tmdb_id])updateTvCardOverlay(item.tmdb_id);
+    else{
+      const dbIdx=(item.db_index!=null&&item.db_index>=0)?item.db_index:-1;
+      fetch(`/api/uye/tv-detay?tmdb_id=${item.tmdb_id}&db_index=${dbIdx}&lang=${CUR_LANG}`).then(r=>r.ok?r.json():null).then(data=>{
+        if(!data||!data.seasons)return;
+        collectTvPosterData(item.tmdb_id,data.seasons,item.original_language||"");
+        updateTvCardOverlay(item.tmdb_id);
+      }).catch(()=>{});
+    }
+  });
+}
+
+function scrollRow(id,dir){
+  const el=document.getElementById(id);
+  if(!el)return;
+  const step=el.clientWidth*0.75||300;
+  el.scrollBy({left:dir*step,behavior:'smooth'});
+}
+
+// TMDB bölümlerini sadece ilk açılışta ve arama/filtre/sıralama/sayfa değişiminde gizle
+function refreshTmdbVisibility(){
+  const hasSrc=SEARCH_Q||CUR_GENRE||CUR_YEAR||CUR_CAST||CUR_PLATFORM||(CUR_SORT!=="newest"&&CUR_SORT!=="yerli_film"&&CUR_SORT!=="yerli_dizi")||CUR_PAGE>1;
+  const isYerli=CUR_SORT==="yerli_film"||CUR_SORT==="yerli_dizi";
+  const ts=document.getElementById("tmdb-section");
+  if(ts)ts.style.display=(hasSrc||isYerli)?"none":"";
+  // Yerli Diziler satırı: sadece dizi modunda, filtre/arama yokken göster
+  const yerliSec=document.getElementById("yerli-dizi-section");
+  if(yerliSec){
+    const showYerli=CUR_TYPE==="tv"&&!hasSrc&&CUR_PAGE===1;
+    yerliSec.style.display=showYerli?"":"none";
+  }
+}
+
+// ── Profil Modal ─────────────────────────────────────────────────────────────
+let _profileData = null;
+let _resetTimer  = null;
+
+async function openProfileModal(){
+  document.getElementById("profile-overlay").style.display="flex";
+  document.getElementById("profile-loading").style.display="flex";
+  document.getElementById("profile-content").style.display="none";
+  try{
+    const r = await fetch("/api/uye/profil");
+    if(!r.ok) throw new Error("HTTP "+r.status);
+    _profileData = await r.json();
+    renderProfileModal(_profileData);
+  }catch(e){
+    document.getElementById("profile-loading").innerHTML=
+      `<span class="ts text-sm">Veri yüklenemedi: ${e.message}</span>`;
+  }
+}
+
+function closeProfileModal(){
+  document.getElementById("profile-overlay").style.display="none";
+  if(_resetTimer){clearInterval(_resetTimer);_resetTimer=null;}
+}
+
+function _fmtGb(v){
+  if(v==null||v===undefined)return t("unlimited");
+  if(v<0.001)return"0 MB";
+  if(v<1)return(v*1024).toFixed(0)+" MB";
+  return v.toFixed(2)+" GB";
+}
+
+function _pctColor(pct){
+  if(pct>=90)return"#ef4444";
+  if(pct>=70)return"#f59e0b";
+  return"#22c55e";
+}
+
+function renderProfileModal(d){
+  // Profil fotoğrafı kaldırıldı — her zaman fa-user-circle ikonu kullanılır
+
+  // Temel bilgiler
+  document.getElementById("pm-name").textContent      = d.name||"—";
+  document.getElementById("pm-since").textContent     = d.member_since||"—";
+  document.getElementById("pm-expiry").textContent    = d.expiry_datetime||"—";
+
+  // Kalan gün
+  const daysEl = document.getElementById("pm-days-left");
+  if(d.days_left!=null){
+    const col = d.days_left<=7?"#ef4444":d.days_left<=30?"#f59e0b":"#22c55e";
+    // Bitiş tarihini hesapla
+    const expDate=new Date();
+    expDate.setDate(expDate.getDate()+d.days_left);
+    const dd=String(expDate.getDate()).padStart(2,"0");
+    const mm=String(expDate.getMonth()+1).padStart(2,"0");
+    const yyyy=expDate.getFullYear();
+    const dateLabel=`${dd}.${mm}.${yyyy}`;
+    daysEl.innerHTML = `<span style="color:${col};font-weight:700">${d.days_left}</span> ${t("pmDaysLeft")} <span style="font-size:.75rem;opacity:.7">(${dateLabel})</span>`;
+  } else {
+    daysEl.textContent="—";
+  }
+
+  // Kullanım barları
+  function renderBar(barId, used, limit, labelId, remId){
+    const usedEl = document.getElementById(labelId);
+    const remEl  = document.getElementById(remId);
+    const barEl  = document.getElementById(barId);
+    if(!usedEl||!barEl) return;
+    const pct = limit>0 ? Math.min(100,Math.round(used/limit*100)) : 0;
+    barEl.style.width = pct+"%";
+    barEl.style.background = _pctColor(pct);
+    if(usedEl) usedEl.textContent = limit>0 ? `${_fmtGb(used)} / ${_fmtGb(limit)}` : _fmtGb(used);
+    if(remEl)  remEl.textContent  = d.daily_remaining!=null&&barId==="pm-bar-daily"
+      ? _fmtGb(d.daily_remaining)
+      : (d.monthly_remaining!=null&&barId==="pm-bar-monthly" ? _fmtGb(d.monthly_remaining) : t("unlimited"));
+  }
+  renderBar("pm-bar-daily",  d.daily_gb,  d.daily_limit,  "pm-daily-used",  "pm-daily-rem");
+  renderBar("pm-bar-monthly",d.monthly_gb,d.monthly_limit,"pm-monthly-used","pm-monthly-rem");
+  document.getElementById("pm-total").textContent = _fmtGb(d.total_gb);
+
+  // Reset countdown — client-side, badge ile ayni _secsToReset() fonksiyonunu kullanir (senkron)
+  function updateReset(){
+    const secs = typeof _secsToReset === "function" ? _secsToReset() : 0;
+    const el = document.getElementById("pm-reset");
+    if(!el) return;
+    if(secs<=0){ el.textContent=t("pmSoonReset"); return; }
+    const h=Math.floor(secs/3600);
+    const m=Math.floor((secs%3600)/60);
+    const s=secs%60;
+    el.textContent=(h>0?h+"s ":"")+m+"dk "+String(s).padStart(2,"0")+"sn";
+  }
+  updateReset();
+  if(_resetTimer) clearInterval(_resetTimer);
+  _resetTimer = setInterval(updateReset,1000);
+
+  // 30 günlük bar chart
+  renderDailyChart(d.daily_30||[]);
+
+  document.getElementById("profile-loading").style.display="none";
+  document.getElementById("profile-content").style.display="block";
+}
+
+function renderDailyChart(data){
+  const wrap = document.getElementById("pm-chart");
+  if(!wrap||!data.length) return;
+  const maxGb = Math.max(...data.map(d=>d.gb), 0.001);
+  const today = new Date().toISOString().slice(0,10);
+
+  wrap.innerHTML = data.map(d=>{
+    const pct = Math.max(2, Math.round(d.gb/maxGb*100));
+    const isToday = d.date===today;
+    const label = d.date.slice(5); // MM-DD
+    const title = `${d.date}\n${_fmtGb(d.gb)}\n${d.streams} akış`;
+    const col   = isToday?"var(--c-prim)":"#3b82f6";
+    return `<div class="pm-bar-col" title="${title}">
+      <div class="pm-bar-val" style="height:${pct}%;background:${col};${isToday?"box-shadow:0 0 6px var(--c-prim)":""}"></div>
+      <div class="pm-bar-lbl ${isToday?"pm-bar-lbl-today":""}">${label}</div>
+    </div>`;
+  }).join("");
+}
+
+document.addEventListener("keydown",e=>{
+  if(e.key==="Escape"){closeModal();closeProfileModal();closeTrailer();}
+});
+</script>
+
+<!-- FRAGMAN (TRAILER) MODAL -->
+<div id="trailer-overlay" onclick="if(event.target===this)closeTrailer()">
+  <div class="trailer-box">
+    <div class="trailer-header">
+      <span id="trailer-title">Fragman</span>
+      <button class="trailer-close" onclick="closeTrailer()"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="trailer-embed" id="trailer-embed">
+      <div class="trailer-loading" id="trailer-loading">
+        <div class="w-10 h-10 border-4 rounded-full spinner" style="border-color:var(--c-border);border-top-color:#ef4444"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- PROFİL MODAL -->
+<style>
+  #profile-overlay{position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.75);display:none;align-items:center;justify-content:center;padding:1rem}
+  .pm-box{width:100%;max-width:680px;max-height:90vh;overflow-y:auto;border-radius:1rem;border:1px solid var(--c-border);background:var(--c-card);padding:1.5rem}
+  .pm-stat-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:.75rem;margin-bottom:1rem}
+  @media(min-width:500px){.pm-stat-grid{grid-template-columns:repeat(3,1fr)}}
+  .pm-stat{background:var(--c-bg);border:1px solid var(--c-border);border-radius:.75rem;padding:.75rem;display:flex;flex-direction:column;gap:.2rem}
+  .pm-stat-label{font-size:.65rem;color:var(--c-text2);text-transform:uppercase;letter-spacing:.04em}
+  .pm-stat-value{font-size:.95rem;font-weight:700;color:var(--c-text)}
+  .pm-bar-wrap{background:var(--c-border);border-radius:9999px;height:6px;margin:.3rem 0 .5rem}
+  .pm-bar-fill{height:6px;border-radius:9999px;transition:width .5s}
+  .pm-chart-wrap{display:flex;align-items:flex-end;gap:2px;height:80px;padding-top:.5rem;overflow:hidden}
+  .pm-bar-col{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;min-width:0;cursor:default}
+  .pm-bar-val{width:100%;border-radius:2px 2px 0 0;min-height:2px;transition:height .3s}
+  .pm-bar-lbl{font-size:.42rem;color:var(--c-text2);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:clip;max-width:100%;text-align:center}
+  .pm-bar-lbl-today{color:var(--c-prim);font-weight:700}
+  .pm-section-title{font-size:.75rem;font-weight:600;color:var(--c-text2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:.5rem;display:flex;align-items:center;gap:.4rem}
+</style>
+
+<div id="profile-overlay" onclick="if(event.target===this)closeProfileModal()">
+  <div class="pm-box">
+    <div class="flex items-center justify-between mb-4">
+      <div class="flex items-center gap-2">
+        <i class="fas fa-user-circle" style="font-size:1.4rem;color:var(--c-prim)"></i>
+        <span id="pm-name" class="text-lg font-bold">…</span>
+      </div>
+      <button onclick="closeProfileModal()" class="ts hover:text-white text-xl"><i class="fas fa-times"></i></button>
+    </div>
+
+    <div id="profile-loading" style="display:flex;align-items:center;justify-content:center;min-height:120px">
+      <i class="fas fa-circle-notch fa-spin" style="font-size:1.5rem;color:var(--c-prim)"></i>
+    </div>
+
+    <div id="profile-content" style="display:none">
+
+      <!-- Üyelik Bilgileri -->
+      <div class="pm-section-title"><i class="fas fa-id-card"></i> <span id="pm-section-member">Üyelik Bilgileri</span></div>
+      <div class="pm-stat-grid" style="margin-bottom:1.25rem">
+        <div class="pm-stat">
+          <span class="pm-stat-label" id="pm-label-since">Üyelik Başlangıcı</span>
+          <span class="pm-stat-value" id="pm-since" style="font-size:.8rem">—</span>
+        </div>
+        <div class="pm-stat">
+          <span class="pm-stat-label" id="pm-label-expiry">Bitiş Tarihi</span>
+          <span class="pm-stat-value" id="pm-expiry" style="font-size:.8rem">—</span>
+        </div>
+        <div class="pm-stat">
+          <span class="pm-stat-label" id="pm-label-duration">Süre</span>
+          <span class="pm-stat-value" id="pm-days-left" style="font-size:.85rem">—</span>
+        </div>
+      </div>
+
+      <!-- Kullanım -->
+      <div class="pm-section-title"><i class="fas fa-chart-bar"></i> <span id="pm-section-data">Veri Kullanımı</span></div>
+      <div style="margin-bottom:1rem">
+        <div class="flex justify-between text-xs mb-1">
+          <span class="ts" id="pm-label-daily">Günlük</span>
+          <span id="pm-daily-used" class="font-medium">—</span>
+        </div>
+        <div class="pm-bar-wrap"><div id="pm-bar-daily" class="pm-bar-fill" style="width:0%"></div></div>
+        <div class="flex justify-between text-xs">
+          <span class="ts"><span id="pm-label-remaining">Kalan:</span> <span id="pm-daily-rem" class="font-semibold" style="color:var(--c-prim)">—</span></span>
+          <span class="ts"><span id="pm-label-reset-in">Sıfırlanmaya:</span> <span id="pm-reset" class="font-semibold" style="color:#22c55e">—</span></span>
+        </div>
+      </div>
+      <div style="margin-bottom:1rem">
+        <div class="flex justify-between text-xs mb-1">
+          <span class="ts" id="pm-label-monthly">Aylık</span>
+          <span id="pm-monthly-used" class="font-medium">—</span>
+        </div>
+        <div class="pm-bar-wrap"><div id="pm-bar-monthly" class="pm-bar-fill" style="width:0%"></div></div>
+        <div class="text-xs ts"><span id="pm-label-remaining2">Kalan:</span> <span id="pm-monthly-rem" class="font-semibold text-yellow-400">—</span></div>
+      </div>
+      <div class="pm-stat-grid" style="grid-template-columns:1fr;margin-bottom:1.25rem">
+        <div class="pm-stat" style="flex-direction:row;align-items:center;justify-content:space-between">
+          <span class="pm-stat-label" id="pm-label-total">Toplam İndirilen</span>
+          <span id="pm-total" class="pm-stat-value" style="color:#a78bfa">—</span>
+        </div>
+      </div>
+
+      <!-- Son 30 Gün -->
+      <div class="pm-section-title"><i class="fas fa-calendar-week"></i> <span id="pm-section-last30">Son 30 Gün Veri Kullanımı</span></div>
+      <div class="pm-chart-wrap" id="pm-chart"></div>
+      <div class="text-xs ts mt-1" style="text-align:center" id="pm-30days-ago">← 30 gün önce · Bugün →</div>
+
+    </div>
+  </div>
+</div>
+</body>
+</html>

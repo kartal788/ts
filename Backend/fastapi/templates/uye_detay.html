@@ -1,0 +1,451 @@
+{% extends "base.html" %}
+{% block title %}Üye Detayı – {{ app_name }}{% endblock %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+  <!-- Geri Butonu + Başlık -->
+  <div class="mb-6 flex items-center gap-4">
+    <a href="/admin/uyeler"
+      class="flex items-center gap-2 text-sm theme-text-secondary hover:text-primary transition-colors">
+      <i class="fas fa-arrow-left"></i> Üyeler
+    </a>
+    <span class="theme-text-secondary">/</span>
+    <span class="text-sm font-medium text-text" id="header-name">Yükleniyor…</span>
+  </div>
+
+  <!-- Profil Kartı -->
+  <div class="theme-card rounded-2xl border p-6 mb-6 relative overflow-hidden">
+    <!-- Dekoratif arka plan -->
+    <div class="absolute inset-0 opacity-5 pointer-events-none"
+         style="background: radial-gradient(ellipse at top right, var(--c-prim) 0%, transparent 70%)"></div>
+
+    <div class="relative flex flex-col sm:flex-row sm:items-center gap-5">
+      <!-- Avatar -->
+      <div class="w-16 h-16 rounded-2xl flex items-center justify-center text-2xl font-bold flex-shrink-0"
+           style="background:color-mix(in srgb, var(--c-prim) 25%, var(--c-card))"
+           id="avatar-letter">?</div>
+
+      <!-- Bilgiler -->
+      <div class="flex-1 min-w-0">
+        <div class="flex flex-wrap items-center gap-3 mb-1">
+          <h1 class="text-xl font-bold text-text" id="member-name">—</h1>
+          <span id="member-status-badge"></span>
+        </div>
+        <div class="flex flex-wrap gap-4 text-sm theme-text-secondary" id="member-meta">
+          <span id="meta-id"></span>
+          <span id="meta-token"></span>
+          <span id="meta-expiry"></span>
+          <span id="meta-joined"></span>
+        </div>
+      </div>
+
+      <!-- Yenile -->
+      <button onclick="loadMemberDetail()" id="refresh-btn"
+        class="flex-shrink-0 flex items-center gap-2 px-4 py-2 bg-primary/10 hover:bg-primary/20 text-primary rounded-xl text-sm font-medium transition-all self-start">
+        <i class="fas fa-sync-alt" id="refresh-icon"></i> Yenile
+      </button>
+    </div>
+  </div>
+
+  <!-- Veri İstatistik Kartları -->
+  <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+    <div class="theme-card rounded-2xl border p-5">
+      <div class="text-xs theme-text-secondary uppercase tracking-wide font-semibold mb-1">Bugün</div>
+      <div class="text-2xl font-bold text-primary" id="stat-daily">—</div>
+    </div>
+    <div class="theme-card rounded-2xl border p-5">
+      <div class="text-xs theme-text-secondary uppercase tracking-wide font-semibold mb-1">Bu Ay</div>
+      <div class="text-2xl font-bold text-blue-400" id="stat-monthly">—</div>
+    </div>
+    <div class="theme-card rounded-2xl border p-5">
+      <div class="text-xs theme-text-secondary uppercase tracking-wide font-semibold mb-1">Toplam</div>
+      <div class="text-2xl font-bold text-text" id="stat-total">—</div>
+    </div>
+    <div class="theme-card rounded-2xl border p-5">
+      <div class="text-xs theme-text-secondary uppercase tracking-wide font-semibold mb-1">Toplam İzleme</div>
+      <div class="text-2xl font-bold text-yellow-400" id="stat-streams">—</div>
+    </div>
+  </div>
+
+  <!-- Ek İstatistikler (Ort hız, süre vb.) -->
+  <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
+    <div class="theme-card rounded-2xl border p-4">
+      <div class="text-xs theme-text-secondary mb-1">Ort. Hız</div>
+      <div class="text-lg font-bold text-text" id="stat-avgspeed">—</div>
+    </div>
+    <div class="theme-card rounded-2xl border p-4">
+      <div class="text-xs theme-text-secondary mb-1">En Yüksek Hız</div>
+      <div class="text-lg font-bold text-text" id="stat-peakspeed">—</div>
+    </div>
+    <div class="theme-card rounded-2xl border p-4">
+      <div class="text-xs theme-text-secondary mb-1">Ort. Seans Süresi</div>
+      <div class="text-lg font-bold text-text" id="stat-duration">—</div>
+    </div>
+    <div class="theme-card rounded-2xl border p-4">
+      <div class="text-xs theme-text-secondary mb-1">Limit</div>
+      <div class="text-lg font-bold text-text" id="stat-limits">—</div>
+    </div>
+  </div>
+
+  <!-- İzleme Geçmişi Tablosu -->
+  <div class="mb-8">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-lg font-bold flex items-center gap-2">
+        <i class="fas fa-film text-primary"></i>
+        İzleme Geçmişi
+        <span class="text-xs theme-text-secondary font-normal ml-1">(en yeniden en eskiye)</span>
+      </h2>
+      <div class="flex items-center gap-2">
+        <input id="hist-search" type="text" placeholder="İçerik ara…" oninput="filterHistory()"
+          class="text-sm px-3 py-1.5 rounded-xl border focus:outline-none focus:border-primary w-40 transition">
+        <span class="text-xs theme-text-secondary" id="hist-count"></span>
+      </div>
+    </div>
+
+    <div class="theme-card rounded-2xl border overflow-hidden shadow-sm">
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="border-b">
+              <th class="px-5 py-3.5 text-left text-xs font-semibold uppercase tracking-wide theme-text-secondary">#</th>
+              <th class="px-5 py-3.5 text-left text-xs font-semibold uppercase tracking-wide theme-text-secondary">İçerik</th>
+              <th class="px-5 py-3.5 text-center text-xs font-semibold uppercase tracking-wide theme-text-secondary hidden sm:table-cell">Sertifika</th>
+              <th class="px-5 py-3.5 text-right text-xs font-semibold uppercase tracking-wide theme-text-secondary">Veri</th>
+              <th class="px-5 py-3.5 text-center text-xs font-semibold uppercase tracking-wide theme-text-secondary hidden md:table-cell">Süre</th>
+              <th class="px-5 py-3.5 text-center text-xs font-semibold uppercase tracking-wide theme-text-secondary hidden lg:table-cell">Hız (Ort/Zirve)</th>
+              <th class="px-5 py-3.5 text-center text-xs font-semibold uppercase tracking-wide theme-text-secondary hidden sm:table-cell">Durum</th>
+              <th class="px-5 py-3.5 text-right text-xs font-semibold uppercase tracking-wide theme-text-secondary">Tarih & Saat</th>
+            </tr>
+          </thead>
+          <tbody id="history-tbody">
+            <tr>
+              <td colspan="8" class="px-6 py-12 text-center theme-text-secondary">
+                <i class="fas fa-spinner fa-spin text-primary mr-2"></i> Geçmiş yükleniyor…
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Sayfalama -->
+    <div class="flex flex-col sm:flex-row items-center justify-between mt-4 gap-3">
+      <span class="text-sm theme-text-secondary" id="hist-page-info"></span>
+      <div class="flex items-center gap-2">
+        <button id="hist-btn-prev" onclick="histChangePage(-1)"
+          class="px-4 py-2 rounded-xl border text-sm hover:border-primary transition disabled:opacity-40">
+          <i class="fas fa-chevron-left mr-1"></i> Önceki
+        </button>
+        <span class="text-sm font-semibold px-2" id="hist-page-num"></span>
+        <button id="hist-btn-next" onclick="histChangePage(1)"
+          class="px-4 py-2 rounded-xl border text-sm hover:border-primary transition disabled:opacity-40">
+          Sonraki <i class="fas fa-chevron-right ml-1"></i>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- En Çok İzlenen İçerikler -->
+  <div class="mb-8">
+    <h2 class="text-lg font-bold flex items-center gap-2 mb-4">
+      <i class="fas fa-star text-yellow-400"></i>
+      En Çok İzlenen İçerikler
+    </h2>
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4" id="top-content-grid">
+      <div class="col-span-full text-center theme-text-secondary py-8">
+        <i class="fas fa-spinner fa-spin mr-2"></i> Yükleniyor…
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  // ─── URL'den kullanıcı ID veya token al ───────────────────────────────────
+  const pathParts = window.location.pathname.split("/");
+  const MEMBER_ID = decodeURIComponent(pathParts[pathParts.length - 1]);
+
+  let ALL_HISTORY  = [];
+  let FILT_HISTORY = [];
+  let histPage     = 1;
+  const HIST_PAGE_SIZE = 25;
+
+  // ─── Yardımcı fonksiyonlar ────────────────────────────────────────────────
+  function fmtGB(bytes) {
+    if (!bytes || bytes <= 0) return "0 B";
+    if (bytes >= 1073741824) return (bytes / 1073741824).toFixed(2) + " GB";
+    if (bytes >= 1048576)    return (bytes / 1048576).toFixed(1) + " MB";
+    if (bytes >= 1024)       return (bytes / 1024).toFixed(0) + " KB";
+    return bytes + " B";
+  }
+
+  function fmtSpeed(mbps) {
+    if (!mbps || mbps <= 0) return "—";
+    if (mbps >= 1000) return (mbps / 1000).toFixed(2) + " GB/s";
+    return mbps.toFixed(2) + " MB/s";
+  }
+
+  function fmtDuration(sec) {
+    if (!sec || sec <= 0) return "—";
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = Math.floor(sec % 60);
+    if (h > 0) return `${h}s ${m}d`;
+    if (m > 0) return `${m}d ${s}s`;
+    return `${s}s`;
+  }
+
+  function fmtDateTime(iso) {
+    if (!iso) return "—";
+    try {
+      const d = new Date(iso);
+      return d.toLocaleString("tr-TR", {
+        day: "2-digit", month: "2-digit", year: "numeric",
+        hour: "2-digit", minute: "2-digit", second: "2-digit"
+      });
+    } catch { return iso; }
+  }
+
+  function fmtDate(iso) {
+    if (!iso) return "—";
+    try {
+      return new Date(iso).toLocaleDateString("tr-TR", {
+        day: "2-digit", month: "2-digit", year: "numeric"
+      });
+    } catch { return "—"; }
+  }
+
+  function escHtml(s) {
+    return String(s || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  }
+
+  function certBadge(cert) {
+    if (!cert) return `<span class="text-xs theme-text-secondary">—</span>`;
+    const colors = {
+      "G":    "bg-green-500/20 text-green-400",
+      "PG":   "bg-blue-500/20 text-blue-400",
+      "PG-13":"bg-yellow-500/20 text-yellow-400",
+      "R":    "bg-orange-500/20 text-orange-400",
+      "NC-17":"bg-red-500/20 text-red-400",
+      "18+":  "bg-red-500/20 text-red-400",
+      "16+":  "bg-orange-500/20 text-orange-400",
+      "13+":  "bg-yellow-500/20 text-yellow-400",
+      "7+":   "bg-blue-500/20 text-blue-400",
+    };
+    const cls = colors[cert] || "bg-gray-500/20 text-gray-400";
+    return `<span class="inline-block text-xs px-2 py-0.5 rounded-lg font-bold ${cls}">${escHtml(cert)}</span>`;
+  }
+
+  function streamStatusBadge(status) {
+    if (!status) return "—";
+    const map = {
+      "finished":   ["bg-green-500/15 text-green-400", "Tamamlandı"],
+      "cancelled":  ["bg-yellow-500/15 text-yellow-400", "İptal"],
+      "error":      ["bg-red-500/15 text-red-400", "Hata"],
+      "active":     ["bg-blue-500/15 text-blue-400", "Aktif"],
+    };
+    const [cls, label] = map[status] || ["bg-gray-500/15 text-gray-400", status];
+    return `<span class="inline-block text-xs px-2 py-0.5 rounded-lg ${cls}">${label}</span>`;
+  }
+
+  // ─── Ana Yükleme ─────────────────────────────────────────────────────────
+  async function loadMemberDetail() {
+    const btn  = document.getElementById("refresh-btn");
+    const icon = document.getElementById("refresh-icon");
+    btn.disabled = true;
+    icon.classList.add("fa-spin");
+
+    try {
+      // İki API'yi paralel çağır: üye listesi + bu üyenin stream geçmişi
+      const [membersRes, streamRes] = await Promise.all([
+        fetch("/api/admin/uyeler"),
+        fetch(`/api/admin/uyeler/${encodeURIComponent(MEMBER_ID)}/streams`)
+      ]);
+
+      if (!membersRes.ok) throw new Error("Üye listesi alınamadı");
+      const membersData = await membersRes.json();
+      const allMembers  = membersData.members || [];
+
+      // Bu üyeyi bul
+      const member = allMembers.find(m =>
+        String(m.user_id) === MEMBER_ID ||
+        (m.token && m.token === MEMBER_ID) ||
+        (m.token && m.token.startsWith(MEMBER_ID))
+      );
+
+      // Profil kartını doldur
+      const name   = member?.user_name || member?.name || `Kullanıcı ${MEMBER_ID}`;
+      const uid    = member?.user_id || MEMBER_ID;
+      const token  = member?.token || "";
+      const status = member?.subscription_status || "unknown";
+      const expiry = member?.subscription_expiry || null;
+
+      document.getElementById("header-name").textContent = name;
+      document.getElementById("member-name").textContent = name;
+      document.getElementById("avatar-letter").textContent = (name.charAt(0) || "?").toUpperCase();
+
+      // Durum badge
+      const statusLabels = {
+        active:  ["bg-green-500/15 text-green-400",  "🟢 Aktif"],
+        expired: ["bg-red-500/15 text-red-400",       "🔴 Süresi Dolmuş"],
+        banned:  ["bg-gray-500/15 text-gray-400",     "⛔ Engellendi"],
+      };
+      const [sCls, sLabel] = statusLabels[status] || ["bg-gray-500/15 text-gray-400", status];
+      document.getElementById("member-status-badge").innerHTML =
+        `<span class="text-xs px-3 py-1 rounded-full font-medium ${sCls}">${sLabel}</span>`;
+
+      // Meta bilgiler
+      if (uid)    document.getElementById("meta-id").textContent    = `ID: ${uid}`;
+      if (token)  document.getElementById("meta-token").textContent = `Token: ${token.substring(0,12)}…`;
+      if (expiry) document.getElementById("meta-expiry").textContent = `Bitiş: ${fmtDate(expiry)}`;
+
+      // Kullanım istatistikleri (token tablosundan)
+      document.getElementById("stat-daily").textContent   = fmtGB(member?.daily_bytes   || 0);
+      document.getElementById("stat-monthly").textContent = fmtGB(member?.monthly_bytes || 0);
+      document.getElementById("stat-total").textContent   = fmtGB(member?.total_bytes   || 0);
+
+      // Limitler
+      const limits = member?.limits;
+      if (limits) {
+        const dLim = limits.daily_limit_gb   || "∞";
+        const mLim = limits.monthly_limit_gb || "∞";
+        document.getElementById("stat-limits").textContent = `${dLim} GB/gün · ${mLim} GB/ay`;
+      } else {
+        document.getElementById("stat-limits").textContent = "Limitsiz";
+      }
+
+      // ── Stream geçmişi ──────────────────────────────────────────────────
+      if (streamRes.ok) {
+        const streamData = await streamRes.json();
+        populateStreamData(streamData);
+      } else {
+        document.getElementById("stat-streams").textContent   = "—";
+        document.getElementById("stat-avgspeed").textContent  = "—";
+        document.getElementById("stat-peakspeed").textContent = "—";
+        document.getElementById("stat-duration").textContent  = "—";
+        document.getElementById("history-tbody").innerHTML =
+          `<tr><td colspan="8" class="px-6 py-8 text-center theme-text-secondary">Stream geçmişi alınamadı</td></tr>`;
+      }
+
+    } catch (e) {
+      console.error(e);
+      document.getElementById("member-name").textContent = `Hata: ${e.message}`;
+    } finally {
+      btn.disabled = false;
+      icon.classList.remove("fa-spin");
+    }
+  }
+
+  // ─── Stream Verisi Yerleştirme ────────────────────────────────────────────
+  function populateStreamData(data) {
+    ALL_HISTORY = data.streams || [];
+    const summary    = data.summary    || {};
+    const topContent = data.top_content || [];
+
+    // Özet istatistikler
+    document.getElementById("stat-streams").textContent    = summary.total_streams ?? ALL_HISTORY.length;
+    document.getElementById("stat-avgspeed").textContent   = fmtSpeed(summary.avg_speed  || 0);
+    document.getElementById("stat-peakspeed").textContent  = fmtSpeed(summary.peak_speed || 0);
+    document.getElementById("stat-duration").textContent   = fmtDuration(summary.avg_duration || 0);
+
+    // En çok izlenen içerikler (API'den gelir)
+    const grid = document.getElementById("top-content-grid");
+    if (topContent.length === 0) {
+      grid.innerHTML = `<div class="col-span-full text-center theme-text-secondary py-6">Veri bulunamadı</div>`;
+    } else {
+      grid.innerHTML = topContent.map((item, i) => `
+        <div class="theme-card rounded-2xl border p-4 flex items-start gap-3 hover:border-primary/50 transition-colors">
+          <div class="w-9 h-9 rounded-xl flex-shrink-0 flex items-center justify-center font-bold text-base"
+               style="background:color-mix(in srgb, var(--c-prim) ${22 + i * 4}%, var(--c-card))">
+            ${i + 1}
+          </div>
+          <div class="min-w-0 flex-1">
+            <div class="font-semibold text-sm text-text leading-tight">${escHtml(item.title || "—")}</div>
+            <div class="text-xs theme-text-secondary mt-1">
+              <span class="font-medium text-text">${item.watch_count}</span> kez izlendi
+              · <span class="text-primary">${fmtGB(item.total_bytes)}</span>
+            </div>
+            <div class="text-xs theme-text-secondary">${fmtDate(item.last_watched)}</div>
+          </div>
+        </div>`).join("");
+    }
+
+    FILT_HISTORY = [...ALL_HISTORY];
+    histPage = 1;
+    renderHistoryTable();
+  }
+
+  function filterHistory() {
+    const q = document.getElementById("hist-search").value.trim().toLowerCase();
+    FILT_HISTORY = q
+      ? ALL_HISTORY.filter(s => (s.title || "").toLowerCase().includes(q) ||
+                                (s.imdb_id || "").toLowerCase().includes(q))
+      : [...ALL_HISTORY];
+    histPage = 1;
+    renderHistoryTable();
+  }
+
+  function renderHistoryTable() {
+    const tbody = document.getElementById("history-tbody");
+    const total = FILT_HISTORY.length;
+    const pages = Math.max(1, Math.ceil(total / HIST_PAGE_SIZE));
+    histPage = Math.min(Math.max(histPage, 1), pages);
+
+    const start = (histPage - 1) * HIST_PAGE_SIZE;
+    const slice = FILT_HISTORY.slice(start, start + HIST_PAGE_SIZE);
+
+    document.getElementById("hist-count").textContent       = `${total} kayıt`;
+    document.getElementById("hist-page-info").textContent   = `${total} kayıt • Sayfa ${histPage} / ${pages}`;
+    document.getElementById("hist-page-num").textContent    = `${histPage} / ${pages}`;
+    document.getElementById("hist-btn-prev").disabled       = histPage === 1;
+    document.getElementById("hist-btn-next").disabled       = histPage === pages;
+
+    if (slice.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="8" class="px-6 py-8 text-center theme-text-secondary">Kayıt bulunamadı</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = slice.map((s, i) => {
+      const idx   = start + i + 1;
+      const title = s.title || s.imdb_id || "İsimsiz İçerik";
+      const cert  = s.certification || s.certification_tr || s.certification_us || null;
+      const bytes = s.total_bytes || 0;
+      const dur   = s.duration_sec || 0;
+      const avg   = s.avg_mbps || 0;
+      const peak  = s.peak_mbps || 0;
+      const stat  = s.status || "finished";
+      const logAt = s.logged_at || null;
+
+      return `<tr class="border-b border-white/5 hover:bg-primary/5 transition-colors">
+        <td class="px-5 py-3.5 text-xs theme-text-secondary font-mono">${idx}</td>
+        <td class="px-5 py-3.5">
+          <div class="font-medium text-text text-sm leading-tight">${escHtml(title)}</div>
+          ${s.imdb_id ? `<div class="text-xs theme-text-secondary mt-0.5 font-mono">${escHtml(s.imdb_id)}</div>` : ""}
+        </td>
+        <td class="px-5 py-3.5 text-center hidden sm:table-cell">${certBadge(cert)}</td>
+        <td class="px-5 py-3.5 text-right font-semibold text-sm text-primary">${fmtGB(bytes)}</td>
+        <td class="px-5 py-3.5 text-center text-xs theme-text-secondary hidden md:table-cell">${fmtDuration(dur)}</td>
+        <td class="px-5 py-3.5 text-center text-xs theme-text-secondary hidden lg:table-cell">
+          <span class="text-text font-medium">${fmtSpeed(avg)}</span>
+          <span class="opacity-60 mx-1">/</span>
+          <span>${fmtSpeed(peak)}</span>
+        </td>
+        <td class="px-5 py-3.5 text-center hidden sm:table-cell">${streamStatusBadge(stat)}</td>
+        <td class="px-5 py-3.5 text-right text-xs theme-text-secondary whitespace-nowrap">
+          ${fmtDateTime(logAt)}
+        </td>
+      </tr>`;
+    }).join("");
+  }
+
+  function histChangePage(dir) {
+    histPage += dir;
+    renderHistoryTable();
+    document.getElementById("history-tbody").closest("div.theme-card").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  // ─── Başlat ──────────────────────────────────────────────────────────────
+  loadMemberDetail();
+</script>
+{% endblock %}

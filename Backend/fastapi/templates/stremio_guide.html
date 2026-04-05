@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+
+{% block title %}Stremio Kurulum Rehberi - KARTAL{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div class="mb-8 text-center">
+        <h1 class="text-3xl font-bold">Stremio Eklenti Kurulumu</h1>
+        <p class="theme-text-secondary mt-2">Telegram Stremio eklentisini kurmak için aşağıdaki adımları takip edin</p>
+    </div>
+
+    <div class="space-y-6">
+        <div class="theme-card p-5 sm:p-6 rounded-lg shadow">
+            <div class="flex items-start space-x-4">
+                <div class="w-8 h-8 theme-primary rounded-full flex items-center justify-center flex-shrink-0">
+                    <span class="text-white font-semibold">1</span>
+                </div>
+                <div class="flex-1 min-w-0">
+                    <h3 class="text-lg font-semibold mb-2">Eklenti URL'sini Kopyala</h3>
+                    <p class="theme-text-secondary mb-4">Aşağıdaki manifest URL'sini panonuza kopyalayın</p>
+                    <div class="bg-gray-100 dark:bg-gray-800 p-4 rounded-md font-mono text-sm break-all flex flex-col sm:flex-row items-start sm:items-center gap-2">
+                        <span id="addon-url" class="flex-1">{{ request.base_url }}stremio/manifest.json</span>
+                        <button onclick="copyToClipboard('addon-url')"
+                                class="whitespace-nowrap bg-primary text-white px-3 py-1.5 rounded text-xs hover:opacity-90 transition-opacity">
+                            <i class="fas fa-copy mr-1"></i>Kopyala
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="theme-card p-5 sm:p-6 rounded-lg shadow">
+            <div class="flex items-start space-x-4">
+                <div class="w-8 h-8 theme-primary rounded-full flex items-center justify-center flex-shrink-0">
+                    <span class="text-white font-semibold">2</span>
+                </div>
+                <div>
+                    <h3 class="text-lg font-semibold mb-2">Stremio'yu Aç</h3>
+                    <p class="theme-text-secondary">Cihazınızda Stremio uygulamasını başlatın</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="theme-card p-5 sm:p-6 rounded-lg shadow">
+            <div class="flex items-start space-x-4">
+                <div class="w-8 h-8 theme-primary rounded-full flex items-center justify-center flex-shrink-0">
+                    <span class="text-white font-semibold">3</span>
+                </div>
+                <div>
+                    <h3 class="text-lg font-semibold mb-2">Eklentiler Bölümüne Git</h3>
+                    <p class="theme-text-secondary">Stremio'nun ana menüsündeki "Eklentiler" bölümüne gidin</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="theme-card p-5 sm:p-6 rounded-lg shadow">
+            <div class="flex items-start space-x-4">
+                <div class="w-8 h-8 theme-primary rounded-full flex items-center justify-center flex-shrink-0">
+                    <span class="text-white font-semibold">4</span>
+                </div>
+                <div class="flex-1">
+                    <h3 class="text-lg font-semibold mb-2">Eklentiyi Kur</h3>
+                    <p class="theme-text-secondary mb-4">URL'yi "Eklenti Ekle" alanına yapıştırın ve yükle düğmesine tıklayın</p>
+                    <div class="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700 text-blue-700 dark:text-blue-300 p-4 rounded-md text-sm">
+                        <i class="fas fa-lightbulb mr-2"></i><strong>İpucu:</strong> Cihazınızın bu sunucunun IP adresine ağ üzerinden erişebildiğinden emin olun
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="theme-card p-5 sm:p-6 rounded-lg shadow mt-8">
+        <h2 class="text-xl font-semibold mb-4">Ek Bilgiler</h2>
+        <div class="space-y-4">
+            <div>
+                <h4 class="font-medium flex items-center gap-2"><i class="fas fa-wifi text-primary"></i>Ağ Gereksinimleri</h4>
+                <p class="theme-text-secondary text-sm mt-1">Stremio ve bu sunucu aynı ağda olmalı veya sunucuya internet üzerinden erişilebilir olmalıdır</p>
+            </div>
+            <div>
+                <h4 class="font-medium flex items-center gap-2"><i class="fas fa-film text-primary"></i>Desteklenen İçerikler</h4>
+                <p class="theme-text-secondary text-sm mt-1">Eklenti, medya koleksiyonunuzdaki film ve dizi içeriklerine erişim sağlar</p>
+            </div>
+            <div>
+                <h4 class="font-medium flex items-center gap-2"><i class="fas fa-sync text-primary"></i>Güncellemeler</h4>
+                <p class="theme-text-secondary text-sm mt-1">Eklenti, medya kütüphanesindeki değişikliklerle otomatik olarak senkronize edilir</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function copyToClipboard(elementId) {
+    const element = document.getElementById(elementId);
+    const text = element.textContent.trim();
+
+    navigator.clipboard.writeText(text).then(() => {
+        const button = element.nextElementSibling;
+        const originalHTML = button.innerHTML;
+        button.innerHTML = '<i class="fas fa-check mr-1"></i>Kopyalandı!';
+        button.classList.add('bg-green-600');
+        setTimeout(() => {
+            button.innerHTML = originalHTML;
+            button.classList.remove('bg-green-600');
+        }, 2000);
+    }).catch(err => {
+        console.error('Kopyalama başarısız:', err);
+        alert('Panoya kopyalanamadı');
+    });
+}
+</script>
+{% endblock %}

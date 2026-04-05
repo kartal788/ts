@@ -1,0 +1,362 @@
+{% extends "base.html" %}
+{% block title %}İstatistik – {{ app_name }}{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-8">
+
+  <!-- ══════════════════════════════════════════ TOKEN KARTI (EN ÜSTTE) -->
+  <section>
+    <h2 class="text-lg font-semibold mb-3 flex items-center gap-2">
+      <i class="fas fa-key text-primary"></i> API Tokenları
+    </h2>
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+      {% for tok in api_tokens %}
+      <div class="theme-card rounded-xl p-4 border border-gray-700 hover:border-primary transition-colors">
+        <div class="flex items-start justify-between mb-2">
+          <span class="font-medium text-sm truncate max-w-[70%]">{{ tok.name or ("Token " ~ loop.index) }}</span>
+          <span class="text-xs px-2 py-0.5 rounded-full
+            {% if tok.subscription_status == 'active' %}bg-green-600 text-white
+            {% else %}bg-gray-600 text-gray-200{% endif %}">
+            {{ tok.subscription_status or "pasif" }}
+          </span>
+        </div>
+        <div class="font-mono text-xs theme-text-secondary mb-3 truncate">{{ tok.token }}</div>
+        <div class="grid grid-cols-2 gap-1 text-xs">
+          <div class="theme-text-secondary">Günlük</div>
+          <div class="text-right font-medium">
+            {% set d = tok.usage.daily.bytes if tok.usage and tok.usage.daily else 0 %}
+            {{ "%.2f"|format(d / 1073741824) }} GB
+          </div>
+          <div class="theme-text-secondary">Aylık</div>
+          <div class="text-right font-medium">
+            {% set m = tok.usage.monthly.bytes if tok.usage and tok.usage.monthly else 0 %}
+            {{ "%.2f"|format(m / 1073741824) }} GB
+          </div>
+          <div class="theme-text-secondary">Toplam</div>
+          <div class="text-right font-medium text-primary">
+            {% set t = tok.usage.total_bytes if tok.usage else 0 %}
+            {{ "%.2f"|format(t / 1073741824) }} GB
+          </div>
+        </div>
+        {% if tok.limits %}
+        <div class="mt-2 pt-2 border-t border-gray-700 text-xs theme-text-secondary">
+          Limit: {{ tok.limits.daily_limit_gb or "∞" }} GB/gün · {{ tok.limits.monthly_limit_gb or "∞" }} GB/ay
+        </div>
+        {% endif %}
+      </div>
+      {% else %}
+      <div class="col-span-full theme-card rounded-xl p-6 text-center theme-text-secondary">
+        Henüz token yok.
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <!-- ══════════════════════════════════════════ ANLIK + ÖZET KARTLAR -->
+  <section>
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-lg font-semibold flex items-center gap-2">
+        <i class="fas fa-bolt text-yellow-400"></i> Bant Genişliği Özeti
+      </h2>
+      <button onclick="refreshStats()" id="refresh-btn"
+        class="text-xs bg-primary text-white px-3 py-1.5 rounded-lg hover:opacity-80 transition flex items-center gap-1">
+        <i class="fas fa-sync-alt" id="refresh-icon"></i> Yenile
+      </button>
+    </div>
+
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3" id="summary-cards">
+      <!-- Anlık Stream Hızı -->
+      <div class="theme-card rounded-xl p-4 border border-yellow-500/40 col-span-2 sm:col-span-1">
+        <div class="text-xs theme-text-secondary mb-1 flex items-center gap-1">
+          <span class="w-2 h-2 bg-green-400 rounded-full animate-pulse inline-block" id="stream-pulse"></span>
+          Üyelere Giden
+        </div>
+        <div class="text-2xl font-bold text-yellow-400" id="val-instant">
+          {% set bps = (bw.instant.bytes) %}
+          {% if bps >= 1073741824 %}{{ "%.2f"|format(bps / 1073741824) }} GB/s
+          {% elif bps >= 1048576 %}{{ "%.2f"|format(bps / 1048576) }} MB/s
+          {% elif bps >= 1024 %}{{ "%.1f"|format(bps / 1024) }} KB/s
+          {% else %}{{ bps }} B/s{% endif %}
+        </div>
+        <div class="text-xs theme-text-secondary mt-1" id="val-active-streams">
+          {{ bw.instant.active_streams }} Anlık Stream
+        </div>
+      </div>
+      <!-- Anlık Çıkış Hızı (stream + yükleme) -->
+      <div class="theme-card rounded-xl p-4 border border-blue-500/40 col-span-2 sm:col-span-1">
+        <div class="text-xs theme-text-secondary mb-1 flex items-center gap-1">
+          <span class="w-2 h-2 bg-blue-400 rounded-full animate-pulse inline-block" id="upload-pulse"></span>
+          Sunucuya İnen
+        </div>
+        <div class="text-2xl font-bold text-blue-400" id="val-upload-speed">0 B/s</div>
+        <div class="text-xs theme-text-secondary mt-1 flex items-center gap-1">
+          <span id="val-upload-tasks">Boşta</span>
+          <span class="ml-auto font-mono text-xs opacity-50" id="val-upload-ts"></span>
+        </div>
+      </div>
+      <!-- Saatlik -->
+      <div class="theme-card rounded-xl p-4">
+        <div class="text-xs theme-text-secondary mb-1"><i class="fas fa-clock mr-1"></i>Bu Saat</div>
+        <div class="text-xl font-bold text-primary" id="val-hourly">
+          {{ "%.2f"|format(bw.hourly_bytes / 1073741824) }} GB
+        </div>
+      </div>
+      <!-- Günlük -->
+      <div class="theme-card rounded-xl p-4">
+        <div class="text-xs theme-text-secondary mb-1"><i class="fas fa-calendar-day mr-1"></i>Bugün</div>
+        <div class="text-xl font-bold text-primary" id="val-daily">
+          {{ "%.2f"|format(bw.daily_bytes / 1073741824) }} GB
+        </div>
+      </div>
+      <!-- Aylık -->
+      <div class="theme-card rounded-xl p-4">
+        <div class="text-xs theme-text-secondary mb-1"><i class="fas fa-calendar-alt mr-1"></i>Bu Ay</div>
+        <div class="text-xl font-bold text-primary" id="val-monthly">
+          {{ "%.2f"|format(bw.monthly_bytes / 1073741824) }} GB
+        </div>
+      </div>
+      <!-- Toplam -->
+      <div class="theme-card rounded-xl p-4">
+        <div class="text-xs theme-text-secondary mb-1"><i class="fas fa-database mr-1"></i>Toplam</div>
+        <div class="text-xl font-bold text-primary" id="val-total">
+          {{ "%.2f"|format(bw.total_bytes / 1073741824) }} GB
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════════════════════ SON 7 GÜN TABLOSU -->
+  <section>
+    <h2 class="text-lg font-semibold mb-3 flex items-center gap-2">
+      <i class="fas fa-table text-primary"></i> Son 7 Gün – Günlük Veri
+    </h2>
+    <div class="theme-card rounded-xl overflow-hidden border border-gray-700">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="border-b border-gray-700">
+            <th class="text-left px-4 py-3 theme-text-secondary font-medium">Tarih</th>
+            <th class="text-right px-4 py-3 theme-text-secondary font-medium">İndirilen (GB)</th>
+            <th class="text-right px-4 py-3 theme-text-secondary font-medium">Stream Sayısı</th>
+            <th class="text-right px-4 py-3 theme-text-secondary font-medium hidden sm:table-cell">Üye Sayısı</th>
+            <th class="px-4 py-3 theme-text-secondary font-medium text-left">Grafik</th>
+          </tr>
+        </thead>
+        <tbody id="weekly-table">
+          {% set max_weekly = bw.weekly | map(attribute='bytes') | max if bw.weekly else 1 %}
+          {% for day in bw.weekly %}
+          <tr class="border-b border-gray-800 hover:bg-white/5 transition-colors">
+            <td class="px-4 py-3 font-mono">
+              {{ day.date }}
+              {% if loop.last %}<span class="ml-1 text-xs text-green-400">(bugün)</span>{% endif %}
+            </td>
+            <td class="px-4 py-3 text-right font-medium">
+              {{ "%.3f"|format(day.bytes / 1073741824) }}
+            </td>
+            <td class="px-4 py-3 text-right theme-text-secondary">{{ day.streams }}</td>
+            <td class="px-4 py-3 text-right theme-text-secondary hidden sm:table-cell">{{ day.unique_users or 0 }}</td>
+            <td class="px-4 py-3">
+              {% set pct = (day.bytes / max_weekly * 100) | int if max_weekly > 0 else 0 %}
+              <div class="h-2 rounded-full bg-gray-700 w-full">
+                <div class="h-2 rounded-full bg-primary transition-all" style="width:{{ pct }}%"></div>
+              </div>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="5" class="px-4 py-6 text-center theme-text-secondary">Veri yok</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════════════════════ EN ÇOK VERİ ÇEKEN İÇERİKLER (SAYFALANMIŞ) -->
+  <section>
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-lg font-semibold flex items-center gap-2">
+        <i class="fas fa-film text-primary"></i> En Çok Veri Kullanan İçerikler
+        <span class="text-xs theme-text-secondary font-normal">(son 7 gün)</span>
+      </h2>
+      <span class="text-xs theme-text-secondary" id="content-page-info"></span>
+    </div>
+
+    <div class="theme-card rounded-xl overflow-hidden border border-gray-700">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="border-b border-gray-700">
+            <th class="text-left px-4 py-3 theme-text-secondary font-medium w-10">#</th>
+            <th class="text-left px-4 py-3 theme-text-secondary font-medium">İçerik Adı</th>
+            <th class="text-right px-4 py-3 theme-text-secondary font-medium">Veri</th>
+            <th class="text-right px-4 py-3 theme-text-secondary font-medium hidden sm:table-cell">Stream</th>
+            <th class="text-right px-4 py-3 theme-text-secondary font-medium hidden sm:table-cell">Üye</th>
+            <th class="text-right px-4 py-3 theme-text-secondary font-medium hidden md:table-cell">Son İzlenme</th>
+          </tr>
+        </thead>
+        <tbody id="content-table-body">
+          <!-- JS ile doldurulur -->
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Sayfalama -->
+    <div class="flex items-center justify-center gap-2 mt-4" id="content-pagination">
+      <button onclick="contentPage('prev')" id="btn-prev"
+        class="px-4 py-2 rounded-lg theme-card border border-gray-700 text-sm hover:border-primary transition disabled:opacity-40">
+        <i class="fas fa-chevron-left mr-1"></i> Önceki
+      </button>
+      <span class="text-sm theme-text-secondary" id="page-label">Sayfa 1</span>
+      <button onclick="contentPage('next')" id="btn-next"
+        class="px-4 py-2 rounded-lg theme-card border border-gray-700 text-sm hover:border-primary transition disabled:opacity-40">
+        Sonraki <i class="fas fa-chevron-right ml-1"></i>
+      </button>
+    </div>
+  </section>
+
+</div>
+
+<!-- ══════════════════════════════════════════ JavaScript -->
+<script>
+  // ---- Veri ----
+  const ALL_CONTENT = {{ bw.top_content_week | tojson }};
+  const PAGE_SIZE   = 10;
+  let currentPage   = 1;
+
+  function fmtGB(bytes) {
+    if (bytes >= 1073741824)   return (bytes / 1073741824).toFixed(2) + " GB";
+    if (bytes >= 1048576)      return (bytes / 1048576).toFixed(1) + " MB";
+    return (bytes / 1024).toFixed(0) + " KB";
+  }
+
+  // Byte/saniye → okunabilir hız
+  function fmtSpeed(bps) {
+    if (!bps || bps <= 0)    return "0 B/s";
+    if (bps >= 1073741824)   return (bps / 1073741824).toFixed(2) + " GB/s";
+    if (bps >= 1048576)      return (bps / 1048576).toFixed(2) + " MB/s";
+    if (bps >= 1024)         return (bps / 1024).toFixed(1) + " KB/s";
+    return bps.toFixed(0) + " B/s";
+  }
+
+  function fmtDate(iso) {
+    if (!iso) return "—";
+    const d = new Date(iso);
+    return d.toLocaleString("tr-TR", {dateStyle:"short", timeStyle:"short"});
+  }
+
+  // ---- Sayfalanmış içerik tablosu ----
+  function renderContentTable() {
+    const tbody     = document.getElementById("content-table-body");
+    const pageLabel = document.getElementById("page-label");
+    const info      = document.getElementById("content-page-info");
+    const btnPrev   = document.getElementById("btn-prev");
+    const btnNext   = document.getElementById("btn-next");
+
+    const total  = ALL_CONTENT.length;
+    const pages  = Math.max(1, Math.ceil(total / PAGE_SIZE));
+    currentPage  = Math.min(Math.max(currentPage, 1), pages);
+    const start  = (currentPage - 1) * PAGE_SIZE;
+    const slice  = ALL_CONTENT.slice(start, start + PAGE_SIZE);
+
+    pageLabel.textContent = `Sayfa ${currentPage} / ${pages}`;
+    info.textContent      = `Toplam ${total} içerik`;
+    btnPrev.disabled      = currentPage === 1;
+    btnNext.disabled      = currentPage === pages;
+
+    tbody.innerHTML = slice.map((item, i) => {
+      const rank   = start + i + 1;
+      const medal  = rank === 1 ? "text-yellow-400" : rank === 2 ? "text-gray-300" : rank === 3 ? "text-yellow-700" : "text-gray-500";
+      return `
+        <tr class="border-b border-gray-800 hover:bg-white/5 transition-colors">
+          <td class="px-4 py-3 text-center font-bold ${medal}">${rank}</td>
+          <td class="px-4 py-3 font-mono text-xs break-all leading-snug">${item.title || "—"}</td>
+          <td class="px-4 py-3 text-right font-medium text-primary">${fmtGB(item.bytes)}</td>
+          <td class="px-4 py-3 text-right theme-text-secondary hidden sm:table-cell">${item.streams ?? "—"}</td>
+          <td class="px-4 py-3 text-right theme-text-secondary hidden sm:table-cell">${item.unique_users ?? "—"}</td>
+          <td class="px-4 py-3 text-right theme-text-secondary text-xs hidden md:table-cell">${fmtDate(item.last_watched)}</td>
+        </tr>`;
+    }).join("") || `<tr><td colspan="6" class="px-4 py-6 text-center theme-text-secondary">Veri yok</td></tr>`;
+  }
+
+  function contentPage(dir) {
+    if (dir === "prev") currentPage--;
+    else currentPage++;
+    renderContentTable();
+    document.querySelector("section:last-of-type").scrollIntoView({behavior:"smooth", block:"start"});
+  }
+
+  // ---- Upload + Stream anlık hız ----
+  async function refreshUploadSpeed() {
+    try {
+      const res  = await fetch("/api/istatistik/upload_speed");
+      const data = await res.json();
+
+      const speedEl  = document.getElementById("val-upload-speed");
+      const tasksEl  = document.getElementById("val-upload-tasks");
+      const tsEl     = document.getElementById("val-upload-ts");
+      const pulseEl  = document.getElementById("upload-pulse");
+
+      // Toplam dışarı çıkan hız = stream + yükleme
+      speedEl.textContent = fmtSpeed(data.total_bps || data.speed_bps || 0);
+
+      // Detay satırı
+      const parts = [];
+      if (data.stream_count > 0)  parts.push(`${data.stream_count} stream`);
+      if (data.upload_tasks > 0)  parts.push(`${data.upload_tasks} yükleme`);
+      tasksEl.textContent = parts.length > 0 ? parts.join(" · ") : "Boşta";
+
+      const isActive = (data.stream_count + (data.upload_tasks || 0)) > 0;
+      pulseEl.className = isActive
+        ? "w-2 h-2 bg-blue-400 rounded-full animate-pulse inline-block"
+        : "w-2 h-2 bg-gray-500 rounded-full inline-block";
+
+      const now = new Date();
+      tsEl.textContent = now.toLocaleTimeString("tr-TR", {hour:"2-digit", minute:"2-digit", second:"2-digit"});
+
+    } catch(e) {
+      console.error("Upload hızı alınamadı", e);
+    }
+  }
+
+  // ---- Bandwidth özeti (stream + genel) ----
+  async function refreshStats() {
+    const btn  = document.getElementById("refresh-btn");
+    const icon = document.getElementById("refresh-icon");
+    btn.disabled = true;
+    icon.classList.add("fa-spin");
+    try {
+      // Bant genişliği özeti
+      const res  = await fetch("/api/istatistik/bandwidth");
+      const data = await res.json();
+
+      document.getElementById("val-instant").textContent        = fmtSpeed(data.instant.bytes);
+      document.getElementById("val-active-streams").textContent = data.instant.active_streams + " aktif stream";
+      // Stream yoksa yeşil nabzı söndür
+      const sp = document.getElementById("stream-pulse");
+      if (sp) sp.className = data.instant.active_streams > 0
+        ? "w-2 h-2 bg-green-400 rounded-full animate-pulse inline-block"
+        : "w-2 h-2 bg-gray-500 rounded-full inline-block";
+      document.getElementById("val-hourly").textContent         = fmtGB(data.hourly_bytes);
+      document.getElementById("val-daily").textContent          = fmtGB(data.daily_bytes);
+      document.getElementById("val-monthly").textContent        = fmtGB(data.monthly_bytes);
+      document.getElementById("val-total").textContent          = fmtGB(data.total_bytes);
+
+      // Upload hızını da aynı anda güncelle
+      await refreshUploadSpeed();
+
+    } catch(e) {
+      console.error("Yenileme hatası", e);
+    } finally {
+      btn.disabled = false;
+      icon.classList.remove("fa-spin");
+    }
+  }
+
+  // ---- Init ----
+  renderContentTable();
+  refreshUploadSpeed(); // Sayfa açıldığında hemen yükle
+
+  // Upload hızını 15 saniyede bir güncelle
+  setInterval(() => refreshUploadSpeed(), 15000);
+
+  // Tüm istatistikleri 30 saniyede bir güncelle
+  setInterval(() => refreshStats(), 30000);
+</script>
+{% endblock %}
