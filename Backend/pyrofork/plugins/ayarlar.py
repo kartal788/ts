@@ -32,7 +32,7 @@ from Backend.logger import LOGGER
 CONFIG_PATH        = pathlib.Path("config.env")
 GDRIVE_TOKEN_PATH  = pathlib.Path(__file__).parent.parent.parent.parent / "gdrive_token.pickle"
 
-TOGGLE_KEYS = ["REPLACE_MODE", "HIDE_CATALOG", "SUBSCRIPTION", "WEBSITESI"]
+TOGGLE_KEYS = ["REPLACE_MODE", "HIDE_CATALOG", "SUBSCRIPTION", "WEBSITESI", "Proxy"]
 
 PAGE_TEXT_KEYS = {
     "stremio":  ["ISIM", "EKLENTI_ACIKLAMASI", "EKLENTI_LOGOSU", "BOLUM_RESIMI"],
@@ -41,6 +41,7 @@ PAGE_TEXT_KEYS = {
     "sistem":   ["YENILEME", "HIZ_LIMITI", "LIMIT_SIFIRLAMA"],
     "kuyruk":   ["MAX_CONCURRENT_DOWNLOADS", "MAX_CONCURRENT_UPLOADS"],
     "guvenlik": ["BRUTE_WINDOW", "BRUTE_MAX", "BRUTE_BAN"],
+    "proxy":    ["ProxyType", "HTTP_Proxy_URL", "PROXY_MODE"],
 }
 
 KEY_DESCRIPTIONS = {
@@ -48,6 +49,10 @@ KEY_DESCRIPTIONS = {
     "HIDE_CATALOG":       "Katalog gizleme",
     "SUBSCRIPTION":       "Abonelik sistemi",
     "WEBSITESI":          "Website açık/kapalı (false → bakım modu, abonelere giriş bilgisi gönderilmez)",
+    "Proxy":              "Proxy sistemi aktif/pasif",
+    "ProxyType":          "Proxy türü (HTTP veya HTTPS)",
+    "HTTP_Proxy_URL":     "Proxy URL'si (örn: https://PROXYURL/?url=)",
+    "PROXY_MODE":         "Proxy modu: 1=Sadece normal, 2=Proxy+Normal (ikisi birden), 3=Sadece proxy",
     "ISIM":               "Eklenti / site adı (varsayılan: KARTAL)",
     "EKLENTI_ACIKLAMASI": "Stremio eklenti açıklaması",
     "EKLENTI_LOGOSU":     "Stremio eklenti logo URL'si",
@@ -152,6 +157,7 @@ def _make_page(user_id: int, page: str, vals: dict):
             ],
             [
                 InlineKeyboardButton("🛡️ Güvenlik",       callback_data=f"cfg {user_id} guvenlik"),
+                InlineKeyboardButton("🌐 Proxy",           callback_data=f"cfg {user_id} proxy"),
             ],
             [
                 InlineKeyboardButton("🔄 Yenile",         callback_data=f"cfg {user_id} home"),
@@ -211,6 +217,7 @@ def _make_page(user_id: int, page: str, vals: dict):
             "sistem":   "Sistem Ayarları",
             "kuyruk":   "Kuyruk & Eşzamanlılık Ayarları",
             "guvenlik": "Güvenlik — Brute-Force Koruması",
+            "proxy":    "Proxy Ayarları",
         }
         lines = [f"⌬ <b><i>{titles[page]}</i></b>\n│"]
 
@@ -253,6 +260,23 @@ def _make_page(user_id: int, page: str, vals: dict):
             lines.append("┃   → MAX_CONCURRENT_DOWNLOADS = 1")
             lines.append("┃   → MAX_CONCURRENT_UPLOADS   = 1")
             lines.append("┖ Boş veya 0 = sınırsız (eski davranış)")
+        elif page == "proxy":
+            proxy_on   = vals.get("Proxy", "false").lower() == "true"
+            proxy_type = vals.get("ProxyType", "HTTPS").strip() or "HTTPS"
+            proxy_url_val = vals.get("HTTP_Proxy_URL", "").strip() or "(boş)"
+            mode_val   = vals.get("PROXY_MODE", "1").strip() or "1"
+            mode_labels = {"1": "Sadece normal", "2": "Proxy + Normal (ikisi birden)", "3": "Sadece proxy"}
+            mode_disp  = mode_labels.get(mode_val, mode_val)
+            proxy_emoji = "✅" if proxy_on else "❌"
+            lines.append(f"┠ {proxy_emoji} <b>Proxy</b> — <i>Proxy sistemi aktif/pasif</i>")
+            lines.append(f"┠ <b>ProxyType</b>: <code>{proxy_type}</code>")
+            lines.append(f"┃   ↳ <i>HTTP veya HTTPS</i>")
+            lines.append(f"┠ <b>HTTP_Proxy_URL</b>: <code>{proxy_url_val if len(proxy_url_val) <= 50 else proxy_url_val[:47]+'…'}</code>")
+            lines.append(f"┃   ↳ <i>Örn: https://PROXYURL/?url=</i>")
+            lines.append(f"┠ <b>PROXY_MODE</b>: <code>{mode_val}</code> — <i>{mode_disp}</i>")
+            lines.append(f"┃   ↳ <i>1=Sadece normal  2=Proxy+Normal  3=Sadece proxy</i>")
+            lines.append("┖ Düzenlemek için ilgili butona bas.")
+
         else:
             for k in PAGE_TEXT_KEYS[page]:
                 desc = KEY_DESCRIPTIONS.get(k, k)
@@ -265,11 +289,26 @@ def _make_page(user_id: int, page: str, vals: dict):
         msg = "\n".join(lines)
 
         rows = []
-        for k in PAGE_TEXT_KEYS[page]:
+        if page == "proxy":
+            # Proxy açma/kapama toggle butonu
+            proxy_on = vals.get("Proxy", "false").lower() == "true"
+            proxy_emoji = "✅" if proxy_on else "❌"
             rows.append([InlineKeyboardButton(
-                f"✏️ {k}",
-                callback_data=f"cfg {user_id} _text {k}",
+                f"{proxy_emoji} Proxy (Aç/Kapat)",
+                callback_data=f"cfg {user_id} _toggle Proxy",
             )])
+            # ProxyType, HTTP_Proxy_URL, PROXY_MODE metin düzenleme butonları
+            for k in ["ProxyType", "HTTP_Proxy_URL", "PROXY_MODE"]:
+                rows.append([InlineKeyboardButton(
+                    f"✏️ {k}",
+                    callback_data=f"cfg {user_id} _text {k}",
+                )])
+        else:
+            for k in PAGE_TEXT_KEYS[page]:
+                rows.append([InlineKeyboardButton(
+                    f"✏️ {k}",
+                    callback_data=f"cfg {user_id} _text {k}",
+                )])
         rows.append(_back_close(user_id))
         return msg, InlineKeyboardMarkup(rows)
 
@@ -309,14 +348,15 @@ async def cfg_callback(client: Client, query: CallbackQuery):
 
     vals = _read_env()
 
-    # Toggle
     if action == "_toggle" and extra in TOGGLE_KEYS:
         current = vals.get(extra, "false").lower()
         new_val = "false" if current == "true" else "true"
         _write_env_key(extra, new_val)
         vals[extra] = new_val
         await query.answer(f"✔️ {extra} → {new_val}")
-        msg, kbd = _make_page(user_id, "toggle", vals)
+        # Proxy toggle ise proxy sayfasına dön, aksi halde toggle sayfasına
+        back_page = "proxy" if extra == "Proxy" else "toggle"
+        msg, kbd = _make_page(user_id, back_page, vals)
         try:
             await query.message.edit_text(msg, reply_markup=kbd, parse_mode=ParseMode.HTML)
         except Exception:

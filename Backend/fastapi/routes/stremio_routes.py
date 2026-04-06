@@ -1932,12 +1932,46 @@ async def get_streams(
             video_tok = media_token_manager.create(token, file_id, kind="video")
             url = f"{BASE_URL}/dl/{token}/{file_id}/{video_tok}/video.mkv"
 
-        streams.append({
-            "name": stream_name,
-            "title": stream_title,
-            "url": url,
-            "_size_bytes": parse_size_to_bytes(size),
-        })
+        # ── Proxy Modu ────────────────────────────────────────────────────────
+        # PROXY_MODE=1 → sadece normal link
+        # PROXY_MODE=2 → önce proxy, sonra normal (her ikisi)
+        # PROXY_MODE=3 → sadece proxy
+        proxy_url = (
+            f"{Telegram.HTTP_PROXY_URL}{url}"
+            if Telegram.PROXY and Telegram.HTTP_PROXY_URL
+            else None
+        )
+
+        if Telegram.PROXY and proxy_url and Telegram.PROXY_MODE == 2:
+            # Hem proxy hem normal
+            streams.append({
+                "name": f"{stream_name} (Proxy)",
+                "title": stream_title,
+                "url": proxy_url,
+                "_size_bytes": parse_size_to_bytes(size),
+            })
+            streams.append({
+                "name": f"{stream_name} (Direct)",
+                "title": stream_title,
+                "url": url,
+                "_size_bytes": parse_size_to_bytes(size),
+            })
+        elif Telegram.PROXY and proxy_url and Telegram.PROXY_MODE == 3:
+            # Sadece proxy
+            streams.append({
+                "name": stream_name,
+                "title": stream_title,
+                "url": proxy_url,
+                "_size_bytes": parse_size_to_bytes(size),
+            })
+        else:
+            # PROXY_MODE=1 veya proxy kapalı → sadece normal
+            streams.append({
+                "name": stream_name,
+                "title": stream_title,
+                "url": url,
+                "_size_bytes": parse_size_to_bytes(size),
+            })
 
     # 2. Sıralama ve Düzenleme Bloğu
     streams.sort(

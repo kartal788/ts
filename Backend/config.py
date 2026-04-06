@@ -51,6 +51,19 @@ class Telegram:
     MAX_CONCURRENT_DOWNLOADS = getenv("MAX_CONCURRENT_DOWNLOADS", "")
     MAX_CONCURRENT_UPLOADS = getenv("MAX_CONCURRENT_UPLOADS", "1")
 
+    # ── Proxy Ayarları ────────────────────────────────────────────────────────
+    # Proxy=True → proxy aktif
+    # ProxyType=HTTPS veya HTTP
+    # HTTP_Proxy_URL → proxy URL'si  (örn: https://PROXYURL/?url=)
+    # PROXY_MODE:
+    #   1 → Sadece normal (proxy yok)
+    #   2 → Hem proxy hem normal (ikisi birden gösterilir)
+    #   3 → Sadece proxy
+    PROXY      = getenv("Proxy", "false").lower() == "true"
+    PROXY_TYPE = getenv("ProxyType", "HTTPS")
+    HTTP_PROXY_URL = getenv("HTTP_Proxy_URL", "")
+    PROXY_MODE = int(getenv("PROXY_MODE", "1"))  # 1=normal, 2=proxy+normal, 3=sadece proxy
+
     # ── Brute-force (kaba kuvvet) koruması ───────────────────────────────────
     # BRUTE_WINDOW  : Kaç saniye içindeki başarısız girişler sayılsın?    (varsayılan: 60 sn)
     # BRUTE_MAX     : Pencere içinde kaç hata sonrası IP banlansın?       (varsayılan: 10)
