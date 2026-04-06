@@ -1905,9 +1905,12 @@ class Database:
                 "msg_id":      stats.get("msg_id"),
                 "chat_id":     stats.get("chat_id"),
                 "dc_id":       stats.get("dc_id"),
-                "title":       stats.get("meta", {}).get("title"),  # Added title
-                "imdb_id":     stats.get("meta", {}).get("imdb_id"),   # İzleme geçmişi için
-                "user_token":  stats.get("meta", {}).get("user_token"), # Kullanıcı bazlı öneri için
+                "title":              stats.get("meta", {}).get("title"),
+                "imdb_id":            stats.get("meta", {}).get("imdb_id"),
+                "certification_tr":   stats.get("meta", {}).get("certification_tr"),
+                "certification_de":   stats.get("meta", {}).get("certification_de"),
+                "certification_us":   stats.get("meta", {}).get("certification_us"),
+                "user_token":         stats.get("meta", {}).get("user_token"),
                 "client_index": stats.get("client_index"),
                 "total_bytes": stats.get("total_bytes", 0),
                 "duration_sec": round(stats.get("duration", 0.0), 2),

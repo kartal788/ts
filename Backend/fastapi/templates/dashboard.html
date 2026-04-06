@@ -111,6 +111,11 @@
                                         <p class="text-xs theme-text-secondary truncate mt-0.5" title="{{ stream.meta.get('title') }}">
                                             {{ stream.meta.get('title') or 'Bilinmeyen İçerik' }}
                                         </p>
+                                        {% if stream.meta.get('client_host') %}
+                                        <div class="flex items-center gap-1 mt-1">
+                                            <span class="text-[10px] font-mono theme-text-secondary">🌐 {{ stream.meta.get('client_host') }}</span>
+                                        </div>
+                                        {% endif %}
                                     </div>
                                     <div class="text-right shrink-0 ml-4">
                                         <span class="text-[10px] font-mono bg-white px-2 py-1 rounded border border-gray-200 theme-text-secondary">
@@ -752,10 +757,22 @@
             return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
         };
 
+        // IP'den ülke bayrağı tahmini (RFC 1918 özel IP kontrolü)
+        const getIpFlag = (ip) => {
+            if (!ip) return '';
+            // Özel / loopback IP'ler
+            if (/^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|127\.|::1$|fc|fd)/.test(ip)) {
+                return '🏠';
+            }
+            return '🌐';
+        };
+
         container.innerHTML = pageItems.map(stream => {
             const statusBadgeClass = stream.status === 'active' ? 'bg-green-100 text-green-700' : stream.status === 'cancelled' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700';
             const userName = (stream.meta && stream.meta.user_name) ? stream.meta.user_name : 'Bilinmeyen Kullanıcı';
             const titleStr = (stream.meta && stream.meta.title) ? stream.meta.title : (stream.title || 'Bilinmeyen İçerik');
+            const clientHost = (stream.meta && stream.meta.client_host) ? stream.meta.client_host : null;
+            const ipFlag = clientHost ? getIpFlag(clientHost) : '';
 
             return `
             <div class="stream-card bg-gray-50 rounded-lg p-4 border border-gray-100">
@@ -766,6 +783,9 @@
                             <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase ${statusBadgeClass}">${stream.status}</span>
                         </div>
                         <p class="text-xs theme-text-secondary truncate mt-0.5" title="${escapeHtml(titleStr)}">${escapeHtml(titleStr)}</p>
+                        ${clientHost ? `<div class="flex items-center gap-1 mt-1">
+                            <span class="text-[10px] font-mono theme-text-secondary">${ipFlag} ${escapeHtml(clientHost)}</span>
+                        </div>` : ''}
                     </div>
                     <div class="text-right shrink-0 ml-4">
                         <span class="text-[10px] font-mono bg-white px-2 py-1 rounded border border-gray-200 theme-text-secondary">

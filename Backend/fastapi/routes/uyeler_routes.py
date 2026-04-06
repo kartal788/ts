@@ -272,10 +272,13 @@ async def admin_uye_stream_history_api(member_id: str) -> dict:
                 "duration_sec": 1,
                 "avg_mbps":     1,
                 "peak_mbps":    1,
-                "status":       1,
-                "logged_at":    1,
-                "client_index": 1,
-                "dc_id":        1,
+                "status":           1,
+                "logged_at":        1,
+                "client_index":     1,
+                "dc_id":            1,
+                "certification_tr": 1,
+                "certification_de": 1,
+                "certification_us": 1,
             }
         ).sort("logged_at", DESCENDING).limit(500)
         streams_raw = await cursor.to_list(None)
@@ -291,10 +294,13 @@ async def admin_uye_stream_history_api(member_id: str) -> dict:
                 "duration_sec": s.get("duration_sec", 0),
                 "avg_mbps":     round(s.get("avg_mbps", 0), 3),
                 "peak_mbps":    round(s.get("peak_mbps", 0), 3),
-                "status":       s.get("status"),
-                "logged_at":    logged.isoformat() if isinstance(logged, datetime) else logged,
-                "client_index": s.get("client_index"),
-                "dc_id":        s.get("dc_id"),
+                "status":           s.get("status"),
+                "logged_at":        logged.isoformat() if isinstance(logged, datetime) else logged,
+                "client_index":     s.get("client_index"),
+                "dc_id":            s.get("dc_id"),
+                "certification_tr": s.get("certification_tr"),
+                "certification_de": s.get("certification_de"),
+                "certification_us": s.get("certification_us"),
             })
 
         # ── Özet istatistikler ────────────────────────────────────────────────
@@ -319,11 +325,14 @@ async def admin_uye_stream_history_api(member_id: str) -> dict:
         top_pipe = [
             {"$match": {**match_filter, "title": {"$ne": None, "$exists": True}}},
             {"$group": {
-                "_id":          "$title",
-                "imdb_id":      {"$first": "$imdb_id"},
-                "watch_count":  {"$sum": 1},
-                "total_bytes":  {"$sum": "$total_bytes"},
-                "last_watched": {"$max": "$logged_at"},
+                "_id":                "$title",
+                "imdb_id":            {"$first": "$imdb_id"},
+                "watch_count":        {"$sum": 1},
+                "total_bytes":        {"$sum": "$total_bytes"},
+                "last_watched":       {"$max": "$logged_at"},
+                "certification_tr":   {"$first": "$certification_tr"},
+                "certification_de":   {"$first": "$certification_de"},
+                "certification_us":   {"$first": "$certification_us"},
             }},
             {"$sort": {"watch_count": -1}},
             {"$limit": 10},
@@ -333,11 +342,14 @@ async def admin_uye_stream_history_api(member_id: str) -> dict:
         for r in top_raw:
             lw = r.get("last_watched")
             top_content.append({
-                "title":       r["_id"],
-                "imdb_id":     r.get("imdb_id"),
-                "watch_count": r["watch_count"],
-                "total_bytes": r["total_bytes"],
-                "last_watched": lw.isoformat() if isinstance(lw, datetime) else lw,
+                "title":              r["_id"],
+                "imdb_id":            r.get("imdb_id"),
+                "watch_count":        r["watch_count"],
+                "total_bytes":        r["total_bytes"],
+                "last_watched":       lw.isoformat() if isinstance(lw, datetime) else lw,
+                "certification_tr":   r.get("certification_tr"),
+                "certification_de":   r.get("certification_de"),
+                "certification_us":   r.get("certification_us"),
             })
 
         return {

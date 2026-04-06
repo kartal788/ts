@@ -815,14 +815,20 @@ async def media_streamer(
     # Look up the real title from the database using the Stremio stream_id_hash
     db_title = None
     db_imdb_id = None
+    db_cert_tr = None
+    db_cert_de = None
+    db_cert_us = None
     if stream_id_hash:
         db_title = await db.get_title_by_stream_id(stream_id_hash)
         LOGGER.info(f"Stream lookup for hash '{stream_id_hash}' returned title: {db_title}")
-        # imdb_id'yi de al — izleme geçmişi (öneri kataloğu) için
+        # imdb_id ve sertifika alanlarını al — izleme geçmişi için
         try:
             _doc = await db.get_document_by_stream_id(stream_id_hash)
             if _doc:
                 db_imdb_id = _doc.get("imdb_id")
+                db_cert_tr = _doc.get("certification_tr")
+                db_cert_de = _doc.get("certification_de")
+                db_cert_us = _doc.get("certification_us")
         except Exception:
             pass
 
@@ -833,6 +839,9 @@ async def media_streamer(
         "client_host": request.client.host if request.client else None,
         "title": final_title,
         "imdb_id": db_imdb_id,          # İzleme geçmişi / öneri kataloğu için
+        "certification_tr": db_cert_tr,  # TR sertifikası
+        "certification_de": db_cert_de,  # DE sertifikası
+        "certification_us": db_cert_us,  # US sertifikası
         "user_name": token_data.get("name", "Unknown") if token_data else "Unknown",
         "user_token": token,  # Kullanıcı bazlı hız dengeleme için
     }

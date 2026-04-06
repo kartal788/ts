@@ -200,9 +200,11 @@
     if (!iso) return "—";
     try {
       const d = new Date(iso);
+      // UTC+3 sabit saat dilimi (sunucu logged_at UTC olarak kaydeder)
       return d.toLocaleString("tr-TR", {
         day: "2-digit", month: "2-digit", year: "numeric",
-        hour: "2-digit", minute: "2-digit", second: "2-digit"
+        hour: "2-digit", minute: "2-digit", second: "2-digit",
+        timeZone: "Europe/Istanbul"
       });
     } catch { return iso; }
   }
@@ -221,7 +223,6 @@
   }
 
   function certBadge(cert) {
-    if (!cert) return `<span class="text-xs theme-text-secondary">—</span>`;
     const colors = {
       "G":    "bg-green-500/20 text-green-400",
       "PG":   "bg-blue-500/20 text-blue-400",
@@ -233,6 +234,20 @@
       "13+":  "bg-yellow-500/20 text-yellow-400",
       "7+":   "bg-blue-500/20 text-blue-400",
     };
+    function singleBadge(value, flag) {
+      if (!value) return "";
+      const cls = colors[value] || "bg-gray-500/20 text-gray-400";
+      return `<span class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-lg font-bold ${cls}" title="${flag}"><span class="opacity-60 text-[10px] font-normal">${flag}</span>${escHtml(value)}</span>`;
+    }
+    if (cert && typeof cert === "object") {
+      const badges = [
+        singleBadge(cert.tr, "TR"),
+        singleBadge(cert.de, "DE"),
+        singleBadge(cert.us, "US"),
+      ].filter(Boolean).join(" ");
+      return badges || `<span class="text-xs theme-text-secondary">—</span>`;
+    }
+    if (!cert) return `<span class="text-xs theme-text-secondary">—</span>`;
     const cls = colors[cert] || "bg-gray-500/20 text-gray-400";
     return `<span class="inline-block text-xs px-2 py-0.5 rounded-lg font-bold ${cls}">${escHtml(cert)}</span>`;
   }
@@ -354,7 +369,10 @@
     if (topContent.length === 0) {
       grid.innerHTML = `<div class="col-span-full text-center theme-text-secondary py-6">Veri bulunamadı</div>`;
     } else {
-      grid.innerHTML = topContent.map((item, i) => `
+      grid.innerHTML = topContent.map((item, i) => {
+        const cert = { tr: item.certification_tr || null, de: item.certification_de || null, us: item.certification_us || null };
+        const hasCert = cert.tr || cert.de || cert.us;
+        return `
         <div class="theme-card rounded-2xl border p-4 flex items-start gap-3 hover:border-primary/50 transition-colors">
           <div class="w-9 h-9 rounded-xl flex-shrink-0 flex items-center justify-center font-bold text-base"
                style="background:color-mix(in srgb, var(--c-prim) ${22 + i * 4}%, var(--c-card))">
@@ -367,8 +385,10 @@
               · <span class="text-primary">${fmtGB(item.total_bytes)}</span>
             </div>
             <div class="text-xs theme-text-secondary">${fmtDate(item.last_watched)}</div>
+            ${hasCert ? `<div class="mt-1.5 flex flex-wrap gap-1">${certBadge(cert)}</div>` : ""}
           </div>
-        </div>`).join("");
+        </div>`;
+      }).join("");
     }
 
     FILT_HISTORY = [...ALL_HISTORY];
@@ -409,7 +429,7 @@
     tbody.innerHTML = slice.map((s, i) => {
       const idx   = start + i + 1;
       const title = s.title || s.imdb_id || "İsimsiz İçerik";
-      const cert  = s.certification || s.certification_tr || s.certification_us || null;
+      const cert  = { tr: s.certification_tr || null, de: s.certification_de || null, us: s.certification_us || s.certification || null };
       const bytes = s.total_bytes || 0;
       const dur   = s.duration_sec || 0;
       const avg   = s.avg_mbps || 0;
