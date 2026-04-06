@@ -185,7 +185,7 @@ Telegram ➜ MongoDB ➜ FastAPI ➜ Stremio ➜ Kullanıcı
 | `/linklerisil` | Geçersiz linkleri veritabanından temizler |
 | `/calismayanlinklerisil` | Çalışmayan stream linklerini siler |
 | `/eskiverileriyenile` | Eski format veritabanı kayıtlarını günceller |
-| `/sunucuyayukle` / `/s` | URL veya dosyayı sunucudan yükler |
+| `/sunucuyayukle` / `/s` | URL veya dosyayı sunucuya yükler |
 | `/sunucudansil` | Sunucudan yüklenen içeriği siler |
 | `/durdur` | Devam eden bir işlemi durdurur |
 | `/iptal` | Kuyruktaki bir görevi iptal eder |
