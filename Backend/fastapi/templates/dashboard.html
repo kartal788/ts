@@ -111,11 +111,7 @@
                                         <p class="text-xs theme-text-secondary truncate mt-0.5" title="{{ stream.meta.get('title') }}">
                                             {{ stream.meta.get('title') or 'Bilinmeyen İçerik' }}
                                         </p>
-                                        {% if stream.meta.get('client_host') %}
-                                        <div class="flex items-center gap-1 mt-1">
-                                            <span class="text-[10px] font-mono theme-text-secondary">🌐 {{ stream.meta.get('client_host') }}</span>
-                                        </div>
-                                        {% endif %}
+
                                     </div>
                                     <div class="text-right shrink-0 ml-4">
                                         <span class="text-[10px] font-mono bg-white px-2 py-1 rounded border border-gray-200 theme-text-secondary">
@@ -783,9 +779,7 @@
                             <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase ${statusBadgeClass}">${stream.status}</span>
                         </div>
                         <p class="text-xs theme-text-secondary truncate mt-0.5" title="${escapeHtml(titleStr)}">${escapeHtml(titleStr)}</p>
-                        ${clientHost ? `<div class="flex items-center gap-1 mt-1">
-                            <span class="text-[10px] font-mono theme-text-secondary">${ipFlag} ${escapeHtml(clientHost)}</span>
-                        </div>` : ''}
+
                     </div>
                     <div class="text-right shrink-0 ml-4">
                         <span class="text-[10px] font-mono bg-white px-2 py-1 rounded border border-gray-200 theme-text-secondary">
