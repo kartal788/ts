@@ -377,18 +377,18 @@ async def cfg_callback(client: Client, query: CallbackQuery):
 
     # Metin düzenleme
     if action == "_text" and extra:
-        _WAITING[user_id] = (extra, query.message.id)
         desc = KEY_DESCRIPTIONS.get(extra, extra)
         hint = ""
         if extra == "APPROVER_IDS":
             hint = "\n\n💡 <i>Birden fazla ID: <code>123456,789012</code></i>"
         await query.answer()
-        await query.message.reply_text(
+        prompt = await query.message.reply_text(
             f"✏️ <b>{extra}</b> için yeni değeri girin.\n"
             f"<i>{desc}</i>{hint}\n\n"
             f"<i>Boş bırakmak için <code>-</code> gönderin. İptal: /iptal</i>",
             parse_mode=ParseMode.HTML,
         )
+        _WAITING[user_id] = (extra, prompt.id, query)
         return
 
     # Sayfa navigasyonu
@@ -411,26 +411,52 @@ async def catch_text_input(client: Client, message: Message):
     if uid not in _WAITING:
         return
 
-    key, _ = _WAITING.pop(uid)
+    key, prompt_msg_id, orig_query = _WAITING.pop(uid)
+
+    # Kullanıcının metin mesajını sil
+    try:
+        await message.delete()
+    except Exception:
+        pass
+    # Bot'un "değer girin" prompt mesajını sil
+    try:
+        await client.delete_messages(message.chat.id, prompt_msg_id)
+    except Exception:
+        pass
 
     if message.text.strip().lower() in ("/iptal", "iptal"):
-        await message.reply_text("❌ İptal edildi.", quote=True, parse_mode=ParseMode.HTML)
+        await orig_query.answer("❌ İptal edildi.", show_alert=True)
         return
 
     value = "" if message.text.strip() == "-" else message.text.strip()
     _write_env_key(key, value)
 
-    page = next((p for p, keys in PAGE_TEXT_KEYS.items() if key in keys), "home")
+    # Eski ayarlar menüsü mesajını sil
+    try:
+        await orig_query.message.delete()
+    except Exception:
+        pass
+
+    # Hangi sayfaya ait olduğunu bul
+    back_page = "home"
+    for page, keys in PAGE_TEXT_KEYS.items():
+        if key in keys:
+            back_page = page
+            break
 
     vals = _read_env()
-    await message.reply_text(
-        f"✅ <b>{key}</b> güncellendi:\n<code>{value or '(boş)'}</code>\n\n"
-        f"<i>Değişikliğin etkili olması için botu yeniden başlatın.</i>",
+    page_msg, kbd = _make_page(uid, back_page, vals)
+
+    await client.send_message(
+        chat_id=message.chat.id,
+        text=(
+            f"✅ <b>{key}</b> güncellendi: <code>{value or '(boş)'}</code>\n"
+            f"⚠️ <i>Değişikliğin etkili olması için botu yeniden başlatın.</i>\n\n"
+            f"{page_msg}"
+        ),
+        reply_markup=kbd,
         parse_mode=ParseMode.HTML,
-        quote=True,
     )
-    msg, kbd = _make_page(uid, page, vals)
-    await message.reply_text(msg, reply_markup=kbd, parse_mode=ParseMode.HTML)
 
 
 # ── Dosya yükleme yakalayıcı (token.pickle vb.) ──────────────────────────────

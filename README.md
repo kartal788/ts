@@ -36,6 +36,7 @@
   - [Erişim Yönetimi](#erişim-yönetimi)
   - [Stremio Eklenti Entegrasyonu](#stremio-eklenti-entegrasyonu)
 - [🔧 Yapılandırma Rehberi](#-yapılandırma-rehberi)
+  - [🌐 Proxy Ayarları](#-proxy-ayarları)
 - [🚀 Kurulum Rehberi](#-kurulum-rehberi)
   - [VPS ile Docker Compose](#-vps-docker-compose-önerilen)
   - [Manuel Docker](#-manuel-docker)
@@ -497,6 +498,90 @@ $h = [System.BitConverter]::ToString($b2).Replace('-','').ToLower()
 | `BRUTE_WINDOW` | Kaç saniye içindeki başarısız girişler sayılsın? | `60` |
 | `BRUTE_MAX` | Pencere içinde kaç başarısız girişten sonra IP engellensin? | `10` |
 | `BRUTE_BAN` | IP kaç saniye boyunca engellensin? | `600` (10 dk) |
+
+## 🌐 Proxy Ayarları
+
+Bazı ülkelerde Telegram'a doğrudan erişim kısıtlanmış olabilir. Bu durumda stream trafiğini bir proxy üzerinden yönlendirmek için aşağıdaki ayarları kullanabilirsin.
+
+| Değişken | Açıklama | Varsayılan |
+|:---|:---|:---|
+| `Proxy` | `true` → proxy sistemi aktif; `false` → devre dışı | `false` |
+| `ProxyType` | Proxy protokolü: `HTTP` veya `HTTPS` | `HTTPS` |
+| `HTTP_Proxy_URL` | Proxy URL'si — sonda `?url=` ile bitmeli (örn. `https://PROXYURL/?url=`) | — |
+| `PROXY_MODE` | `1` → Sadece normal (proxy yok) · `2` → Proxy + Normal (ikisi birden) · `3` → Sadece proxy | `1` |
+
+### 🔧 Ücretsiz Proxy Oluşturma (Cloudflare Workers)
+
+Cloudflare Workers üzerinde ücretsiz bir proxy worker kurabilirsin:
+
+**1️⃣** [https://dash.cloudflare.com/](https://dash.cloudflare.com/) adresine git ve hesabına giriş yap.
+
+**2️⃣** Sol menüden **Workers & Pages** → **Create** → **Worker** seç.
+
+**3️⃣** Worker'a bir isim ver (örn. `proxy`) ve **Deploy** butonuna bas.
+
+**4️⃣** **Edit Code** butonuna tıkla, açılan editördeki tüm kodu sil ve aşağıdakini yapıştır:
+
+```js
+export default {
+  async fetch(request) {
+    try {
+      const url = new URL(request.url);
+
+      // Get target URL (everything after "/")
+      let target = url.pathname.slice(1);
+
+      // If using ?url= format
+      if (!target && url.searchParams.get("url")) {
+        target = url.searchParams.get("url");
+      }
+
+      if (!target || !target.startsWith("http")) {
+        return new Response("Invalid URL", { status: 400 });
+      }
+
+      // Forward headers (important for streaming)
+      const headers = new Headers(request.headers);
+      headers.set("Host", new URL(target).host);
+
+      const response = await fetch(target, {
+        method: request.method,
+        headers: headers,
+        redirect: "follow"
+      });
+
+      // Copy response headers
+      const newHeaders = new Headers(response.headers);
+
+      // Allow streaming + CORS
+      newHeaders.set("Access-Control-Allow-Origin", "*");
+      newHeaders.set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
+      newHeaders.set("Access-Control-Allow-Headers", "*");
+
+      return new Response(response.body, {
+        status: response.status,
+        headers: newHeaders
+      });
+
+    } catch (err) {
+      return new Response("Proxy Error: " + err.message, { status: 500 });
+    }
+  }
+};
+```
+
+**5️⃣** Sağ üstteki **Deploy** butonuna bas.
+
+**6️⃣** Worker URL'n otomatik oluşturulur (örn. `https://proxy.kullanici.workers.dev`). Bu URL'yi `config.env`'e şu şekilde ekle:
+
+```env
+Proxy=true
+ProxyType=HTTPS
+HTTP_Proxy_URL="https://proxy.kullanici.workers.dev/?url="
+PROXY_MODE=2
+```
+
+> 💡 `PROXY_MODE=2` ile sistem önce proxy'yi, başarısız olursa normal bağlantıyı dener. Sadece proxy üzerinden gitmesini istiyorsan `PROXY_MODE=3` kullan.
 
 ## Abonelik Sistemi
 
