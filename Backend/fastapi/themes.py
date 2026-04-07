@@ -194,6 +194,110 @@ THEMES = {
             "text_secondary": "#D1D5DB"
         },
         "css_classes": "theme-midnight-carbon"
+    },
+    "dark_purple_haze": {
+        "name": "Dark Purple Haze",
+        "colors": {
+            "primary": "#A855F7",
+            "secondary": "#7C3AED",
+            "accent": "#C084FC",
+            "background": "#0D0A1A",
+            "card": "#1A1429",
+            "text": "#F5F0FF",
+            "text_secondary": "#C4B5FD"
+        },
+        "css_classes": "theme-dark-purple-haze"
+    },
+    "dark_emerald": {
+        "name": "Dark Emerald",
+        "colors": {
+            "primary": "#10B981",
+            "secondary": "#059669",
+            "accent": "#34D399",
+            "background": "#071A12",
+            "card": "#0D2B1E",
+            "text": "#ECFDF5",
+            "text_secondary": "#6EE7B7"
+        },
+        "css_classes": "theme-dark-emerald"
+    },
+    "dark_crimson": {
+        "name": "Dark Crimson",
+        "colors": {
+            "primary": "#F43F5E",
+            "secondary": "#BE123C",
+            "accent": "#FB7185",
+            "background": "#0F0A0B",
+            "card": "#1C0F12",
+            "text": "#FFF1F2",
+            "text_secondary": "#FECDD3"
+        },
+        "css_classes": "theme-dark-crimson"
+    },
+    "dark_gold": {
+        "name": "Dark Gold",
+        "colors": {
+            "primary": "#F59E0B",
+            "secondary": "#D97706",
+            "accent": "#FCD34D",
+            "background": "#0C0A00",
+            "card": "#1A1500",
+            "text": "#FFFBEB",
+            "text_secondary": "#FDE68A"
+        },
+        "css_classes": "theme-dark-gold"
+    },
+    "dark_ocean": {
+        "name": "Dark Ocean",
+        "colors": {
+            "primary": "#22D3EE",
+            "secondary": "#0891B2",
+            "accent": "#67E8F9",
+            "background": "#020B10",
+            "card": "#061724",
+            "text": "#ECFEFF",
+            "text_secondary": "#A5F3FC"
+        },
+        "css_classes": "theme-dark-ocean"
+    },
+    "dark_slate": {
+        "name": "Dark Slate",
+        "colors": {
+            "primary": "#94A3B8",
+            "secondary": "#64748B",
+            "accent": "#CBD5E1",
+            "background": "#0B0F14",
+            "card": "#141B24",
+            "text": "#F8FAFC",
+            "text_secondary": "#94A3B8"
+        },
+        "css_classes": "theme-dark-slate"
+    },
+    "dark_rose": {
+        "name": "Dark Rose",
+        "colors": {
+            "primary": "#EC4899",
+            "secondary": "#BE185D",
+            "accent": "#F9A8D4",
+            "background": "#0F0610",
+            "card": "#1E0A1C",
+            "text": "#FDF2F8",
+            "text_secondary": "#F9A8D4"
+        },
+        "css_classes": "theme-dark-rose"
+    },
+    "dark_orange_ember": {
+        "name": "Dark Orange Ember",
+        "colors": {
+            "primary": "#F97316",
+            "secondary": "#EA580C",
+            "accent": "#FB923C",
+            "background": "#0C0700",
+            "card": "#1C1000",
+            "text": "#FFF7ED",
+            "text_secondary": "#FED7AA"
+        },
+        "css_classes": "theme-dark-orange-ember"
     }
 }
 
