@@ -1730,6 +1730,19 @@ async def get_meta(token: str, media_type: str, id: str, lang: str = "tr", token
         for season in sorted(media.get("seasons", []), key=lambda s: s.get("season_number")):
             for episode in sorted(season.get("episodes", []), key=lambda e: e.get("episode_number")):
 
+                # Bölümün gerçek video stream'i var mı kontrol et (zip/arşiv olan bölümleri atla)
+                ep_qualities = episode.get("telegram", [])
+                has_real_video = False
+                for _q in ep_qualities:
+                    _qname = _q.get("name", "")
+                    if _is_archive_fn(_qname) or _q.get("is_archive", False):
+                        continue
+                    if any(_qname.lower().endswith(ext) for ext in _ALLOWED_VIDEO_EXTS_MOD):
+                        has_real_video = True
+                        break
+                if not has_real_video:
+                    continue
+
                 episode_id = f"{id}:{season['season_number']}:{episode['episode_number']}"
 
                 # Dile göre bölüm başlığı
