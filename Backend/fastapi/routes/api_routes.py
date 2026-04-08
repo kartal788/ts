@@ -160,10 +160,14 @@ async def update_media_api(
         update_data = {k: v for k, v in update_data.items() if v != ""}
         result = await db.update_document(media_type, tmdb_id, db_index, update_data)
         if result:
+            import asyncio
+            from Backend.helper.platform_catalog import platform_catalog
+            loop = asyncio.get_event_loop()
+            loop.run_in_executor(None, platform_catalog.refresh)
             return {"message": "Media updated successfully"}
         else:
             raise HTTPException(status_code=404, detail="Media not found or no changes made")
-            
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -832,3 +836,163 @@ async def rename_tv_quality_api(request: Request, tmdb_id: int, db_index: int, s
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+async def requery_media_api(request: Request, tmdb_id: int, db_index: int, media_type: str):
+    """
+    Mevcut kaydın dosya adlarından (telegram[].name) PTN ile metadata çıkarır,
+    TMDB'den güncel bilgileri getirir ve önizleme olarak döndürür.
+    Onaylandığında /api/media/update ile kaydedilebilir.
+    """
+    import re
+    import PTN
+    from Backend.helper.metadata import (
+        safe_tmdb_search,
+        _tmdb_movie_details,
+        _tmdb_tv_details,
+        format_tmdb_image,
+        get_tmdb_logo,
+        _fetch_tmdb_images,
+    )
+    try:
+        from Backend.helper.metadata import tur_genre_normalize, de_genre_normalize
+    except ImportError:
+        def tur_genre_normalize(g): return g
+        def de_genre_normalize(g): return g
+
+    try:
+        doc = await db.get_document(media_type, tmdb_id, db_index)
+        if not doc:
+            raise HTTPException(status_code=404, detail="Kayıt bulunamadı")
+
+        # Dosya adlarını topla
+        filenames: list[str] = []
+        if media_type == "movie":
+            for q in doc.get("telegram", []):
+                n = q.get("name", "")
+                if n:
+                    filenames.append(n)
+        else:  # tv
+            for season in doc.get("seasons", []):
+                for ep in season.get("episodes", []):
+                    for q in ep.get("telegram", []):
+                        n = q.get("name", "")
+                        if n:
+                            filenames.append(n)
+
+        if not filenames:
+            raise HTTPException(status_code=400, detail="Kayıtta dosya adı bulunamadı")
+
+        # En iyi dosya adını seç (en uzun / en bilgi dolu)
+        best_filename = max(filenames, key=lambda f: len(PTN.parse(f)))
+        best_filename_clean = re.sub(r'https?://\S+', '', best_filename).strip()
+        best_filename_clean = re.sub(r'\bm(1080p|720p|2160p|480p)\b', r'\1', best_filename_clean, flags=re.IGNORECASE)
+
+        parsed = PTN.parse(best_filename_clean)
+        title = parsed.get("title") or doc.get("title", "")
+        year  = parsed.get("year")
+        season_num  = parsed.get("season")
+        episode_num = parsed.get("episode")
+
+        if not title:
+            raise HTTPException(status_code=400, detail="Dosya adından başlık çıkarılamadı")
+
+        # TMDB arama
+        is_tv = media_type == "tv" or bool(season_num and episode_num)
+        tmdb_type = "tv" if is_tv else "movie"
+
+        result = await safe_tmdb_search(title, tmdb_type, year)
+        if not result:
+            raise HTTPException(status_code=404, detail=f"TMDB'de '{title}' bulunamadı")
+
+        new_tmdb_id = result.id
+
+        # TMDB detayları
+        if is_tv:
+            details = await _tmdb_tv_details(new_tmdb_id)
+        else:
+            details = await _tmdb_movie_details(new_tmdb_id)
+
+        if not details:
+            raise HTTPException(status_code=404, detail="TMDB detayları alınamadı")
+
+        # Görsel verileri
+        images = await _fetch_tmdb_images(tmdb_type, new_tmdb_id)
+
+        def _img(path, size="w500"):
+            return format_tmdb_image(path, size) if path else ""
+
+        if is_tv:
+            genres_raw = [g.name for g in (getattr(details, "genres", None) or [])]
+            preview = {
+                "tmdb_id":        new_tmdb_id,
+                "title":          details.original_name or details.name or title,
+                "title_tr":       details.name or title,
+                "title_de":       getattr(details, "name_de", "") or details.original_name or title,
+                "description":    getattr(details, "overview", "") or "",
+                "description_tr": getattr(details, "overview_tr", "") or getattr(details, "overview", "") or "",
+                "description_de": getattr(details, "overview_de", "") or "",
+                "release_year":   getattr(getattr(details, "first_air_date", None), "year", None),
+                "rating":         getattr(details, "vote_average", None),
+                "poster":         _img(getattr(details, "poster_path", None)),
+                "backdrop":       _img(getattr(details, "backdrop_path", None), "original"),
+                "logo":           get_tmdb_logo(getattr(details, "images", None)),
+                "poster_tr":      getattr(details, "poster_tr", "") or "",
+                "backdrop_tr":    getattr(details, "backdrop_tr", "") or "",
+                "logo_tr":        getattr(details, "logo_tr", "") or "",
+                "poster_de":      getattr(details, "poster_de", "") or "",
+                "backdrop_de":    getattr(details, "backdrop_de", "") or "",
+                "logo_de":        getattr(details, "logo_de", "") or "",
+                "genres":         genres_raw,
+                "genres_tr":      tur_genre_normalize(genres_raw),
+                "genres_de":      de_genre_normalize(getattr(details, "genres_de", []) or []) or de_genre_normalize(genres_raw),
+                "original_language": getattr(details, "original_language", None),
+                "runtime":        str(getattr(details, "episode_run_time", [None])[0] or "") if getattr(details, "episode_run_time", None) else "",
+                "total_seasons":  getattr(details, "number_of_seasons", None),
+                "total_episodes": getattr(details, "number_of_episodes", None),
+                "certification_tr": getattr(details, "certification_tr", None),
+                "certification_de": getattr(details, "certification_de", None),
+                "certification_us": getattr(details, "certification_us", None),
+                "_parsed_from":   best_filename_clean,
+            }
+        else:
+            genres_raw = [g.name for g in (getattr(details, "genres", None) or [])]
+            runtime_raw = getattr(details, "runtime", None)
+            preview = {
+                "tmdb_id":        new_tmdb_id,
+                "title":          details.original_title or getattr(details, "title", None) or title,
+                "title_tr":       getattr(details, "title", None) or title,
+                "title_de":       getattr(details, "title_de", "") or details.original_title or title,
+                "description":    getattr(details, "overview", "") or "",
+                "description_tr": getattr(details, "overview_tr", "") or getattr(details, "overview", "") or "",
+                "description_de": getattr(details, "overview_de", "") or "",
+                "release_year":   getattr(getattr(details, "release_date", None), "year", None),
+                "rating":         getattr(details, "vote_average", None),
+                "poster":         _img(getattr(details, "poster_path", None)),
+                "backdrop":       _img(getattr(details, "backdrop_path", None), "original"),
+                "logo":           get_tmdb_logo(getattr(details, "images", None)),
+                "poster_tr":      getattr(details, "poster_tr", "") or "",
+                "backdrop_tr":    getattr(details, "backdrop_tr", "") or "",
+                "logo_tr":        getattr(details, "logo_tr", "") or "",
+                "poster_de":      getattr(details, "poster_de", "") or "",
+                "backdrop_de":    getattr(details, "backdrop_de", "") or "",
+                "logo_de":        getattr(details, "logo_de", "") or "",
+                "genres":         genres_raw,
+                "genres_tr":      tur_genre_normalize(genres_raw),
+                "genres_de":      de_genre_normalize(getattr(details, "genres_de", []) or []) or de_genre_normalize(genres_raw),
+                "original_language": getattr(details, "original_language", None),
+                "runtime":        str(runtime_raw) if runtime_raw else "",
+                "collection_id":  getattr(getattr(details, "belongs_to_collection", None), "id", None),
+                "certification_tr": getattr(details, "certification_tr", None),
+                "certification_de": getattr(details, "certification_de", None),
+                "certification_us": getattr(details, "certification_us", None),
+                "_parsed_from":   best_filename_clean,
+            }
+
+        return {"preview": preview}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        raise HTTPException(status_code=500, detail=f"Yeniden sorgulama hatası: {str(e)}")

@@ -131,7 +131,17 @@
 
     <!-- Edit Form -->
     <div class="theme-card p-4 sm:p-6 rounded-lg shadow mb-6 sm:mb-8">
-        <h3 class="text-lg sm:text-xl font-semibold mb-4 sm:mb-6">Detayları Düzenle</h3>
+        <div class="flex items-center justify-between mb-4 sm:mb-6">
+            <h3 class="text-lg sm:text-xl font-semibold">Detayları Düzenle</h3>
+            <button type="button" onclick="requeryMedia()"
+                class="flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-md border border-blue-500 text-blue-500 hover:bg-blue-500 hover:text-white transition-colors duration-150">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                Yeniden Sorgula
+            </button>
+        </div>
         <form onsubmit="updateMedia(event)" id="edit-form">
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 mb-6">
                 <div class="sm:col-span-2">
@@ -1198,7 +1208,276 @@
     }
 
     // Close on Escape key
-    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSpeedTest(); });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeSpeedTest(); closeRequeryModal(); } });
+
+    // ============================================================
+    //  YENİDEN SORGULA
+    // ============================================================
+    async function requeryMedia() {
+        const btn = document.querySelector('button[onclick="requeryMedia()"]');
+        const origHtml = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = `<svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path></svg> Sorgulanıyor...`;
+
+        try {
+            const resp = await fetch(`/api/media/requery?tmdb_id=${tmdbId}&db_index=${dbIndex}&media_type=${mediaType}`, {
+                method: 'POST'
+            });
+            if (!resp.ok) {
+                const err = await resp.json();
+                showErrorMessage(`Yeniden sorgulama hatası: ${err.detail || 'Bilinmeyen hata'}`);
+                return;
+            }
+            const data = await resp.json();
+            showRequeryModal(data.preview);
+        } catch (e) {
+            showErrorMessage('Yeniden sorgulama başarısız. Lütfen tekrar deneyin.');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = origHtml;
+        }
+    }
+
+    function showRequeryModal(preview) {
+        // Header backdrop + poster
+        const posterEl = document.getElementById('rq-poster');
+        const backdropEl = document.getElementById('rq-backdrop');
+        posterEl.src = preview.poster || '';
+        posterEl.style.display = preview.poster ? '' : 'none';
+        backdropEl.style.backgroundImage = preview.backdrop ? `url('${preview.backdrop}')` : 'none';
+
+        // Header title
+        document.getElementById('rq-title-header').textContent = preview.title || '-';
+
+        // Temel alanlar
+        document.getElementById('rq-title').textContent        = preview.title || '-';
+        document.getElementById('rq-title-tr').textContent     = preview.title_tr || '-';
+        document.getElementById('rq-title-de').textContent     = preview.title_de || '-';
+        document.getElementById('rq-year').textContent         = preview.release_year || '-';
+        document.getElementById('rq-rating').textContent       = preview.rating ? Number(preview.rating).toFixed(1) : '-';
+        document.getElementById('rq-genres').textContent       = (preview.genres || []).join(', ') || '-';
+        document.getElementById('rq-genres-tr').textContent    = (preview.genres_tr || []).join(', ') || '-';
+        document.getElementById('rq-genres-de').textContent    = (preview.genres_de || []).join(', ') || '-';
+        document.getElementById('rq-desc').textContent         = preview.description || '-';
+        document.getElementById('rq-desc-tr').textContent      = preview.description_tr || '-';
+        document.getElementById('rq-desc-de').textContent      = preview.description_de || '-';
+        document.getElementById('rq-runtime').textContent      = preview.runtime ? `${preview.runtime} dk` : '-';
+        document.getElementById('rq-lang').textContent         = preview.original_language || '-';
+        document.getElementById('rq-tmdb-id').textContent      = preview.tmdb_id || '-';
+        document.getElementById('rq-cert-tr').textContent      = preview.certification_tr || '-';
+        document.getElementById('rq-cert-de').textContent      = preview.certification_de || '-';
+        document.getElementById('rq-cert-us').textContent      = preview.certification_us || '-';
+        document.getElementById('rq-parsed-from').textContent  = preview._parsed_from || '-';
+
+        // Görsel thumbnail'ler
+        const imgPoster   = document.getElementById('rq-img-poster');
+        const imgBackdrop = document.getElementById('rq-img-backdrop');
+        const imgLogo     = document.getElementById('rq-img-logo');
+        imgPoster.src   = preview.poster   || ''; imgPoster.style.display   = preview.poster   ? '' : 'none';
+        imgBackdrop.src = preview.backdrop || ''; imgBackdrop.style.display = preview.backdrop ? '' : 'none';
+        imgLogo.src     = preview.logo     || ''; imgLogo.style.display     = preview.logo     ? '' : 'none';
+
+        // TV-only alanlar
+        const tvRow = document.getElementById('rq-tv-row');
+        if (mediaType === 'tv') {
+            tvRow.style.display = '';
+            document.getElementById('rq-seasons').textContent  = preview.total_seasons || '-';
+            document.getElementById('rq-episodes').textContent = preview.total_episodes || '-';
+        } else {
+            tvRow.style.display = 'none';
+        }
+
+        // Önizleme verisini butona aktar
+        document.getElementById('rq-confirm-btn').dataset.preview = JSON.stringify(preview);
+
+        document.getElementById('requery-modal').classList.remove('hidden');
+        document.body.style.overflow = 'hidden';
+    }
+
+    function closeRequeryModal() {
+        document.getElementById('requery-modal').classList.add('hidden');
+        document.body.style.overflow = '';
+    }
+
+    async function confirmRequery() {
+        const btn = document.getElementById('rq-confirm-btn');
+        const preview = JSON.parse(btn.dataset.preview || '{}');
+
+        // preview'dan update_data oluştur (korunacak alanlar: telegram, seasons, db_index vs.)
+        const updateData = {};
+        const fields = [
+            'tmdb_id','title','title_tr','title_de',
+            'description','description_tr','description_de',
+            'release_year','rating','poster','backdrop','logo',
+            'poster_tr','backdrop_tr','logo_tr',
+            'poster_de','backdrop_de','logo_de',
+            'genres','genres_tr','genres_de',
+            'original_language','runtime',
+            'certification_tr','certification_de','certification_us',
+            'collection_id','total_seasons','total_episodes'
+        ];
+        for (const f of fields) {
+            if (preview[f] !== undefined && preview[f] !== null && preview[f] !== '') {
+                updateData[f] = preview[f];
+            }
+        }
+        // rating sayıya çevir
+        if (updateData.rating) updateData.rating = parseFloat(updateData.rating);
+        if (updateData.release_year) updateData.release_year = parseInt(updateData.release_year);
+
+        btn.disabled = true;
+        btn.textContent = 'Kaydediliyor...';
+
+        try {
+            const resp = await fetch(`/api/media/update?tmdb_id=${tmdbId}&db_index=${dbIndex}&media_type=${mediaType}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(updateData)
+            });
+            if (resp.ok) {
+                closeRequeryModal();
+                showSuccessMessage('Medya başarıyla güncellendi');
+                setTimeout(() => location.reload(), 1200);
+            } else {
+                const err = await resp.json();
+                showErrorMessage(`Kaydetme hatası: ${err.detail || 'Bilinmeyen hata'}`);
+                btn.disabled = false;
+                btn.textContent = 'Onayla ve Kaydet';
+            }
+        } catch (e) {
+            showErrorMessage('Kaydetme başarısız. Lütfen tekrar deneyin.');
+            btn.disabled = false;
+            btn.textContent = 'Onayla ve Kaydet';
+        }
+    }
 </script>
+
+<!-- Yeniden Sorgula Önizleme Modalı -->
+<div id="requery-modal" class="hidden fixed inset-0 z-50 flex items-start justify-center p-4 sm:p-8 bg-black/60 overflow-y-auto">
+    <div class="theme-card w-full max-w-3xl rounded-xl shadow-2xl my-4">
+        <!-- Backdrop header -->
+        <div id="rq-backdrop" class="relative h-40 sm:h-52 rounded-t-xl bg-gradient-to-r from-gray-800 to-gray-700 bg-cover bg-center overflow-hidden">
+            <div class="absolute inset-0 bg-black/50 rounded-t-xl"></div>
+            <div class="absolute bottom-4 left-4 right-4 flex items-end gap-4">
+                <img id="rq-poster" src="" alt="poster"
+                    class="w-20 sm:w-28 h-28 sm:h-40 object-cover rounded-lg shadow-xl border-2 border-white flex-shrink-0"
+                    onerror="this.style.display='none'">
+                <div class="text-white min-w-0">
+                    <div class="text-xs font-medium opacity-70 mb-1 uppercase tracking-wider">TMDB Önizleme</div>
+                    <h2 id="rq-title-header" class="text-lg sm:text-2xl font-bold truncate"></h2>
+                    <div class="flex items-center gap-3 mt-1 text-sm opacity-80">
+                        <span id="rq-year"></span>
+                        <span>⭐ <span id="rq-rating"></span></span>
+                        <span id="rq-runtime"></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="p-4 sm:p-6 space-y-4">
+            <!-- Parsed from -->
+            <div class="text-xs theme-text-secondary bg-gray-100 dark:bg-gray-800 rounded px-3 py-2 font-mono break-all">
+                📄 Dosya adından çözümlendi: <span id="rq-parsed-from" class="font-semibold"></span>
+            </div>
+
+            <!-- Başlıklar -->
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                    <div class="text-xs font-semibold theme-text-secondary uppercase tracking-wide mb-1">Başlık (Orijinal)</div>
+                    <div id="rq-title" class="text-sm font-medium"></div>
+                </div>
+                <div>
+                    <div class="text-xs font-semibold theme-text-secondary uppercase tracking-wide mb-1">🇹🇷 Başlık TR</div>
+                    <div id="rq-title-tr" class="text-sm"></div>
+                </div>
+                <div>
+                    <div class="text-xs font-semibold theme-text-secondary uppercase tracking-wide mb-1">🇩🇪 Başlık DE</div>
+                    <div id="rq-title-de" class="text-sm"></div>
+                </div>
+            </div>
+
+            <!-- Türler -->
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                    <div class="text-xs font-semibold theme-text-secondary uppercase tracking-wide mb-1">Türler</div>
+                    <div id="rq-genres" class="text-sm"></div>
+                </div>
+                <div>
+                    <div class="text-xs font-semibold theme-text-secondary uppercase tracking-wide mb-1">🇹🇷 Türler TR</div>
+                    <div id="rq-genres-tr" class="text-sm"></div>
+                </div>
+                <div>
+                    <div class="text-xs font-semibold theme-text-secondary uppercase tracking-wide mb-1">🇩🇪 Türler DE</div>
+                    <div id="rq-genres-de" class="text-sm"></div>
+                </div>
+            </div>
+
+            <!-- Özet -->
+            <div>
+                <div class="text-xs font-semibold theme-text-secondary uppercase tracking-wide mb-1">Özet</div>
+                <p id="rq-desc" class="text-sm theme-text-secondary leading-relaxed line-clamp-3"></p>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                    <div class="text-xs font-semibold theme-text-secondary uppercase tracking-wide mb-1">🇹🇷 Özet TR</div>
+                    <p id="rq-desc-tr" class="text-sm theme-text-secondary leading-relaxed line-clamp-2"></p>
+                </div>
+                <div>
+                    <div class="text-xs font-semibold theme-text-secondary uppercase tracking-wide mb-1">🇩🇪 Özet DE</div>
+                    <p id="rq-desc-de" class="text-sm theme-text-secondary leading-relaxed line-clamp-2"></p>
+                </div>
+            </div>
+
+            <!-- Meta bilgiler -->
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+                <div>
+                    <div class="text-xs font-semibold theme-text-secondary uppercase tracking-wide mb-1">TMDB ID</div>
+                    <div id="rq-tmdb-id" class="font-mono"></div>
+                </div>
+                <div>
+                    <div class="text-xs font-semibold theme-text-secondary uppercase tracking-wide mb-1">Dil</div>
+                    <div id="rq-lang"></div>
+                </div>
+                <div>
+                    <div class="text-xs font-semibold theme-text-secondary uppercase tracking-wide mb-1">Sertifika TR/DE/US</div>
+                    <div class="flex gap-1 flex-wrap">
+                        <span id="rq-cert-tr" class="px-1.5 py-0.5 bg-red-100 text-red-700 rounded text-xs"></span>
+                        <span id="rq-cert-de" class="px-1.5 py-0.5 bg-yellow-100 text-yellow-700 rounded text-xs"></span>
+                        <span id="rq-cert-us" class="px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded text-xs"></span>
+                    </div>
+                </div>
+                <div id="rq-tv-row">
+                    <div class="text-xs font-semibold theme-text-secondary uppercase tracking-wide mb-1">Sezon / Bölüm</div>
+                    <div><span id="rq-seasons"></span> sezon / <span id="rq-episodes"></span> bölüm</div>
+                </div>
+            </div>
+
+            <!-- Görseller önizleme -->
+            <div>
+                <div class="text-xs font-semibold theme-text-secondary uppercase tracking-wide mb-2">Görseller (Poster · Backdrop · Logo)</div>
+                <div class="flex gap-2 overflow-x-auto pb-1">
+                    <img id="rq-img-poster" src="" alt="poster" class="h-24 rounded shadow object-cover flex-shrink-0"
+                        onerror="this.style.display='none'">
+                    <img id="rq-img-backdrop" src="" alt="backdrop" class="h-24 rounded shadow object-cover flex-shrink-0"
+                        onerror="this.style.display='none'">
+                    <img id="rq-img-logo" src="" alt="logo" class="h-24 rounded shadow object-contain flex-shrink-0 bg-gray-200 p-2"
+                        onerror="this.style.display='none'">
+                </div>
+            </div>
+
+            <!-- Butonlar -->
+            <div class="flex gap-3 pt-2">
+                <button id="rq-confirm-btn" onclick="confirmRequery()"
+                    class="flex-1 py-2.5 px-4 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg transition-colors text-sm">
+                    ✅ Onayla ve Kaydet
+                </button>
+                <button onclick="closeRequeryModal()"
+                    class="flex-1 py-2.5 px-4 border border-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 font-semibold rounded-lg transition-colors text-sm">
+                    ❌ Reddet / Kapat
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
 
 {% endblock %}

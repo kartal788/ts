@@ -35,7 +35,7 @@ from Backend.fastapi.routes.member_routes import (
     member_profile_api, member_db_size_api,
 )
 from Backend.fastapi.routes.api_routes import (
-    list_media_api, delete_media_api, update_media_api,
+    list_media_api, delete_media_api, update_media_api, requery_media_api,
     delete_movie_quality_api, delete_tv_quality_api,
     delete_tv_episode_api, delete_tv_season_api,
     rename_movie_quality_api, rename_tv_quality_api,
@@ -366,6 +366,10 @@ async def delete_media(tmdb_id: int, db_index: int, media_type: str, _: bool = D
 @app.put("/api/media/update")
 async def update_media(request: Request, tmdb_id: int, db_index: int, media_type: str, _: bool = Depends(require_auth)):
     return await update_media_api(request, tmdb_id, db_index, media_type)
+
+@app.post("/api/media/requery")
+async def requery_media(request: Request, tmdb_id: int, db_index: int, media_type: str, _: bool = Depends(require_auth)):
+    return await requery_media_api(request, tmdb_id, db_index, media_type)
 
 @app.delete("/api/media/delete-quality")
 async def delete_movie_quality(tmdb_id: int, db_index: int, id: str, _: bool = Depends(require_auth)):
