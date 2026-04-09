@@ -63,9 +63,27 @@ async def send_start_message(client: Client, message: Message):
         if not is_active:
             plans = await db.get_subscription_plans()
             if not plans:
+                # OWNER ise admin paneli giriş bilgilerini de mesaja ekle
+                admin_otp_text = ""
+                if user_id == Telegram.OWNER_ID:
+                    try:
+                        photo_url = message.from_user.photo.big_file_id if (message.from_user and message.from_user.photo) else ""
+                        admin_otp = await db.create_admin_otp(photo_url=photo_url)
+                        admin_url = f"{base_url}/login"
+                        admin_otp_text = (
+                            f"\n\n🛡️ <b>Yönetici Paneli Girişi:</b>\n"
+                            f"🔗 {admin_url}\n"
+                            f"👤 <b>Kullanıcı Adı:</b> <code>{admin_otp['username']}</code>\n"
+                            f"🔑 <b>Şifre:</b> <code>{admin_otp['password']}</code>\n"
+                            f"<i>⚠️ Bu bilgiler her /start'ta yenilenir, yalnızca tek kullanımlıktır.</i>"
+                        )
+                    except Exception as e:
+                        print(f"DEBUG: Admin OTP generation error (no-plan branch): {e}")
+
                 return await message.reply_text(
                     f'<b>{Telegram.ISIM} Özel Grubuna Hoş Geldiniz!</b>\n\n'
-                    'Şu anda herhangi bir abonelik planı tanımlanmamıştır. Lütfen yönetici ile iletişime geçin.',
+                    'Şu anda herhangi bir abonelik planı tanımlanmamıştır. Lütfen yönetici ile iletişime geçin.'
+                    f'{admin_otp_text}',
                     quote=True,
                     parse_mode=enums.ParseMode.HTML
                 )
