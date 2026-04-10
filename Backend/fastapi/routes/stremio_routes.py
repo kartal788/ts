@@ -1956,29 +1956,29 @@ async def get_streams(
         )
 
         if Telegram.PROXY and proxy_url and Telegram.PROXY_MODE == 2:
-            # Hem proxy hem normal
+            # Hem proxy hem normal — her ikisi de etiketli
             streams.append({
-                "name": f"{stream_name} (Proxy)",
+                "name": f"{stream_name} 🔀 Proxy",
                 "title": stream_title,
                 "url": proxy_url,
                 "_size_bytes": parse_size_to_bytes(size),
             })
             streams.append({
-                "name": f"{stream_name} (Direct)",
+                "name": f"{stream_name} ⚡ Direct",
                 "title": stream_title,
                 "url": url,
                 "_size_bytes": parse_size_to_bytes(size),
             })
         elif Telegram.PROXY and proxy_url and Telegram.PROXY_MODE == 3:
-            # Sadece proxy
+            # Sadece proxy — etiket ekle
             streams.append({
-                "name": stream_name,
+                "name": f"{stream_name} 🔀 Proxy",
                 "title": stream_title,
                 "url": proxy_url,
                 "_size_bytes": parse_size_to_bytes(size),
             })
         else:
-            # PROXY_MODE=1 veya proxy kapalı → sadece normal
+            # PROXY_MODE=1 veya proxy kapalı → sadece normal, etiket yok
             streams.append({
                 "name": stream_name,
                 "title": stream_title,
