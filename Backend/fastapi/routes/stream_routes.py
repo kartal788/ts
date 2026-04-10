@@ -634,89 +634,100 @@ async def local_file_streamer(request: Request, local_path: str, token_data: dic
         t0 = time.time()
         _throttle_start = time.monotonic()
         _throttle_sent = 0
-        with p.open("rb") as fh:
-            fh.seek(s)
-            while remaining > 0:
-                read_size = min(chunk, remaining)
-                data = fh.read(read_size)
-                if not data:
-                    break
-                remaining -= len(data)
-                sent += len(data)
+        _finished_normally = False
+        try:
+            with p.open("rb") as fh:
+                fh.seek(s)
+                while remaining > 0:
+                    read_size = min(chunk, remaining)
+                    data = fh.read(read_size)
+                    if not data:
+                        break
+                    remaining -= len(data)
+                    sent += len(data)
 
-                # ACTIVE_STREAMS kaydını güncelle
-                info = ACTIVE_STREAMS.get(stream_id)
-                if info is not None:
-                    elapsed = (time.time() - t0) or 0.001
-                    info["total_bytes"] = sent
-                    info["last_ts"] = time.time()
-                    info["avg_mbps"] = round((sent / elapsed) / (1024 * 1024), 2)
+                    # ACTIVE_STREAMS kaydını güncelle
+                    info = ACTIVE_STREAMS.get(stream_id)
+                    if info is not None:
+                        elapsed = (time.time() - t0) or 0.001
+                        info["total_bytes"] = sent
+                        info["last_ts"] = time.time()
+                        info["avg_mbps"] = round((sent / elapsed) / (1024 * 1024), 2)
 
-                    # ── Hız limiti throttle (dinamik — kullanıcı bazlı) ──────
-                    _current_limit = info.get("rate_limit_mbps", 0.0)
-                    _rate_bps = (_current_limit * 1024 * 1024 / 8) if _current_limit > 0 else 0.0
-                    if _rate_bps > 0:
-                        _throttle_sent += len(data)
-                        _elapsed_w = time.monotonic() - _throttle_start
-                        _expected  = _throttle_sent / _rate_bps
-                        _sleep     = _expected - _elapsed_w
-                        if _sleep > 0.005:
-                            await asyncio.sleep(_sleep)
-                    # ────────────────────────────────────────────────────────
+                        # ── Hız limiti throttle (dinamik — kullanıcı bazlı) ──────
+                        _current_limit = info.get("rate_limit_mbps", 0.0)
+                        _rate_bps = (_current_limit * 1024 * 1024 / 8) if _current_limit > 0 else 0.0
+                        if _rate_bps > 0:
+                            _throttle_sent += len(data)
+                            _elapsed_w = time.monotonic() - _throttle_start
+                            _expected  = _throttle_sent / _rate_bps
+                            _sleep     = _expected - _elapsed_w
+                            if _sleep > 0.005:
+                                await asyncio.sleep(_sleep)
+                        # ────────────────────────────────────────────────────────
 
-                yield data
+                    yield data
 
-        # Stream bitti — durumu güncelle ve analytics'e kaydet
-        end_ts = time.time()
-        duration = end_ts - t0 if end_ts > t0 else 0.0
-        avg_mbps = round((sent / (1024 * 1024)) / (duration if duration > 0 else 1e-6), 3)
-        peak_mbps = avg_mbps  # yerel dosyada chunk bazlı peak ölçümü yok, avg kullan
+            _finished_normally = True
 
-        info = ACTIVE_STREAMS.get(stream_id)
-        if info is not None:
-            info["status"] = "finished"
-            info["end_ts"] = end_ts
-            info["total_bytes"] = sent
-            info["duration"] = duration
-            info["avg_mbps"] = avg_mbps
-            info["peak_mbps"] = peak_mbps
+        except (asyncio.CancelledError, GeneratorExit):
+            # İstemci bağlantıyı kesti veya indirme iptal edildi
+            _finished_normally = False
+            raise
+        except Exception:
+            _finished_normally = False
+            raise
+        finally:
+            # Bağlantı kesilse de, iptal edilse de, normal bitse de — her zaman temizle
+            end_ts = time.time()
+            duration = end_ts - t0 if end_ts > t0 else 0.0
+            avg_mbps = round((sent / (1024 * 1024)) / (duration if duration > 0 else 1e-6), 3)
+            peak_mbps = avg_mbps
 
-        # Sadece anlamlı boyuttaki istekleri kaydet (HEAD/küçük range isteklerini atla)
-        if sent > 0:
-            # Dosya adından temiz başlık türet — meta.title olarak kaydet
-            # (get_bandwidth_stats "$title" alanından okur)
-            clean_title = p.stem  # uzantısız ad
+            final_status = "finished" if _finished_normally else "cancelled"
 
-            log_entry = {
-                "stream_id":    stream_id,
-                "msg_id":       None,
-                "chat_id":      None,
-                "dc_id":        None,
-                "client_index": None,
-                "total_bytes":  sent,
-                "duration":     duration,
-                "avg_mbps":     avg_mbps,
-                "peak_mbps":    peak_mbps,
-                "status":       "finished",
-                "parallelism":  1,
-                "chunk_size":   chunk,
-                "meta": {
-                    "title": clean_title,
-                },
-            }
-            asyncio.create_task(db.log_stream_stats(log_entry))
+            info = ACTIVE_STREAMS.get(stream_id)
+            if info is not None:
+                info["status"] = final_status
+                info["end_ts"] = end_ts
+                info["total_bytes"] = sent
+                info["duration"] = duration
+                info["avg_mbps"] = avg_mbps
+                info["peak_mbps"] = peak_mbps
 
-        async def _delayed_pop():
-            await asyncio.sleep(3)
-            try:
-                if stream_id in ACTIVE_STREAMS:
-                    RECENT_STREAMS.appendleft(ACTIVE_STREAMS.pop(stream_id))
-            except Exception:
-                pass
-            # Stream kapandı — kalan kullanıcı stream'lerini dengele
-            if _local_total_rate > 0 and token:
-                _rebalance_user_streams(token, _local_total_rate)
-        asyncio.create_task(_delayed_pop())
+            # Sadece anlamlı boyuttaki istekleri kaydet (HEAD/küçük range isteklerini atla)
+            if sent > 0:
+                clean_title = p.stem  # uzantısız ad
+                log_entry = {
+                    "stream_id":    stream_id,
+                    "msg_id":       None,
+                    "chat_id":      None,
+                    "dc_id":        None,
+                    "client_index": None,
+                    "total_bytes":  sent,
+                    "duration":     duration,
+                    "avg_mbps":     avg_mbps,
+                    "peak_mbps":    peak_mbps,
+                    "status":       final_status,
+                    "parallelism":  1,
+                    "chunk_size":   chunk,
+                    "meta": {
+                        "title": clean_title,
+                    },
+                }
+                asyncio.create_task(db.log_stream_stats(log_entry))
+
+            async def _delayed_pop():
+                await asyncio.sleep(3)
+                try:
+                    if stream_id in ACTIVE_STREAMS:
+                        RECENT_STREAMS.appendleft(ACTIVE_STREAMS.pop(stream_id))
+                except Exception:
+                    pass
+                # Stream kapandı — kalan kullanıcı stream'lerini dengele
+                if _local_total_rate > 0 and token:
+                    _rebalance_user_streams(token, _local_total_rate)
+            asyncio.create_task(_delayed_pop())
 
     # RFC 5987: Türkçe/UTF-8 karakterleri latin-1'e encode edilemez,
     # filename* parametresiyle URL-encode olarak gönder.
@@ -1027,7 +1038,13 @@ async def get_stream_stats(_: bool = Depends(_require_admin)):
 
     active = []
     for sid, info in ACTIVE_STREAMS.items():
+        # Sadece gerçekten aktif ve veri transfer etmiş stream'leri göster
+        if info.get("status") != "active":
+            continue
+        if (info.get("total_bytes") or 0) <= 0:
+            continue
         meta = info.get("meta", {})
+        start_ts = info.get("start_ts") or now
         active.append(
             {
                 "stream_id": sid,
@@ -1041,7 +1058,8 @@ async def get_stream_stats(_: bool = Depends(_require_admin)):
                 "instant_mbps": round(info.get("instant_mbps", 0.0), 3),
                 "avg_mbps": round(info.get("avg_mbps", 0.0), 3),
                 "peak_mbps": round(info.get("peak_mbps", 0.0), 3),
-                "start_ts": info.get("start_ts"),
+                "duration": round(now - start_ts, 1),
+                "start_ts": start_ts,
                 "meta": {
                     "title": meta.get("title"),
                     "user_name": meta.get("user_name"),

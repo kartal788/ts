@@ -507,6 +507,60 @@
         </div>
     </div>
 
+    <!-- ZIP İndirme Progress Modal -->
+    <div id="zip-modal" class="fixed inset-0 z-50 hidden flex items-center justify-center bg-black/60 backdrop-blur-sm">
+        <div class="theme-card rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6 border border-white/10">
+            <div class="flex items-center justify-between mb-5">
+                <h2 class="text-lg font-bold flex items-center gap-2">
+                    <i class="fas fa-file-archive text-cyan-400"></i>
+                    Klasör Hazırlanıyor
+                </h2>
+                <button id="zip-close-btn" onclick="closeZipModal()" class="text-gray-400 hover:text-white transition-colors hidden">
+                    <i class="fas fa-times text-lg"></i>
+                </button>
+            </div>
+
+            <p id="zip-folder-name" class="text-sm theme-text-secondary mb-4 truncate"></p>
+
+            <div class="flex items-center gap-2 text-sm mb-3">
+                <i id="zip-spinner" class="fas fa-spinner fa-spin text-cyan-400 flex-shrink-0"></i>
+                <span id="zip-status-text" class="theme-text-secondary">Hazırlanıyor...</span>
+            </div>
+
+            <div class="w-full bg-white/10 rounded-full h-2.5 overflow-hidden mb-3">
+                <div id="zip-progress-bar" class="h-2.5 rounded-full transition-all duration-300 bg-cyan-400" style="width:0%"></div>
+            </div>
+
+            <div class="grid grid-cols-4 gap-2 text-center mb-5">
+                <div class="bg-white/5 rounded-lg px-2 py-2">
+                    <div class="text-xs theme-text-secondary mb-0.5">Dosya</div>
+                    <div id="zip-stat-files" class="text-xs font-bold">—</div>
+                </div>
+                <div class="bg-white/5 rounded-lg px-2 py-2">
+                    <div class="text-xs theme-text-secondary mb-0.5">Boyut</div>
+                    <div id="zip-stat-size" class="text-xs font-bold text-cyan-400">—</div>
+                </div>
+                <div class="bg-white/5 rounded-lg px-2 py-2">
+                    <div class="text-xs theme-text-secondary mb-0.5">Kalan</div>
+                    <div id="zip-stat-eta" class="text-xs font-bold">—</div>
+                </div>
+                <div class="bg-white/5 rounded-lg px-2 py-2">
+                    <div class="text-xs theme-text-secondary mb-0.5">Hız</div>
+                    <div id="zip-stat-speed" class="text-xs font-bold text-cyan-400">—</div>
+                </div>
+            </div>
+
+            <div id="zip-error" class="hidden mb-4 p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
+                <i class="fas fa-exclamation-triangle mr-2"></i><span id="zip-error-text"></span>
+            </div>
+
+            <button id="zip-action-btn" onclick="cancelZip()"
+                class="w-full px-4 py-2.5 rounded-xl border border-white/20 hover:bg-white/5 text-sm transition">
+                İptal
+            </button>
+        </div>
+    </div>
+
     <!-- ═══════════════════════════════════════════════════════════
          Google Drive Kataloğu (DB'ye eklenmiş Drive içerikleri)
     ══════════════════════════════════════════════════════════════ -->
@@ -636,7 +690,12 @@ function renderEntry(e) {
                title="İndir"
                class="p-1.5 rounded-lg text-green-400 hover:bg-green-400/10 transition-colors inline-flex items-center">
                <i class="fas fa-download text-sm"></i>
-           </a>` : '';
+           </a>`
+        : `<button onclick="startFolderZip('${escHtml(e.path)}', '${escHtml(e.name)}')"
+               title="Klasörü ZIP olarak indir"
+               class="p-1.5 rounded-lg text-cyan-400 hover:bg-cyan-400/10 transition-colors">
+               <i class="fas fa-file-archive text-sm"></i>
+           </button>`;
 
     return `
         <div class="grid grid-cols-12 items-center px-5 py-3.5 hover:bg-white/5 transition-colors group">
@@ -1712,6 +1771,122 @@ async function deleteGdriveDbEntry(docId, title) {
     } catch (e) {
         showToast('Silme hatası: ' + e.message, 'error');
     }
+}
+
+// ── Klasör ZIP İndirme ────────────────────────────────────────────────────────
+let _zipSSE      = null;
+let _zipJobId    = null;
+
+async function startFolderZip(path, name) {
+    // Modal sıfırla
+    document.getElementById('zip-folder-name').textContent  = '📁 ' + name;
+    document.getElementById('zip-status-text').textContent  = 'ZIP hazırlanıyor...';
+    document.getElementById('zip-progress-bar').style.width = '0%';
+    document.getElementById('zip-stat-files').textContent   = '—';
+    document.getElementById('zip-stat-size').textContent    = '—';
+    document.getElementById('zip-stat-eta').textContent     = '—';
+    document.getElementById('zip-stat-speed').textContent   = '—';
+    document.getElementById('zip-error').classList.add('hidden');
+    document.getElementById('zip-close-btn').classList.add('hidden');
+    document.getElementById('zip-spinner').className        = 'fas fa-spinner fa-spin text-cyan-400 flex-shrink-0';
+    const actionBtn = document.getElementById('zip-action-btn');
+    actionBtn.textContent = 'İptal';
+    actionBtn.onclick     = cancelZip;
+    actionBtn.className   = 'w-full px-4 py-2.5 rounded-xl border border-white/20 hover:bg-white/5 text-sm transition';
+    document.getElementById('zip-modal').classList.remove('hidden');
+
+    // İşi başlat
+    let jobData;
+    try {
+        const res = await fetch('/api/sunucu/klasor-zip-baslat?path=' + encodeURIComponent(path));
+        jobData = await res.json();
+        if (jobData.error) { _zipShowError(jobData.error); return; }
+    } catch (e) {
+        _zipShowError('Sunucu bağlantı hatası: ' + e.message);
+        return;
+    }
+
+    _zipJobId = jobData.job_id;
+
+    // SSE ile ilerlemeyi takip et
+    if (_zipSSE) { _zipSSE.close(); }
+    const es = new EventSource('/api/sunucu/klasor-zip-durum?job_id=' + _zipJobId);
+    _zipSSE = es;
+
+    es.addEventListener('progress', ev => {
+        const d = JSON.parse(ev.data);
+        document.getElementById('zip-progress-bar').style.width = d.percent + '%';
+        document.getElementById('zip-status-text').textContent  =
+            `⚙️ Sıkıştırılıyor… ${d.progress} / ${d.total} dosya  (${d.percent.toFixed(1)}%)`;
+        document.getElementById('zip-stat-files').textContent  = d.progress + ' / ' + d.total;
+        document.getElementById('zip-stat-size').textContent   = d.done_size_str;
+        document.getElementById('zip-stat-eta').textContent    = d.eta;
+        document.getElementById('zip-stat-speed').textContent  = d.speed_str;
+    });
+
+    es.addEventListener('done', ev => {
+        const d = JSON.parse(ev.data);
+        es.close();
+        _zipSSE = null;
+
+        // Progress bar %100
+        document.getElementById('zip-progress-bar').style.width = '100%';
+        document.getElementById('zip-progress-bar').classList.replace('bg-cyan-400', 'bg-green-400');
+        document.getElementById('zip-spinner').className        = 'fas fa-check-circle text-green-400 flex-shrink-0';
+        document.getElementById('zip-status-text').textContent  =
+            `✅ Hazır! (${d.zip_size_str}) — İndirme başlıyor...`;
+        document.getElementById('zip-stat-eta').textContent    = '0s';
+
+        // Gizli <a> ile indirmeyi tetikle
+        const a = document.createElement('a');
+        a.href     = '/api/sunucu/indir-klasor?job_id=' + encodeURIComponent(d.job_id);
+        a.download = d.zip_name;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+
+        // Kapat butonunu göster, iptal butonunu kapat butonu yap
+        document.getElementById('zip-close-btn').classList.remove('hidden');
+        actionBtn.textContent = 'Kapat';
+        actionBtn.onclick     = closeZipModal;
+        actionBtn.className   = 'w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-green-600 text-white rounded-xl hover:opacity-90 transition font-medium text-sm';
+
+        // 3 saniye sonra otomatik kapat
+        setTimeout(closeZipModal, 3000);
+    });
+
+    es.addEventListener('error', ev => {
+        let msg = 'Bağlantı hatası';
+        try { msg = JSON.parse(ev.data).message; } catch (_) {}
+        es.close();
+        _zipSSE = null;
+        _zipShowError(msg);
+    });
+}
+
+function _zipShowError(msg) {
+    document.getElementById('zip-spinner').className    = 'fas fa-exclamation-triangle text-red-400 flex-shrink-0';
+    document.getElementById('zip-status-text').textContent = 'Hata oluştu';
+    document.getElementById('zip-error-text').textContent  = msg;
+    document.getElementById('zip-error').classList.remove('hidden');
+    document.getElementById('zip-close-btn').classList.remove('hidden');
+    const actionBtn = document.getElementById('zip-action-btn');
+    actionBtn.textContent = 'Kapat';
+    actionBtn.onclick     = closeZipModal;
+}
+
+function cancelZip() {
+    if (_zipSSE) { _zipSSE.close(); _zipSSE = null; }
+    _zipJobId = null;
+    closeZipModal();
+}
+
+function closeZipModal() {
+    document.getElementById('zip-modal').classList.add('hidden');
+    // progress bar rengini sıfırla
+    const bar = document.getElementById('zip-progress-bar');
+    bar.classList.remove('bg-green-400');
+    bar.classList.add('bg-cyan-400');
 }
 
 // İlk yükleme

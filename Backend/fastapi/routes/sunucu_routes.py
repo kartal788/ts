@@ -628,12 +628,78 @@ async def sunucu_yeniden_adlandir(request: Request, _: bool = Depends(require_au
     except Exception as e:
         return JSONResponse({"error": f"Yeniden adlandırma hatası: {e}"}, status_code=500)
 
-    return {
+    # ── DB'deki local_path referanslarını güncelle ─────────────────────────────
+    # Klasör adı değişince içindeki tüm dosyalar yeni yola taşınır.
+    # Dosya adı değişince sadece o tek dosyanın yolu değişir.
+    # Her iki durumda da: eski mutlak yol → yeni mutlak yol prefix eşleşmesiyle bulunur.
+    db_updated = 0
+    try:
+        from Backend.helper.encrypt import encode_string as _encode_string, decode_string as _decode_string
+
+        old_abs = str(target.resolve())   # rename öncesi resolve (artık new_path'te)
+        new_abs = str(new_path.resolve())
+
+        async def _repath_encoded(old_id: str) -> str | None:
+            """
+            Encoded string'i çöz; local_path varsa ve eski yolla başlıyorsa
+            yeni yolla güncelle ve yeniden encode et. Değişiklik yoksa None döner.
+            """
+            try:
+                decoded = await _decode_string(old_id)
+            except Exception:
+                return None
+            lp = decoded.get("local_path")
+            if not lp:
+                return None
+            # Dosya adı veya klasör içindeki herhangi bir dosya eşleşebilir
+            if lp == old_abs or lp.startswith(old_abs + "/") or lp.startswith(old_abs + "\\"):
+                new_lp = new_abs + lp[len(old_abs):]
+                decoded["local_path"] = new_lp
+                return await _encode_string(decoded)
+            return None
+
+        for i in range(1, db.current_db_index + 1):
+            storage = db.dbs[f"storage_{i}"]
+            for col_name in ("movie", "tv"):
+                col = storage[col_name]
+                async for doc in col.find({}):
+                    changed = False
+                    if col_name == "movie":
+                        tg_list = doc.get("telegram", [])
+                        for q in tg_list:
+                            new_id = await _repath_encoded(q.get("id", ""))
+                            if new_id:
+                                q["id"] = new_id
+                                changed = True
+                        if changed:
+                            await col.update_one({"_id": doc["_id"]}, {"$set": {"telegram": tg_list}})
+                            db_updated += 1
+                    else:
+                        seasons = doc.get("seasons", [])
+                        for season in seasons:
+                            for ep in season.get("episodes", []):
+                                tg_list = ep.get("telegram", [])
+                                for q in tg_list:
+                                    new_id = await _repath_encoded(q.get("id", ""))
+                                    if new_id:
+                                        q["id"] = new_id
+                                        changed = True
+                        if changed:
+                            await col.update_one({"_id": doc["_id"]}, {"$set": {"seasons": seasons}})
+                            db_updated += 1
+
+    except Exception as e:
+        LOGGER.warning(f"[yeniden-adlandir] DB güncelleme hatası: {e}")
+
+    result = {
         "status":   "success",
         "old_name": target.name,
         "new_name": new_name,
         "new_path": str(new_path.relative_to(SUNUCU_DIR)),
     }
+    if db_updated:
+        result["db_updated"] = db_updated
+    return result
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -1001,6 +1067,226 @@ async def sunucu_indir(request: Request, _: bool = Depends(require_auth)):
         file_iterator(),
         status_code=status_code,
         media_type=media_type,
+        headers=headers,
+    )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Klasör ZIP işleri — geçici dosyalar için basit kayıt defteri
+# ──────────────────────────────────────────────────────────────────────────────
+import uuid as _uuid
+import tempfile as _tempfile
+
+_ZIP_JOBS: dict[str, dict] = {}   # job_id → {status, progress, total, zip_path, zip_name, error}
+_ZIP_TEMP_DIR = Path(_tempfile.gettempdir()) / "sunucu_zip"
+_ZIP_TEMP_DIR.mkdir(parents=True, exist_ok=True)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# GET /api/sunucu/klasor-zip-baslat  → Arka planda ZIP işi başlat, job_id döner
+# ──────────────────────────────────────────────────────────────────────────────
+async def sunucu_klasor_zip_baslat(request: Request, _: bool = Depends(require_auth)):
+    """
+    Klasörü arka planda ZIP'lemeye başlar.
+    Döner: { job_id, zip_name, total_files, total_size }
+    """
+    rel = request.query_params.get("path", "").strip()
+    if not rel:
+        return JSONResponse({"error": "path gerekli"}, status_code=400)
+
+    try:
+        target = _safe_path(rel)
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+    if not target.exists():
+        return JSONResponse({"error": "Klasör bulunamadı"}, status_code=404)
+    if not target.is_dir():
+        return JSONResponse({"error": "Belirtilen yol bir klasör değil"}, status_code=400)
+
+    files       = sorted([p for p in target.rglob("*") if p.is_file()])
+    total_size  = sum(f.stat().st_size for f in files)
+    total_files = len(files)
+
+    job_id   = _uuid.uuid4().hex
+    zip_name = target.name + ".zip"
+    zip_path = _ZIP_TEMP_DIR / f"{job_id}.zip"
+
+    job = {
+        "status":      "running",
+        "progress":    0,
+        "total":       total_files,
+        "done_size":   0,
+        "total_size":  total_size,
+        "zip_path":    str(zip_path),
+        "zip_name":    zip_name,
+        "error":       None,
+        "started_at":  time.monotonic(),
+    }
+    _ZIP_JOBS[job_id] = job
+
+    async def _build_async():
+        """
+        Her dosyayı ayrı ZipFile.open/close döngüsüyle ekler.
+        Böylece her adımda ZIP tamamen flush edilir ve stat().st_size gerçek değeri verir.
+        """
+        try:
+            loop = asyncio.get_event_loop()
+            mode = "w"   # ilk dosya için yeni arşiv; sonrası "a" (append)
+
+            for i, fp in enumerate(files):
+                arcname = fp.relative_to(target.parent)
+                _mode   = mode
+
+                def _write(fp=fp, arcname=arcname, _mode=_mode):
+                    with zipfile.ZipFile(zip_path, mode=_mode,
+                                         compression=zipfile.ZIP_DEFLATED,
+                                         allowZip64=True) as zf:
+                        zf.write(fp, arcname)
+
+                await loop.run_in_executor(None, _write)
+                mode = "a"   # ikinci dosyadan itibaren append
+
+                job["progress"]  = i + 1
+                job["done_size"] = zip_path.stat().st_size if zip_path.exists() else 0
+
+            job["status"]    = "done"
+            job["done_size"] = zip_path.stat().st_size if zip_path.exists() else 0
+
+        except Exception as ex:
+            job["status"] = "error"
+            job["error"]  = str(ex)
+            zip_path.unlink(missing_ok=True)
+            LOGGER.warning(f"[klasor-zip] Hata: {ex}")
+
+    asyncio.ensure_future(_build_async())
+
+    return JSONResponse({
+        "job_id":      job_id,
+        "zip_name":    zip_name,
+        "total_files": total_files,
+        "total_size":  total_size,
+    })
+
+# GET /api/sunucu/klasor-zip-durum  → SSE: ZIP ilerleme akışı
+# ──────────────────────────────────────────────────────────────────────────────
+async def sunucu_klasor_zip_durum(request: Request, _: bool = Depends(require_auth)):
+    """
+    SSE akışı. Events:
+      progress  { progress, total, percent, done_size, total_size,
+                  done_size_str, total_size_str, elapsed, eta, speed_str }
+      done      { job_id, zip_name, zip_size, zip_size_str }
+      error     { message }
+    """
+    job_id = request.query_params.get("job_id", "").strip()
+    if not job_id or job_id not in _ZIP_JOBS:
+        async def _err():
+            yield _sse("error", {"message": "Geçersiz job_id"})
+        return StreamingResponse(_err(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+    async def generate():
+        last_progress = -1
+        while True:
+            job = _ZIP_JOBS.get(job_id)
+            if not job:
+                yield _sse("error", {"message": "İş bulunamadı"})
+                return
+
+            progress   = job["progress"]
+            total      = job["total"]
+            done_size  = job["done_size"]
+            total_size = job["total_size"]
+            elapsed    = max(time.monotonic() - job["started_at"], 0.001)
+            percent    = round(progress / total * 100, 1) if total else 0
+
+            speed_bps  = done_size / elapsed if elapsed > 0 else 0
+            remaining  = total_size - done_size
+            eta        = _human_eta(remaining / speed_bps) if speed_bps > 0 and remaining > 0 else "—"
+
+            if progress != last_progress or job["status"] != "running":
+                last_progress = progress
+                yield _sse("progress", {
+                    "progress":       progress,
+                    "total":          total,
+                    "percent":        percent,
+                    "done_size":      done_size,
+                    "total_size":     total_size,
+                    "done_size_str":  _human_size(done_size),
+                    "total_size_str": _human_size(total_size) if total_size else "?",
+                    "elapsed":        round(elapsed, 1),
+                    "eta":            eta,
+                    "speed_str":      _human_speed(speed_bps) if speed_bps > 0 else "—",
+                })
+
+            if job["status"] == "done":
+                zip_size = Path(job["zip_path"]).stat().st_size
+                yield _sse("done", {
+                    "job_id":       job_id,
+                    "zip_name":     job["zip_name"],
+                    "zip_size":     zip_size,
+                    "zip_size_str": _human_size(zip_size),
+                })
+                return
+
+            if job["status"] == "error":
+                yield _sse("error", {"message": job["error"] or "ZIP hatası"})
+                return
+
+            await asyncio.sleep(0.4)
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# GET /api/sunucu/indir-klasor  → Tamamlanmış ZIP'i indir ve geçici dosyayı sil
+# ──────────────────────────────────────────────────────────────────────────────
+async def sunucu_indir_klasor(request: Request, _: bool = Depends(require_auth)):
+    """
+    job_id ile tamamlanmış ZIP'i tarayıcıya gönderir.
+    İndirme tamamlanınca geçici dosyayı temizler.
+    """
+    job_id = request.query_params.get("job_id", "").strip()
+    if not job_id or job_id not in _ZIP_JOBS:
+        return JSONResponse({"error": "Geçersiz job_id"}, status_code=400)
+
+    job = _ZIP_JOBS[job_id]
+    if job["status"] != "done":
+        return JSONResponse({"error": "ZIP henüz hazır değil"}, status_code=425)
+
+    zip_path = Path(job["zip_path"])
+    zip_name = job["zip_name"]
+
+    if not zip_path.exists():
+        return JSONResponse({"error": "ZIP dosyası bulunamadı"}, status_code=404)
+
+    async def file_iter_and_cleanup():
+        try:
+            async with aiofiles.open(zip_path, "rb") as f:
+                while True:
+                    chunk = await f.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    yield chunk
+        finally:
+            zip_path.unlink(missing_ok=True)
+            _ZIP_JOBS.pop(job_id, None)
+
+    zip_size = zip_path.stat().st_size
+    headers = {
+        "Content-Disposition": f'attachment; filename="{zip_name}"',
+        "Content-Length":      str(zip_size),
+        "Cache-Control":       "no-cache",
+        "X-Accel-Buffering":   "no",
+    }
+
+    return StreamingResponse(
+        file_iter_and_cleanup(),
+        media_type="application/zip",
         headers=headers,
     )
 

@@ -88,7 +88,7 @@
                                     <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
                                     <span class="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
                                 </span>
-                                <span class="text-sm font-bold text-red-600">{{ system_stats.active_streams | selectattr('total_bytes', 'gt', 0) | list | length if system_stats.active_streams else 0 }} Aktif</span>
+                                <span id="active-streams-badge" class="text-sm font-bold text-red-600">{{ system_stats.active_streams | length if system_stats.active_streams else 0 }} Aktif</span>
                             </div>
                         </div>
 
@@ -831,13 +831,13 @@
             const response = await fetch('/stream/stats');
             if (response.ok) {
                 const data = await response.json();
-                const allStreams = data.active_streams || [];
-                streamsData = allStreams.filter(s => (s.total_bytes || 0) > 0);
+                // Backend zaten active + total_bytes > 0 filtresi uyguluyor
+                streamsData = data.active_streams || [];
 
                 window._staticStreamCards = [];
                 window._showStaticStreamPage = null;
 
-                const badge = document.querySelector('.streams-container .text-red-600');
+                const badge = document.getElementById('active-streams-badge');
                 if (badge) badge.textContent = streamsData.length + ' Aktif';
 
                 streamsCurrentPage = 0;
@@ -848,10 +848,19 @@
         }
     }
 
-    const statsInterval = setInterval(() => {
-        refreshSystemStats();
+    // Sayfa açılışında hemen çalıştır
+    updateActiveStreams();
+    refreshSystemStats();
+
+    // Her 10 saniyede bir stream durumunu güncelle
+    setInterval(() => {
         updateActiveStreams();
-    }, 120000);
+    }, 10000);
+
+    // Sistem istatistiklerini her 30 saniyede bir güncelle
+    setInterval(() => {
+        refreshSystemStats();
+    }, 30000);
 
     (function initStreamsPagination() {
         const container = document.getElementById('active-streams-container');

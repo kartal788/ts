@@ -189,6 +189,11 @@ async def dashboard_page(request: Request, _: bool = Depends(require_auth)):
 
         active_streams_data = []
         for stream_id, info in ACTIVE_STREAMS.items():
+            # Sadece gerçekten aktif ve veri transfer etmiş stream'leri göster
+            if info.get("status") != "active":
+                continue
+            if (info.get("total_bytes") or 0) <= 0:
+                continue
             active_streams_data.append({
                 "stream_id": stream_id,
                 "msg_id": info.get("msg_id"),

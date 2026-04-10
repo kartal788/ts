@@ -23,7 +23,8 @@ from Backend.fastapi.routes.sunucu_routes import (
     sunucu_yukle_stream, sunucu_listele, sunucu_sil,
     sunucu_yeniden_adlandir, sunucu_metadata, sunucu_klasor_olustur,
     sunucu_sistem_durumu, sunucu_metadata_sorgu, sunucu_metadata_kaydet,
-    sunucu_metadata_sil, sunucu_indir,
+    sunucu_metadata_sil, sunucu_indir, sunucu_indir_klasor,
+    sunucu_klasor_zip_baslat, sunucu_klasor_zip_durum,
     sunucu_gdrive_listele, sunucu_gdrive_ekle,
     sunucu_gdrive_meta_sorgu, sunucu_gdrive_ekle_onay,
     sunucu_gdrive_db_listele, sunucu_gdrive_db_sil, sunucu_gdrive_migrate,
@@ -617,6 +618,18 @@ async def sunucu_metadata_sil_route(request: Request, _: bool = Depends(require_
 @app.get("/api/sunucu/indir")
 async def sunucu_indir_route(request: Request, _: bool = Depends(require_auth)):
     return await sunucu_indir(request, _)
+
+@app.get("/api/sunucu/klasor-zip-baslat")
+async def sunucu_klasor_zip_baslat_route(request: Request, _: bool = Depends(require_auth)):
+    return await sunucu_klasor_zip_baslat(request, _)
+
+@app.get("/api/sunucu/klasor-zip-durum")
+async def sunucu_klasor_zip_durum_route(request: Request, _: bool = Depends(require_auth)):
+    return await sunucu_klasor_zip_durum(request, _)
+
+@app.get("/api/sunucu/indir-klasor")
+async def sunucu_indir_klasor_route(request: Request, _: bool = Depends(require_auth)):
+    return await sunucu_indir_klasor(request, _)
 
 @app.get("/api/sunucu/gdrive-listele")
 async def sunucu_gdrive_listele_route(request: Request, _: bool = Depends(require_auth)):

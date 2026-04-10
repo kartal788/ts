@@ -213,29 +213,13 @@ async def member_login_post(
     # Önce admin OTP'yi dene — bakım modunda da admin girebilmeli
     admin_doc = await db.verify_admin_credentials(username, password)
     if admin_doc:
-        all_tokens = await db.get_all_api_tokens()
-        from Backend.config import Telegram as _Tg
-        token_doc = next(
-            (t for t in all_tokens if t.get("user_id") == _Tg.OWNER_ID), None
-        )
-        owner_display = admin_doc.get("display_name", "Yönetici")
-        try:
-            owner_tg = await db.get_user(_Tg.OWNER_ID)
-            if owner_tg and owner_tg.get("first_name"):
-                owner_display = owner_tg["first_name"]
-        except Exception:
-            pass
-        request.session["member"] = {
-            "user_id":          _Tg.OWNER_ID,
-            "name":             owner_display,
-            "photo_url":        "",
-            "token":            token_doc["token"] if token_doc else None,
-            "lang":             lang,
-            "subscription_end": None,
-            "is_admin":         True,
-        }
-        record_success(ip)
-        return RedirectResponse(url=f"/uye/katalog?lang={lang}", status_code=302)
+        # Yönetici şifresiyle üye kataloğuna giriş engellendi.
+        # Admin girişleri yalnızca /login (yönetici paneli) üzerinden yapılmalıdır.
+        return _err({
+            "tr": "Yönetici şifresiyle üye kataloğuna giriş yapılamaz. Lütfen üye şifrenizi kullanın.",
+            "en": "Admin password cannot be used to access the member catalog. Please use your member password.",
+            "de": "Das Admin-Passwort kann nicht für den Mitgliederkatalog verwendet werden. Bitte verwenden Sie Ihr Mitgliedspasswort.",
+        }.get(lang, "Admin login is not allowed here."))
 
     # Üye OTP doğrula
     session_doc = await db.verify_member_otp(username, password)
@@ -323,29 +307,23 @@ async def member_catalog_page(request: Request):
         request.session.pop("member", None)
         return RedirectResponse(url="/uye/giris", status_code=302)
 
-    # Canlı abonelik kontrolü (admin her zaman geçer)
-    if not member.get("is_admin") and not await _check_subscription(member["user_id"]):
+    # Yönetici oturumu ile üye kataloğuna erişim engellendi
+    if member.get("is_admin"):
+        request.session.pop("member", None)
+        return RedirectResponse(url="/uye/giris", status_code=302)
+
+    # Canlı abonelik kontrolü
+    if not await _check_subscription(member["user_id"]):
         request.session.pop("member", None)
         return RedirectResponse(url="/uye/giris?expired=1", status_code=302)
 
     # Session_id kontrolü: /start'ta yeni OTP üretildiğinde DB'deki session_id değişir.
     # Cookie'deki eski session_id artık eşleşmez → kullanıcı login sayfasına yönlendirilir.
-    # Admin oturumları da DB'deki admin_sessions kaydıyla doğrulanır.
-    if member.get("is_admin"):
-        # Admin oturumu için: DB'de geçerli bir admin session kaydı olup olmadığını kontrol et
-        try:
-            admin_valid = await db.has_valid_admin_session()
-            if not admin_valid:
-                request.session.pop("member", None)
-                return RedirectResponse(url="/uye/giris", status_code=302)
-        except Exception:
-            pass  # DB hatasında oturumu kapat
-    else:
-        cookie_sid = member.get("session_id", "")
-        db_sid = await db.get_member_session_id(int(member["user_id"]))
-        if db_sid and cookie_sid != db_sid:
-            request.session.pop("member", None)
-            return RedirectResponse(url="/uye/giris", status_code=302)
+    cookie_sid = member.get("session_id", "")
+    db_sid = await db.get_member_session_id(int(member["user_id"]))
+    if db_sid and cookie_sid != db_sid:
+        request.session.pop("member", None)
+        return RedirectResponse(url="/uye/giris", status_code=302)
 
     theme_name = request.session.get("theme", "purple_gradient")
     theme = get_theme(theme_name)
