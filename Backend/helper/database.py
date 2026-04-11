@@ -1820,6 +1820,19 @@ class Database:
             "catalog_order":   doc.get("catalog_order", []),
         }
 
+    async def get_channel_order(self, token: str) -> list:
+        """Return user-specific live channel ordering for this token."""
+        doc = await self.dbs["tracking"]["api_tokens"].find_one({"token": token})
+        return doc.get("channel_order", []) if doc else []
+
+    async def save_channel_order(self, token: str, channel_order: list) -> bool:
+        """Persist user-specific live channel ordering for this token."""
+        result = await self.dbs["tracking"]["api_tokens"].update_one(
+            {"token": token},
+            {"$set": {"channel_order": channel_order}}
+        )
+        return result.modified_count > 0
+
     async def save_catalog_prefs(self, token: str, hidden_catalogs: list) -> bool:
         """Persist hidden catalog IDs for this token."""
         result = await self.dbs["tracking"]["api_tokens"].update_one(

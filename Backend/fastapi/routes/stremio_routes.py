@@ -889,6 +889,11 @@ async def configure_addon(token: str, lang: str = "en"):
             "btn_saving": "Kaydediliyor...",
             "save_ok": "✅ Kaydedildi! Eklentiyi güncellemek için silip tekrar yükleyin.",
             "save_err": "❌ Kaydetme başarısız.",
+            "channel_section": "📡 Canlı Kanal Sırası",
+            "channel_subtitle": "Kanalları sürükleyerek kendi sıranıza göre düzenleyin.",
+            "btn_save_channels": "💾 Kanal Sırasını Kaydet",
+            "channel_save_ok": "✅ Kanal sırası kaydedildi!",
+            "channel_save_err": "❌ Kanal sırası kaydedilemedi.",
             "label_daily_used": "Günlük Kullanılan",
             "label_monthly_used": "Aylık Kullanılan",
             "label_daily_limit": "Günlük Limit",
@@ -925,6 +930,11 @@ async def configure_addon(token: str, lang: str = "en"):
             "btn_saving": "Speichern...",
             "save_ok": "✅ Gespeichert! Entfernen Sie das Add-on und installieren Sie es erneut, um es zu aktualisieren.",
             "save_err": "❌ Speichern fehlgeschlagen.",
+            "channel_section": "📡 Reihenfolge der Live-Kanäle",
+            "channel_subtitle": "Kanäle per Drag & Drop in Ihrer Wunschreihenfolge sortieren.",
+            "btn_save_channels": "💾 Kanalreihenfolge speichern",
+            "channel_save_ok": "✅ Kanalreihenfolge gespeichert!",
+            "channel_save_err": "❌ Speichern der Kanalreihenfolge fehlgeschlagen.",
             "label_daily_used": "Heute verbraucht",
             "label_monthly_used": "Monat verbraucht",
             "label_daily_limit": "Tageslimit",
@@ -961,6 +971,11 @@ async def configure_addon(token: str, lang: str = "en"):
             "btn_saving": "Saving...",
             "save_ok": "✅ Saved! To update the add-on, remove it and install it again.",
             "save_err": "❌ Failed to save.",
+            "channel_section": "📡 Live Channel Order",
+            "channel_subtitle": "Drag channels to set your personal viewing order.",
+            "btn_save_channels": "💾 Save Channel Order",
+            "channel_save_ok": "✅ Channel order saved!",
+            "channel_save_err": "❌ Failed to save channel order.",
             "label_daily_used": "Daily Used",
             "label_monthly_used": "Monthly Used",
             "label_daily_limit": "Daily Limit",
@@ -982,6 +997,26 @@ async def configure_addon(token: str, lang: str = "en"):
     cat_prefs = await _db.get_catalog_prefs_full(token)
     hidden_catalogs = cat_prefs.get("hidden_catalogs", []) if isinstance(cat_prefs, dict) else (cat_prefs or [])
     saved_order = cat_prefs.get("catalog_order", []) if isinstance(cat_prefs, dict) else []
+
+    # Kanal sırası tercihlerini çek
+    saved_channel_order = await _db.get_channel_order(token)
+    all_channels = await _db.get_live_channels()
+    if saved_channel_order:
+        ch_order_map = {cid: idx for idx, cid in enumerate(saved_channel_order)}
+        default_ch_start = len(saved_channel_order)
+        all_channels.sort(key=lambda ch: ch_order_map.get(ch.get("_id", ""), default_ch_start))
+    channel_items_html = ""
+    for ch in all_channels:
+        ch_id = ch.get("_id", "")
+        ch_name = ch.get("name", ch_id)
+        ch_logo = ch.get("logo", "") or ch.get("poster", "")
+        logo_html = f'<img src="{ch_logo}" style="width:22px;height:22px;border-radius:4px;object-fit:cover;flex-shrink:0;">' if ch_logo else '<span style="width:22px;height:22px;background:#374151;border-radius:4px;flex-shrink:0;display:inline-block;"></span>'
+        channel_items_html += f"""
+      <div class="cat-item" draggable="true" data-ch-id="{ch_id}">
+        <span class="drag-handle">⠿</span>
+        {logo_html}
+        <span class="cat-name">{ch_name}</span>
+      </div>"""
 
     _MONTHS_TR = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran",
                   "Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"]
@@ -1279,6 +1314,17 @@ async def configure_addon(token: str, lang: str = "en"):
     <button class="btn-save" id="saveBtn" onclick="saveCatalogs()">{t['btn_save_catalogs']}</button>
     <div class="save-msg" id="saveMsg"></div>
   </div>
+
+  <!-- Canlı Kanal Sırası -->
+  <div class="catalog-section" style="margin-top:22px">
+    <div class="catalog-label">{t['channel_section']}</div>
+    <div class="catalog-subtitle">{t['channel_subtitle']}</div>
+    <div class="catalog-list" id="channelList">
+{channel_items_html}
+    </div>
+    <button class="btn-save" id="saveChBtn" onclick="saveChannels()" style="background:linear-gradient(135deg,#7c3aed,#4f46e5)">{t['btn_save_channels']}</button>
+    <div class="save-msg" id="saveChMsg"></div>
+  </div>
 </div>
 
 <script>
@@ -1290,6 +1336,9 @@ async def configure_addon(token: str, lang: str = "en"):
   const BTN_SAVE_LABEL = "{t['btn_save_catalogs']}";
   const SAVE_OK = "{t['save_ok']}";
   const SAVE_ERR = "{t['save_err']}";
+  const BTN_SAVE_CH_LABEL = "{t['btn_save_channels']}";
+  const SAVE_CH_OK = "{t['channel_save_ok']}";
+  const SAVE_CH_ERR = "{t['channel_save_err']}";
   let currentLang = "{lang}";
 
   function selectLang(lang, el) {{
@@ -1319,19 +1368,16 @@ async def configure_addon(token: str, lang: str = "en"):
     else item.classList.add('cat-off');
   }}
 
-  // ── Drag-and-Drop sıralama ────────────────────────────────────────────────
+  // ── Drag-and-Drop sıralama (katalog ve kanal listeleri) ───────────────────
   let dragSrc = null;
 
-  document.addEventListener('DOMContentLoaded', () => {{
-    const list = document.querySelector('.catalog-list');
-
+  function _initDragList(list) {{
     list.addEventListener('dragstart', e => {{
       const item = e.target.closest('.cat-item[draggable]');
       if (!item) return;
       dragSrc = item;
       setTimeout(() => item.classList.add('dragging'), 0);
     }});
-
     list.addEventListener('dragend', e => {{
       const item = e.target.closest('.cat-item');
       if (!item) return;
@@ -1339,7 +1385,6 @@ async def configure_addon(token: str, lang: str = "en"):
       list.querySelectorAll('.cat-item').forEach(i => i.classList.remove('drag-over'));
       dragSrc = null;
     }});
-
     list.addEventListener('dragover', e => {{
       e.preventDefault();
       const target = e.target.closest('.cat-item[draggable]');
@@ -1347,13 +1392,11 @@ async def configure_addon(token: str, lang: str = "en"):
       list.querySelectorAll('.cat-item').forEach(i => i.classList.remove('drag-over'));
       target.classList.add('drag-over');
     }});
-
     list.addEventListener('drop', e => {{
       e.preventDefault();
       const target = e.target.closest('.cat-item[draggable]');
       if (!target || target === dragSrc || !dragSrc) return;
       target.classList.remove('drag-over');
-      // Hedefe göre konuma ekle
       const items = [...list.querySelectorAll('.cat-item')];
       const srcIdx = items.indexOf(dragSrc);
       const tgtIdx = items.indexOf(target);
@@ -1363,6 +1406,10 @@ async def configure_addon(token: str, lang: str = "en"):
         list.insertBefore(dragSrc, target);
       }}
     }});
+  }}
+
+  document.addEventListener('DOMContentLoaded', () => {{
+    document.querySelectorAll('.catalog-list').forEach(list => _initDragList(list));
   }});
 
   async function saveCatalogs() {{
@@ -1374,7 +1421,7 @@ async def configure_addon(token: str, lang: str = "en"):
 
     const hidden = [];
     const order = [];
-    document.querySelectorAll('.catalog-list .cat-item[draggable]').forEach(item => {{
+    document.querySelectorAll('.catalog-list:not(#channelList) .cat-item[draggable]').forEach(item => {{
       const id = item.dataset.id;
       order.push(id);
       const cb = item.querySelector('input[type=checkbox]');
@@ -1395,6 +1442,34 @@ async def configure_addon(token: str, lang: str = "en"):
     }}
     btn.disabled = false;
     btn.textContent = BTN_SAVE_LABEL;
+  }}
+
+  async function saveChannels() {{
+    const btn = document.getElementById('saveChBtn');
+    const msg = document.getElementById('saveChMsg');
+    btn.disabled = true;
+    btn.textContent = BTN_SAVING;
+    msg.textContent = '';
+
+    const channel_order = [];
+    document.querySelectorAll('#channelList .cat-item[draggable]').forEach(item => {{
+      channel_order.push(item.dataset.chId);
+    }});
+
+    try {{
+      const res = await fetch(BASE + '/stremio/' + TOKEN + '/channel-order', {{
+        method: 'POST',
+        headers: {{'Content-Type': 'application/json'}},
+        body: JSON.stringify({{channel_order}})
+      }});
+      msg.style.color = res.ok ? '#22c55e' : '#ef4444';
+      msg.textContent = res.ok ? SAVE_CH_OK : SAVE_CH_ERR;
+    }} catch(e) {{
+      msg.style.color = '#ef4444';
+      msg.textContent = SAVE_CH_ERR;
+    }}
+    btn.disabled = false;
+    btn.textContent = BTN_SAVE_CH_LABEL;
   }}
 </script>
 </body>
@@ -1449,6 +1524,14 @@ async def get_catalog(token: str, media_type: str, id: str, extra: Optional[str]
             if id.startswith("live_") and media_type == "channel":
                 from Backend import db as _db
                 channels = await _db.get_live_channels()
+
+                # Üyenin kayıtlı kanal sırasını uygula
+                channel_order = await _db.get_channel_order(token)
+                if channel_order:
+                    order_map = {cid: idx for idx, cid in enumerate(channel_order)}
+                    default_start = len(channel_order)
+                    channels.sort(key=lambda ch: order_map.get(ch.get("_id", ""), default_start))
+
                 metas = []
                 for ch in channels[stremio_skip: stremio_skip + PAGE_SIZE]:
                     ch_id = ch.get("_id", "")
@@ -2029,6 +2112,29 @@ async def save_catalog_prefs(token: str, request: Request, token_data: dict = De
         if not isinstance(hidden, list) or not isinstance(order, list):
             return JSONResponse({"ok": False, "error": "invalid payload"}, status_code=400)
         await _db_prefs.save_catalog_prefs_full(token, hidden, order)
+        return JSONResponse({"ok": True})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+# ── Kanal sırası kaydı ────────────────────────────────────────────────────
+@router.post("/{token}/channel-order")
+async def save_channel_order(token: str, request: Request, token_data: dict = Depends(verify_token)):
+    from fastapi.responses import JSONResponse
+    from Backend import db as _db
+    try:
+        body = await request.json()
+        channel_order = body.get("channel_order", [])
+
+        if not isinstance(channel_order, list):
+            return JSONResponse({"ok": False, "error": "invalid payload"}, status_code=400)
+
+        # DB'deki gerçek kanal ID'lerini çek — yabancı ID girilmesini engelle
+        all_channels = await _db.get_live_channels()
+        valid_ids = {ch["_id"] for ch in all_channels}
+        filtered_order = [cid for cid in channel_order if cid in valid_ids]
+
+        await _db.save_channel_order(token, filtered_order)
         return JSONResponse({"ok": True})
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
