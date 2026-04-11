@@ -267,20 +267,37 @@ def _step_ram(lines: list):
 def _step_log(lines: list):
     log_path = "log.txt"
     try:
-        size = os.path.getsize(log_path) if os.path.exists(log_path) else 0
-        # Tüm handler'ları kapat, dosyayı sıfırla, yeniden aç
         import logging
         root_logger = logging.getLogger()
+
+        # Tüm handler'ları kapat ve kaldır
         for handler in root_logger.handlers[:]:
-            if isinstance(handler, logging.FileHandler) and handler.baseFilename.endswith("log.txt"):
+            if isinstance(handler, logging.FileHandler) and "log.txt" in handler.baseFilename:
                 handler.close()
                 root_logger.removeHandler(handler)
+
+        # log.txt + rotate yedekleri (log.txt.1, log.txt.2, …) hepsini sil
+        total_size = 0
+        deleted = []
+        base_dir = os.path.dirname(os.path.abspath(log_path)) or "."
+        for fname in os.listdir(base_dir):
+            fpath = os.path.join(base_dir, fname)
+            if fname == "log.txt" or (fname.startswith("log.txt.") and fname[8:].isdigit()):
+                try:
+                    total_size += os.path.getsize(fpath)
+                    os.remove(fpath)
+                    deleted.append(fname)
+                except Exception:
+                    pass
+
+        # log.txt'yi sıfırdan oluştur ve handler'ı yeniden ekle
         open(log_path, "w").close()
-        # Handler'ı yeniden ekle
         from Backend.logger import file_handler
         file_handler.stream = open(log_path, "a", encoding="utf-8")
         root_logger.addHandler(file_handler)
-        lines.append(f"✅ log.txt — <b>{_bytes(size)}</b> temizlendi")
+
+        detail = f" ({', '.join(sorted(deleted))})" if deleted else ""
+        lines.append(f"✅ Log dosyaları{detail} — <b>{_bytes(total_size)}</b> temizlendi")
     except Exception as e:
         lines.append(f"⚠️ log.txt: {e}")
 
