@@ -1128,11 +1128,23 @@ async def cmd_sunucuyayukle(client: Client, message: Message):
         ul_str = str(max_ul) if max_ul < 999 else "sınırsız"
         return await message.reply_text(
             f"ℹ️ <b>Nasıl Yükleme Yapılır?</b>\n\n"
+            f"<b>📦 Zip/7z Arşiv Modu:</b>\n"
+            f"• <code>/s 1</code> ➜ 1 adet zip/7z dosyası bekler.\n"
             f"• <code>/s 2</code> ➜ 2 adet partlı dosya bekler (Zip/7z).\n"
+            f"• <code>/s 2 [TMDB/IMDb Link]</code> ➜ 2 dosya + metadata linki ile sorgular.\n\n"
+            f"<b>🎬 Video Modu:</b>\n"
+            f"• <code>/s v</code> ➜ 1 video dosyası bekler, doğrudan sunucuya yükler.\n"
+            f"• <code>/s v2</code> ➜ 2 video dosyası bekler (ikincisi episode/part).\n"
+            f"• <code>/s v [TMDB/IMDb Link]</code> ➜ Video + metadata linki ile sorgular.\n\n"
+            f"<b>🌐 URL Modu:</b>\n"
             f"• <code>/s [URL]</code> ➜ Linkten direkt indirir.\n"
             f"• <code>/s [URL] [İsim]</code> ➜ Özel isimle indirir.\n"
             f"• <code>/s [Drive-Link]</code> ➜ Google Drive desteği.\n"
             "  ↳ Drive indirme için önce /ayarlar → 📁 Dosya Ekle → token.pickle yükleyin.\n\n"
+            f"<b>🔗 Metadata Linkleri:</b>\n"
+            f"• TMDB: <code>https://www.themoviedb.org/movie/12345</code>\n"
+            f"• TMDB Dizi: <code>https://www.themoviedb.org/tv/67890</code>\n"
+            f"• IMDb: <code>https://www.imdb.com/title/tt1234567</code>\n\n"
             f"⚙️ <b>Sistem Limitleri:</b>\n"
             f"├ ⬇️ İndirme: <b>{dl_str}</b>\n"
             f"└ ⬆️ Yükleme: <b>{ul_str}</b>\n\n"
@@ -1234,12 +1246,58 @@ async def cmd_sunucuyayukle(client: Client, message: Message):
                           "session": session, "orig_message": message})
         return
 
-    # ── Dosya modu ────────────────────────────────────────────────────────────
+    # ── Video modu: /s v, /s v2, /s v [link] ─────────────────────────────────
     raw_lower = raw_arg.lower()
+
+    # "v" veya "v<N>" formatını kontrol et: v, v1, v2, v3 ...
+    _video_mode_match = re.fullmatch(r'v(\d*)', raw_lower)
+    if _video_mode_match:
+        video_count_str = _video_mode_match.group(1)
+        video_count = int(video_count_str) if video_count_str else 1
+        if video_count < 1:
+            video_count = 1
+
+        # Metadata link argümanı var mı? (/s v tmdblink veya /s v2 tmdblink)
+        _remaining_args = args[2:]
+        override_link = None
+        for _a in _remaining_args:
+            if _a.lower().startswith(("http://", "https://")):
+                override_link = _a
+                break
+
+        session = {
+            "count": video_count, "mode": "video", "collected": [],
+            "session_dir": session_dir, "session_id": session_id,
+            "chat_id": chat_id, "cancelled": False,
+            "override_link": override_link,
+        }
+        _SESSIONS[uid] = session
+        _SESSION_LOCKS[session_id] = asyncio.Lock()
+
+        link_info = ""
+        if override_link:
+            link_info = f"\n🔗 <b>Metadata:</b> <code>{override_link[:60]}{'…' if len(override_link) > 60 else ''}</code>"
+
+        await message.reply_text(
+            f"🎬 <b>Video Modu Aktif — {video_count} video bekleniyor</b>{link_info}\n"
+            "Video dosyasını gönderin (mkv, mp4, avi, …).\n"
+            "<i>İptal: /iptal</i>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    # ── Arşiv dosya modu: /s <N> veya /s <N> [link] ──────────────────────────
+    # Metadata link argümanı var mı? (/s 2 tmdblink veya /s 2 imdblink)
+    _meta_link_from_args = None
+    for _a in args[2:]:
+        if _a.lower().startswith(("http://", "https://")):
+            _meta_link_from_args = _a
+            break
+
     if not (raw_lower.isdigit() and int(raw_lower) >= 1):
         return await message.reply_text(
             "❌ Geçersiz parametre.\n"
-            "Kullanım: <code>/sunucuyayukle 2</code> veya <code>/sunucuyayukle https://…</code>",
+            "Kullanım: <code>/s 2</code>, <code>/s v</code> veya <code>/s https://…</code>",
             parse_mode=ParseMode.HTML,
         )
 
@@ -1248,14 +1306,19 @@ async def cmd_sunucuyayukle(client: Client, message: Message):
         "count": count, "mode": "multi", "collected": [],
         "session_dir": session_dir, "session_id": session_id,
         "chat_id": chat_id, "cancelled": False,
+        "override_link": _meta_link_from_args,
     }
     _SESSIONS[uid] = session
     _SESSION_LOCKS[session_id] = asyncio.Lock()
 
+    link_info = ""
+    if _meta_link_from_args:
+        link_info = f"\n🔗 <b>Metadata:</b> <code>{_meta_link_from_args[:60]}{'…' if len(_meta_link_from_args) > 60 else ''}</code>"
+
     # Dosya bekleniyor — sadece bilgi mesajı gönder, görev satırı ekleme.
     # Görev satırı her dosya gelince zip_file_collector tarafından eklenir.
     await message.reply_text(
-        f"✅ <b>Yükleme Modu Aktif — {count} dosya bekleniyor</b>\n"
+        f"✅ <b>Yükleme Modu Aktif — {count} dosya bekleniyor</b>{link_info}\n"
         "Dosyaları sırasıyla gönderin.\n"
         "<i>İptal: /iptal</i>",
         parse_mode=ParseMode.HTML,
@@ -1418,17 +1481,17 @@ async def cmd_cancel_session(client: Client, message: Message):
 )
 async def zip_file_collector(client: Client, message: Message):
     """
-    Gelen arşiv dosyalarını sırayla aynı session'a toplar.
-    Her dosya gelince durum mesajında o dosyanın adı ve indirme ilerlemesi gösterilir.
-    Tüm parçalar toplandıktan sonra birlikte çıkarılır (multi-part arşiv desteği).
+    Gelen arşiv veya video dosyalarını sırayla aynı session'a toplar.
+    "multi" modunda arşiv dosyaları, "video" modunda video dosyaları beklenir.
+    Tüm parçalar toplandıktan sonra kuyruğa işleme görevi eklenir.
     """
     chat_id = message.chat.id
 
-    # Bu chat için aktif bir "multi" session'ı ara
+    # Bu chat için aktif bir "multi" veya "video" session'ı ara
     session = None
     uid     = None
     for _uid, sess in _SESSIONS.items():
-        if sess["chat_id"] == chat_id and sess.get("mode") == "multi":
+        if sess["chat_id"] == chat_id and sess.get("mode") in ("multi", "video"):
             session = sess
             uid     = _uid
             break
@@ -1439,8 +1502,16 @@ async def zip_file_collector(client: Client, message: Message):
     doc = message.document
     _video_exts = {".mkv", ".mp4", ".avi", ".mov", ".wmv", ".ts", ".m4v", ".webm", ".flv", ".mpg", ".mpeg"}
     _is_video_doc = bool(doc and (doc.file_name or "").lower().endswith(tuple(_video_exts)))
-    if not _is_zip_or_7z(doc) and not _is_video_doc:
-        return
+
+    mode = session.get("mode", "multi")
+
+    # Mod kontrolü: video modunda video bekliyoruz; multi modunda arşiv veya video
+    if mode == "video":
+        if not _is_video_doc:
+            return  # Video modunda arşiv kabul etme
+    else:
+        if not _is_zip_or_7z(doc) and not _is_video_doc:
+            return
 
     session_id = session["session_id"]
     lock       = _SESSION_LOCKS.get(session_id)
@@ -1457,17 +1528,18 @@ async def zip_file_collector(client: Client, message: Message):
             return  # Fazla dosya, yoksay
 
         session_dir: Path = session["session_dir"]
-        tg_fname = doc.file_name or f"file_{doc.file_unique_id}.zip"
+        tg_fname = doc.file_name or f"file_{doc.file_unique_id}.{'mkv' if _is_video_doc else 'zip'}"
         dest     = session_dir / tg_fname
 
-        # İlk dosya geldiğinde parçalı arşiv tespiti yap; flag session'a yazılır.
-        # Sonraki parçalar aynı session'da olduğundan bir kez set etmek yeterli.
-        if "is_multipart" not in session:
+        # İlk dosya geldiğinde parçalı arşiv tespiti yap (sadece multi modunda)
+        if mode == "multi" and "is_multipart" not in session:
             session["is_multipart"] = _is_multipart_archive(tg_fname)
             if session["is_multipart"]:
                 LOGGER.info(f"[yukle:{session_id}] Parçalı arşiv tespit edildi: {tg_fname} — indirme limiti 1")
 
-        LOGGER.info(f"[yukle:{session_id}] Dosya alındı ({idx}/{count}): {tg_fname}")
+        LOGGER.info(f"[yukle:{session_id}] Dosya alındı ({idx}/{count}): {tg_fname} [mod={mode}]")
+
+        mode_label = "#VideoMod" if mode == "video" else "#TgDosya"
 
         # Bu dosyanın indirme görevini TASKS'a ekle / güncelle
         await _task_set(
@@ -1476,7 +1548,7 @@ async def zip_file_collector(client: Client, message: Message):
             status="İndiriliyor", pct=0,
             processed=0, total_size=doc.file_size or 0,
             speed=0, eta="-", elapsed="0s",
-            engine="Pyrogram", mode_in="#TgDosya",
+            engine="Pyrogram", mode_in=mode_label,
             is_multipart=session.get("is_multipart", False),
         )
 
@@ -1510,8 +1582,6 @@ async def zip_file_collector(client: Client, message: Message):
                     pass
             return
         except FileNotFoundError as e:
-            # Pyrogram temp dosyayı taşımaya çalışırken session_dir zaten silindi
-            # (kullanıcı iptal etti) → sessizce çık, hata loglanmaz.
             if session.get("cancelled"):
                 return
             err = f"FileNotFoundError: {e}"
@@ -1545,7 +1615,7 @@ async def zip_file_collector(client: Client, message: Message):
             # Sonraki dosyayı bekle — durum güncelle
             await _task_set(
                 session_id,
-                fname=f"{len(session['collected'])}/{count} alındı — {remaining} dosya bekleniyor",
+                fname=f"{len(session['collected'])}/{count} alındı — {remaining} {'video' if mode == 'video' else 'dosya'} bekleniyor",
                 status="Dosya Bekleniyor", pct=0,
                 processed=0, total_size=0, speed=0, eta="-", elapsed="-",
             )
@@ -1649,13 +1719,15 @@ async def _process_session_download(client: Client, uid: int, session: dict,
         archive_parts     = [p for p in parts if _is_archive(p.name)]
         non_archive_parts = [p for p in parts if not _is_archive(p.name)]
         video_exts        = {".mkv", ".mp4", ".avi", ".mov", ".wmv", ".ts", ".m4v"}
+        mode              = session.get("mode", "multi")
 
-        if non_archive_parts and not archive_parts:
-            video_parts = [p for p in non_archive_parts if p.suffix.lower() in video_exts]
-            video_path  = video_parts[0] if video_parts else non_archive_parts[0]
-            LOGGER.info(f"[yukle:{session_id}] Arşiv değil, direkt dosya: {video_path.name}")
+        # Video modunda arşiv çıkarmayı atla, direkt video yolunu kullan
+        if mode == "video" or (non_archive_parts and not archive_parts):
+            video_parts = [p for p in parts if p.suffix.lower() in video_exts]
+            video_path  = video_parts[0] if video_parts else (non_archive_parts[0] if non_archive_parts else parts[0] if parts else None)
+            LOGGER.info(f"[yukle:{session_id}] Direkt dosya: {video_path.name if video_path else '?'} [mod={mode}]")
             await _task_set(session_id, status="Yükleme Bekleniyor",
-                            fname=video_path.name, pct=100)
+                            fname=video_path.name if video_path else "?", pct=100)
             await _push_status(chat_id, client, force=True)
             extract_err = None
         else:
@@ -1729,6 +1801,16 @@ async def _process_session_upload(client: Client, uid: int, session: dict,
         from Backend.helper.metadata import extract_default_id
         raw_caption = orig_message.caption or ""
         override_id, _ = extract_default_id(raw_caption) if raw_caption else (None, None)
+
+        # Eğer caption'da link yoksa session'daki override_link'i kullan
+        # (/s 2 tmdblink veya /s v imdblink ile gönderilen link)
+        if not override_id:
+            override_link = session.get("override_link")
+            if override_link:
+                _oid, _ = extract_default_id(override_link)
+                if _oid:
+                    override_id = override_link  # metadata() fonksiyonu extract_default_id çağırır
+                    LOGGER.info(f"[yukle:{session_id}] override_link kullanılıyor: {override_link}")
 
         video_name_for_meta = _archive_to_video_name(video_path.name)
         clean_name = clean_filename(video_name_for_meta)
