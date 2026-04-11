@@ -264,6 +264,27 @@ def _step_ram(lines: list):
     )
 
 
+def _step_log(lines: list):
+    log_path = "log.txt"
+    try:
+        size = os.path.getsize(log_path) if os.path.exists(log_path) else 0
+        # Tüm handler'ları kapat, dosyayı sıfırla, yeniden aç
+        import logging
+        root_logger = logging.getLogger()
+        for handler in root_logger.handlers[:]:
+            if isinstance(handler, logging.FileHandler) and handler.baseFilename.endswith("log.txt"):
+                handler.close()
+                root_logger.removeHandler(handler)
+        open(log_path, "w").close()
+        # Handler'ı yeniden ekle
+        from Backend.logger import file_handler
+        file_handler.stream = open(log_path, "a", encoding="utf-8")
+        root_logger.addHandler(file_handler)
+        lines.append(f"✅ log.txt — <b>{_bytes(size)}</b> temizlendi")
+    except Exception as e:
+        lines.append(f"⚠️ log.txt: {e}")
+
+
 async def _step_tmp(lines: list):
     try:
         freed = 0
@@ -309,17 +330,20 @@ async def cmd_temizle(client: Client, message: Message):
     lines: list = []
 
     await _step_mongodb(lines)
-    await msg.edit_text("🧹 <b>(1/4) MongoDB…</b>\n\n" + "\n".join(f"  {l}" for l in lines), parse_mode=enums.ParseMode.HTML)
+    await msg.edit_text("🧹 <b>(1/5) MongoDB…</b>\n\n" + "\n".join(f"  {l}" for l in lines), parse_mode=enums.ParseMode.HTML)
 
     _step_ram(lines)
-    await msg.edit_text("🧹 <b>(2/4) RAM & Cache…</b>\n\n" + "\n".join(f"  {l}" for l in lines), parse_mode=enums.ParseMode.HTML)
+    await msg.edit_text("🧹 <b>(2/5) RAM & Cache…</b>\n\n" + "\n".join(f"  {l}" for l in lines), parse_mode=enums.ParseMode.HTML)
 
     await _step_tmp(lines)
     rc, _ = await _run("pip cache purge", 20)
     lines.append("✅ pip cache temizlendi" if rc == 0 else "ℹ️ pip cache: atlandı")
     rc, _ = await _run("uv cache clean", 20)
     lines.append("✅ uv cache temizlendi" if rc == 0 else "ℹ️ uv cache: atlandı")
-    await msg.edit_text("🧹 <b>(3/4) Dosya cache…</b>\n\n" + "\n".join(f"  {l}" for l in lines), parse_mode=enums.ParseMode.HTML)
+    await msg.edit_text("🧹 <b>(3/5) Dosya cache…</b>\n\n" + "\n".join(f"  {l}" for l in lines), parse_mode=enums.ParseMode.HTML)
+
+    _step_log(lines)
+    await msg.edit_text("🧹 <b>(4/5) Log dosyası…</b>\n\n" + "\n".join(f"  {l}" for l in lines), parse_mode=enums.ParseMode.HTML)
 
     rc, _ = await _run("docker info", 8)
     if rc == 0:
@@ -331,6 +355,8 @@ async def cmd_temizle(client: Client, message: Message):
 
     rc, _ = await _run("journalctl --vacuum-size=100M", 20)
     lines.append("✅ journald 100MB sınırlandı" if rc == 0 else "ℹ️ journald: atlandı")
+
+    await msg.edit_text("🧹 <b>(5/5) Docker & Journald…</b>\n\n" + "\n".join(f"  {l}" for l in lines), parse_mode=enums.ParseMode.HTML)
 
     result = "\n".join(f"  {l}" for l in lines)
     final = (
