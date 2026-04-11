@@ -92,6 +92,14 @@ async def start_services():
         media_token_manager.configure(Telegram.YENILEME)
         LOGGER.info("Stream Token Manager başlatıldı.")
 
+        # stream_token periyodik temizlik (10 dakikada bir süresi dolmuş tokenları sil)
+        async def _purge_tokens_loop():
+            while True:
+                await asleep(10 * 60)
+                media_token_manager._purge_expired()
+                LOGGER.debug("stream_token: süresi dolmuş tokenlar temizlendi.")
+        loop.create_task(_purge_tokens_loop())
+
         if Telegram.SUBSCRIPTION:
             from Backend.helper.subscription_checker import subscription_checker_loop
             loop.create_task(subscription_checker_loop(StreamBot))

@@ -171,6 +171,7 @@ BotCommand("engelkaldir", "🛡️ Kullanıcı yasağını kaldırır."),
 BotCommand("ayarlar", "⚙️ Botun çalışma tercihlerini yapılandırır."),
 BotCommand("vindir", "💾 Veritabanı (DB) yedeğini alır."),
 BotCommand("log", "🔑 Sistem günlüklerini raporlar."),
+BotCommand("temizle", "🧹 RAM ve SSD üzerindeki gereksiz verileri temizler."),
 BotCommand("restart", "🔃 Sistemi yeniden başlatır.")
 ]
 

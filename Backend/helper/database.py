@@ -123,7 +123,7 @@ class Database:
     async def connect(self):
         try:
             for index, uri in enumerate(self.db_uris):
-                client = motor.motor_asyncio.AsyncIOMotorClient(uri)
+                client = motor.motor_asyncio.AsyncIOMotorClient(uri, maxPoolSize=10, minPoolSize=1)
                 db_key = "tracking" if index == 0 else f"storage_{index}"
                 self.clients[db_key] = client
                 self.dbs[db_key] = client[self.db_name]
@@ -181,6 +181,16 @@ class Database:
                 )
             except Exception as idx_err:
                 LOGGER.warning(f"ip_bans index: {idx_err}")
+
+            # stream_analytics koleksiyonu: 30 günden eski kayıtları otomatik sil
+            try:
+                await self.dbs["tracking"]["stream_analytics"].create_index(
+                    "logged_at",
+                    expireAfterSeconds=30 * 24 * 3600,  # 30 gün
+                    background=True,
+                )
+            except Exception as idx_err:
+                LOGGER.warning(f"stream_analytics TTL index: {idx_err}")
 
         except Exception as e:
             LOGGER.error(f"Database connection error: {e}")
