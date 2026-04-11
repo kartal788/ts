@@ -329,6 +329,36 @@
                                     <span class="absolute right-3 top-3 text-gray-400 text-sm pointer-events-none">Mbit/s</span>
                                 </div>
                             </div>
+
+                            <div class="w-full md:w-32">
+                                <label class="block text-sm font-medium theme-text-secondary mb-1">
+                                    📅 Geçerlilik
+                                    {% if subscription_mode %}<span class="text-red-500 ml-1" title="Abonelik modu açık, zorunlu alan">*</span>{% endif %}
+                                </label>
+                                <div class="relative">
+                                    <input type="number" id="validity-days" placeholder="{% if subscription_mode %}Zorunlu{% else %}∞{% endif %}" step="1" min="1"
+                                        class="w-full theme-card border {% if subscription_mode %}border-red-300{% else %}border-gray-300{% endif %} rounded-lg pl-4 pr-12 py-3 focus:outline-none focus:border-primary"
+                                        {% if subscription_mode %}required{% endif %}>
+                                    <span class="absolute right-3 top-3 text-gray-400 text-sm pointer-events-none">Gün</span>
+                                </div>
+                                {% if subscription_mode %}
+                                <p class="text-xs text-red-500 mt-1">Abonelik modu aktif, zorunludur.</p>
+                                {% endif %}
+                            </div>
+                        </div>
+
+                        <!-- Satır 1b: Telegram User ID -->
+                        <div class="flex flex-col md:flex-row gap-4 items-end">
+                            <div class="w-full md:w-60">
+                                <label class="block text-sm font-medium theme-text-secondary mb-1">📱 Telegram Kullanıcı ID</label>
+                                <input type="number" id="create-telegram-user-id" placeholder="Boş bırakılabilir"
+                                    class="w-full theme-card border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:border-primary text-sm">
+                            </div>
+                            <div class="flex-1">
+                                <p class="text-xs theme-text-secondary mt-1">
+                                    💡 Telegram ID girilirse bu eklenti belirtilen kullanıcıya bağlanır ve bot üzerinden erişim kontrolü yapılabilir.
+                                </p>
+                            </div>
                         </div>
 
                         <!-- Satır 2: Portal Bilgileri + Butonlar -->
@@ -389,6 +419,14 @@
                                 {{ token.name }}<br>
                                 <span class="text-xs theme-text-secondary">{{ token.created_at.strftime('%Y-%m-%d')
                                     }}</span>
+                                {% if token.expires_at %}
+                                <br><span class="text-xs {% if token.is_expired %}text-red-500{% else %}text-green-600{% endif %}">
+                                    {% if token.is_expired %}⛔ Süresi doldu{% else %}⏳ Bitiş: {{ token.expires_at[:10] if token.expires_at is string else token.expires_at.strftime('%Y-%m-%d') }}{% endif %}
+                                </span>
+                                {% endif %}
+                                {% if token.user_id %}
+                                <br><span class="text-xs text-blue-500">📱 TG: {{ token.user_id }}</span>
+                                {% endif %}
                             </td>
                             <td class="py-4 px-4 text-sm">
                                 <span class="block">Bugün: <span class="font-semibold text-primary"
@@ -426,8 +464,9 @@
         </code>
         
         <div class="flex flex-wrap gap-2">
+            {% set _base = configured_base_url if configured_base_url else (request.base_url|string).replace('http:', 'https:') %}
             <button
-                onclick="copyUrl('{{ (request.base_url|string).replace('http:', 'https:') }}stremio/{{ token.token }}/en/manifest.json')"
+                onclick="copyUrl('{{ _base }}stremio/{{ token.token }}/en/manifest.json')"
                 class="flex items-center space-x-1 text-xs font-medium bg-blue-50 text-blue-600 px-2 py-1 rounded hover:bg-blue-100 transition-colors border border-blue-200"
                 title="İngilizce Eklentiyi Kopyala">
                 <span class="font-bold">EN</span>
@@ -437,7 +476,7 @@
             </button>
 
             <button
-                onclick="copyUrl('{{ (request.base_url|string).replace('http:', 'https:') }}stremio/{{ token.token }}/tr/manifest.json')"
+                onclick="copyUrl('{{ _base }}stremio/{{ token.token }}/tr/manifest.json')"
                 class="flex items-center space-x-1 text-xs font-medium bg-red-50 text-red-600 px-2 py-1 rounded hover:bg-red-100 transition-colors border border-red-200"
                 title="Türkçe Eklentiyi Kopyala">
                 <span class="font-bold">TR</span>
@@ -447,7 +486,7 @@
             </button>
 
             <button
-                onclick="copyUrl('{{ (request.base_url|string).replace('http:', 'https:') }}stremio/{{ token.token }}/de/manifest.json')"
+                onclick="copyUrl('{{ _base }}stremio/{{ token.token }}/de/manifest.json')"
                 class="flex items-center space-x-1 text-xs font-medium bg-yellow-50 text-yellow-700 px-2 py-1 rounded hover:bg-yellow-100 transition-colors border border-yellow-200"
                 title="Almanca Eklentiyi Kopyala">
                 <span class="font-bold">DE</span>
@@ -460,11 +499,11 @@
 </td>
                             <td class="py-4 px-4 text-right">
                                 <button
-                                    onclick="openEditModal('{{ token.token }}', '{{ token.limits.daily_limit_gb|default(0) }}', '{{ token.limits.monthly_limit_gb|default(0) }}', '{{ token.limits.speed_limit_mbps|default(0) }}', '{{ token.portal_username|default('') }}', '{{ token.portal_password|default('') }}')"
+                                    onclick="openEditModal('{{ token.token }}', '{{ token.limits.daily_limit_gb|default(0) }}', '{{ token.limits.monthly_limit_gb|default(0) }}', '{{ token.limits.speed_limit_mbps|default(0) }}', '{{ token.portal_username|default('') }}', '{{ token.portal_password|default('') }}', '{{ token.validity_days|default(0) }}', '{{ token.user_id|default('') }}')"
                                     class="text-blue-500 hover:text-blue-700 font-medium text-sm px-3 py-1 mr-2 rounded border border-blue-200 hover:bg-blue-50 transition-colors">
                                     Düzenle
                                 </button>
-                                <button onclick="revokeToken('{{ token.token }}')"
+                                <button onclick="revokeToken('{{ token.token }}', '{{ token.user_id|default('') }}')"
                                     class="text-red-500 hover:text-red-700 font-medium text-sm px-3 py-1 rounded border border-red-200 hover:bg-red-50 transition-colors">
                                     Sil
                                 </button>
@@ -505,6 +544,21 @@
                             <span class="absolute right-3 top-2 text-gray-400 text-sm pointer-events-none">Mbit/s</span>
                         </div>
                         <p class="text-xs theme-text-secondary mt-1">0 = config varsayılanı veya sınırsız</p>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium theme-text-secondary mb-1">📅 Geçerlilik (Gün)</label>
+                        <div class="relative">
+                            <input type="number" id="edit-validity-days" placeholder="0 = sınırsız" step="1" min="0"
+                                class="w-full theme-card border border-gray-300 rounded-lg px-4 py-2 pr-12 focus:outline-none focus:border-primary">
+                            <span class="absolute right-3 top-2 text-gray-400 text-sm pointer-events-none">Gün</span>
+                        </div>
+                        <p class="text-xs theme-text-secondary mt-1">0 = süresiz. Girilen gün kadar geçerlilik süresi belirlenir (bugünden itibaren hesaplanır).</p>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium theme-text-secondary mb-1">📱 Telegram Kullanıcı ID</label>
+                        <input type="number" id="edit-telegram-user-id" placeholder="Boş bırakılırsa değişmez"
+                            class="w-full theme-card border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:border-primary text-sm">
+                        <p class="text-xs theme-text-secondary mt-1">Bu eklentiyi belirtilen Telegram kullanıcısına bağlar.</p>
                     </div>
                     <hr class="border-gray-200">
                     <p class="text-xs theme-text-secondary">🌐 Üye Portal Giriş Bilgileri (isteğe bağlı)</p>
@@ -556,7 +610,7 @@
 
     let currentEditToken = null;
 
-    function openEditModal(token, daily, monthly, speed, portalUsername, portalPassword) {
+    function openEditModal(token, daily, monthly, speed, portalUsername, portalPassword, validityDays, telegramUserId) {
         currentEditToken = token;
         document.getElementById('edit-token-id').value = token;
         document.getElementById('edit-daily').value = daily == 'None' ? 0 : daily;
@@ -564,6 +618,8 @@
         document.getElementById('edit-speed').value = (speed == 'None' || speed == '0') ? '' : speed;
         document.getElementById('edit-portal-username').value = portalUsername || '';
         document.getElementById('edit-portal-password').value = portalPassword || '';
+        document.getElementById('edit-validity-days').value = (validityDays && validityDays != 'None' && validityDays != '0') ? validityDays : '';
+        document.getElementById('edit-telegram-user-id').value = (telegramUserId && telegramUserId != 'None') ? telegramUserId : '';
 
         document.getElementById('edit-modal').classList.remove('hidden');
     }
@@ -604,6 +660,8 @@
         const monthly = document.getElementById('edit-monthly').value;
         const portalUsername = document.getElementById('edit-portal-username').value;
         const portalPassword = document.getElementById('edit-portal-password').value;
+        const validityDays = document.getElementById('edit-validity-days').value;
+        const telegramUserId = document.getElementById('edit-telegram-user-id').value;
 
         try {
             const response = await fetch('/api/tokens/' + currentEditToken, {
@@ -615,6 +673,8 @@
                     speed_limit_mbps: document.getElementById('edit-speed').value || 0,
                     portal_username: portalUsername || null,
                     portal_password: portalPassword || null,
+                    validity_days: validityDays ? parseInt(validityDays) : null,
+                    telegram_user_id: telegramUserId ? parseInt(telegramUserId) : null,
                 })
             });
 
@@ -897,6 +957,16 @@
         const nameInput = document.getElementById('token-name');
         const dailyInput = document.getElementById('daily-limit');
         const monthlyInput = document.getElementById('monthly-limit');
+        const validityDays = document.getElementById('validity-days').value;
+        const telegramUserId = document.getElementById('create-telegram-user-id').value;
+
+        {% if subscription_mode %}
+        if (!validityDays || parseInt(validityDays) < 1) {
+            showToast('⚠️ Abonelik modu aktif: Geçerlilik (Gün) zorunludur!');
+            document.getElementById('validity-days').focus();
+            return;
+        }
+        {% endif %}
 
         const payload = {
             name: nameInput.value,
@@ -905,6 +975,8 @@
             speed_limit_mbps: document.getElementById('speed-limit').value || 0,
             portal_username: document.getElementById('create-portal-username').value || null,
             portal_password: document.getElementById('create-portal-password').value || null,
+            validity_days: validityDays ? parseInt(validityDays) : null,
+            telegram_user_id: telegramUserId ? parseInt(telegramUserId) : null,
         };
 
         try {
@@ -928,22 +1000,32 @@
         }
     }
 
-    async function revokeToken(token) {
-        if (!confirm('Bu token iptal edilsin mi? Kullanıcı erişimini hemen kaybedecek.')) return;
+    async function revokeToken(token, userId) {
+        const uid = userId && userId !== 'None' && userId !== '' ? userId : null;
+        const msg = uid
+            ? 'Bu eklenti silinsin mi? Kullanıcının aboneliği de iptal edilecek.'
+            : 'Bu token iptal edilsin mi? Kullanıcı erişimini hemen kaybedecek.';
+        if (!confirm(msg)) return;
 
         try {
-            const response = await fetch('/api/tokens/' + token, {
-                method: 'DELETE'
+            const url = uid
+                ? `/api/tokens/${token}?delete_subscription=true&user_id=${uid}`
+                : `/api/tokens/${token}`;
+            const response = await fetch(url, {
+                method: 'DELETE',
+                credentials: 'same-origin'
             });
 
             if (response.ok) {
-                showToast('Token başarıyla iptal edildi!');
+                const msg2 = uid ? 'Eklenti ve abonelik başarıyla silindi!' : 'Token başarıyla iptal edildi!';
+                showToast(msg2);
                 setTimeout(() => window.location.reload(), 1000);
             } else {
-                showToast('Token iptal edilirken hata');
+                const errData = await response.json().catch(() => ({}));
+                showToast('Silme hatası: ' + (errData.detail || response.status));
             }
         } catch (error) {
-            showToast('Token iptal edilirken hata');
+            showToast('Silme işleminde hata oluştu.');
         }
     }
 

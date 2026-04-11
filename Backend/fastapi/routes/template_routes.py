@@ -248,6 +248,8 @@ async def dashboard_page(request: Request, _: bool = Depends(require_auth)):
         }
 
     api_tokens = await db.get_all_api_tokens()
+    # BASE_URL config'den alınır; yoksa request.base_url kullanılır (port bilgisi korunur)
+    configured_base_url = Telegram.BASE_URL.rstrip("/") + "/" if Telegram.BASE_URL else None
     return templates.TemplateResponse("dashboard.html", {
         "request": request,
         "theme": theme,
@@ -257,7 +259,9 @@ async def dashboard_page(request: Request, _: bool = Depends(require_auth)):
         "current_user": current_user,
         "owner_name": owner_name,
         "system_stats": system_stats,
-        "api_tokens": api_tokens
+        "api_tokens": api_tokens,
+        "configured_base_url": configured_base_url,
+        "subscription_mode": Telegram.SUBSCRIPTION
     })
 
 

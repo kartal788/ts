@@ -238,7 +238,9 @@ async def create_token_api(payload: dict):
         daily_limit = payload.get("daily_limit_gb")
         monthly_limit = payload.get("monthly_limit_gb")
         speed_limit = payload.get("speed_limit_mbps")
-        
+        validity_days = payload.get("validity_days")
+        telegram_user_id = payload.get("telegram_user_id")
+
         if not token_name:
              raise HTTPException(status_code=400, detail="Token name is required")
         def parse_limit(val):
@@ -251,6 +253,17 @@ async def create_token_api(payload: dict):
         portal_username = payload.get("portal_username")
         portal_password = payload.get("portal_password")
 
+        # validity_days → expires_at hesapla
+        expires_at = None
+        if validity_days:
+            try:
+                days = int(validity_days)
+                if days > 0:
+                    from datetime import datetime, timedelta
+                    expires_at = datetime.utcnow() + timedelta(days=days)
+            except (ValueError, TypeError):
+                pass
+
         new_token = await db.add_api_token(
             token_name,
             parse_limit(daily_limit),
@@ -258,7 +271,23 @@ async def create_token_api(payload: dict):
             parse_limit(speed_limit),
             portal_username=portal_username.strip() if portal_username else None,
             portal_password=portal_password.strip() if portal_password else None,
+            user_id=int(telegram_user_id) if telegram_user_id else None,
+            expires_at=expires_at,
+            validity_days=int(validity_days) if validity_days else None,
         )
+
+        # Telegram ID girilmişse kullanıcıya abonelik kaydı oluştur/güncelle.
+        # Bu sayede kullanıcı /abonelik komutunu çalıştırdığında aktif görünür.
+        if telegram_user_id:
+            try:
+                tg_id = int(telegram_user_id)
+                days_to_assign = int(validity_days) if validity_days else 36500  # validity_days yoksa "sınırsız" (100 yıl)
+                await db.assign_subscription(tg_id, days_to_assign)
+            except Exception as sub_err:
+                # Abonelik kaydı hatası token oluşturmayı engellemesin, sadece logla
+                from Backend.logger import LOGGER
+                LOGGER.warning(f"create_token_api: subscription upsert failed for tg_id={telegram_user_id}: {sub_err}")
+
         return new_token
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -270,6 +299,8 @@ async def update_token_limits_api(token: str, payload: dict):
         speed_limit = payload.get("speed_limit_mbps")
         portal_username = payload.get("portal_username")
         portal_password = payload.get("portal_password")
+        validity_days = payload.get("validity_days")
+        telegram_user_id = payload.get("telegram_user_id")
 
         def parse_limit(val):
             try:
@@ -278,6 +309,19 @@ async def update_token_limits_api(token: str, payload: dict):
             except (ValueError, TypeError, AttributeError):
                 return None
 
+        # validity_days → expires_at hesapla
+        expires_at = None
+        if validity_days is not None:
+            try:
+                days = int(validity_days)
+                if days > 0:
+                    from datetime import datetime, timedelta
+                    expires_at = datetime.utcnow() + timedelta(days=days)
+                elif days == 0:
+                    expires_at = None  # 0 = sınırsız, mevcut süreyi kaldır
+            except (ValueError, TypeError):
+                pass
+
         result = await db.update_api_token_limits(
             token,
             parse_limit(daily_limit),
@@ -285,7 +329,22 @@ async def update_token_limits_api(token: str, payload: dict):
             parse_limit(speed_limit),
             portal_username=portal_username,
             portal_password=portal_password,
+            expires_at=expires_at,
+            clear_expiry=(validity_days is not None and int(validity_days) == 0),
+            validity_days=int(validity_days) if validity_days is not None else None,
+            telegram_user_id=int(telegram_user_id) if telegram_user_id else None,
         )
+
+        # Telegram ID varsa abonelik kaydını da güncelle/oluştur
+        if telegram_user_id:
+            try:
+                tg_id = int(telegram_user_id)
+                # validity_days=0 → sınırsız (100 yıl), yoksa verilen değer
+                days_to_assign = int(validity_days) if (validity_days and int(validity_days) > 0) else 36500
+                await db.assign_subscription(tg_id, days_to_assign)
+            except Exception as sub_err:
+                from Backend.logger import LOGGER
+                LOGGER.warning(f"update_token_limits_api: subscription upsert failed for tg_id={telegram_user_id}: {sub_err}")
 
         if result:
             return {"message": "Limits updated successfully"}
@@ -295,13 +354,17 @@ async def update_token_limits_api(token: str, payload: dict):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-async def revoke_token_api(token: str):
+async def revoke_token_api(token: str, delete_subscription: bool = False, user_id: int = None):
     try:
         result = await db.revoke_api_token(token)
         if result:
+            if delete_subscription and user_id:
+                await db.manage_subscriber(user_id, "delete")
             return {"message": "Token revoked successfully"}
         else:
             raise HTTPException(status_code=404, detail="Token not found")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -761,13 +824,15 @@ async def get_all_tokens_api() -> dict:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-async def revoke_token_api(token: str) -> dict:
+async def revoke_token_api(token: str, delete_subscription: bool = False, user_id: int = None) -> dict:
     from Backend import db
     try:
         success = await db.revoke_api_token(token)
-        if success:
-            return {"status": "success", "message": "Token revoked."}
-        raise HTTPException(status_code=404, detail="Token not found.")
+        if not success:
+            raise HTTPException(status_code=404, detail="Token not found.")
+        if delete_subscription and user_id:
+            await db.manage_subscriber(user_id, "delete")
+        return {"status": "success", "message": "Token (ve varsa abonelik) silindi."}
     except HTTPException:
         raise
     except Exception as e:

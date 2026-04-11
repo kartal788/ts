@@ -420,8 +420,8 @@ async def update_token(token: str, payload: dict, _: bool = Depends(require_auth
     return await update_token_limits_api(token, payload)
 
 @app.delete("/api/tokens/{token}")
-async def revoke_token(token: str, _: bool = Depends(require_auth)):
-    return await revoke_token_api(token)
+async def revoke_token(token: str, delete_subscription: bool = False, user_id: int = None, _: bool = Depends(require_auth)):
+    return await revoke_token_api(token, delete_subscription=delete_subscription, user_id=user_id)
 
 @app.get("/api/system/stats")
 async def get_system_stats(_: bool = Depends(require_auth)):
@@ -707,9 +707,9 @@ async def get_access_tokens(_: bool = Depends(require_auth)):
     return await get_all_tokens_api()
 
 @app.delete("/api/admin/access/tokens/{token}")
-async def delete_access_token(token: str, _: bool = Depends(require_auth)):
+async def delete_access_token(token: str, delete_subscription: bool = False, user_id: int = None, _: bool = Depends(require_auth)):
     from Backend.fastapi.routes.api_routes import revoke_token_api as _revoke_token_api
-    return await _revoke_token_api(token)
+    return await _revoke_token_api(token, delete_subscription=delete_subscription, user_id=user_id)
 
 @app.post("/api/admin/access/users/{user_id}/assign-plan")
 async def assign_access_plan(user_id: int, payload: dict, _: bool = Depends(require_auth)):

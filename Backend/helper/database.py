@@ -1571,7 +1571,7 @@ class Database:
     # API Token Methods
     # -------------------------------
 
-    async def add_api_token(self, name: str, daily_limit_gb: float = None, monthly_limit_gb: float = None, speed_limit_mbps: float = None, portal_username: str = None, portal_password: str = None, user_id: int = None) -> dict:
+    async def add_api_token(self, name: str, daily_limit_gb: float = None, monthly_limit_gb: float = None, speed_limit_mbps: float = None, portal_username: str = None, portal_password: str = None, user_id: int = None, expires_at=None, validity_days: int = None) -> dict:
         # If a user_id is provided, return existing token if already created
         if user_id:
             existing = await self.dbs["tracking"]["api_tokens"].find_one({"user_id": user_id})
@@ -1581,13 +1581,18 @@ class Database:
                     new_daily   = float(daily_limit_gb)    if daily_limit_gb    else 0.0
                     new_monthly = float(monthly_limit_gb)  if monthly_limit_gb  else 0.0
                     new_speed   = float(speed_limit_mbps)  if speed_limit_mbps  else 0.0
+                    update_set = {
+                        "limits.daily_limit_gb":   new_daily,
+                        "limits.monthly_limit_gb": new_monthly,
+                        "limits.speed_limit_mbps": new_speed,
+                    }
+                    if expires_at is not None:
+                        update_set["expires_at"] = expires_at
+                    if validity_days is not None:
+                        update_set["validity_days"] = validity_days
                     await self.dbs["tracking"]["api_tokens"].update_one(
                         {"_id": existing["_id"]},
-                        {"$set": {
-                            "limits.daily_limit_gb":   new_daily,
-                            "limits.monthly_limit_gb": new_monthly,
-                            "limits.speed_limit_mbps": new_speed,
-                        }}
+                        {"$set": update_set}
                     )
                     existing.setdefault("limits", {})
                     existing["limits"]["daily_limit_gb"]   = new_daily
@@ -1603,6 +1608,8 @@ class Database:
             "token": token,
             "user_id": user_id,
             "created_at": datetime.utcnow(),
+            "expires_at": expires_at,
+            "validity_days": validity_days,
             "portal_username": portal_username or None,
             "portal_password": portal_password or None,
             "limits": {
@@ -1627,7 +1634,17 @@ class Database:
     async def get_all_api_tokens(self) -> List[dict]:
         cursor = self.dbs["tracking"]["api_tokens"].find().sort("created_at", DESCENDING)
         tokens = await cursor.to_list(None)
-        return [convert_objectid_to_str(token) for token in tokens]
+        now = datetime.utcnow()
+        result = []
+        for token in tokens:
+            # expires_at kontrolü: süresi dolmuş mu?
+            exp = token.get("expires_at")
+            if exp:
+                token["is_expired"] = exp < now
+            else:
+                token["is_expired"] = False
+            result.append(convert_objectid_to_str(token))
+        return result
 
     async def revoke_api_token(self, token: str) -> bool:
         result = await self.dbs["tracking"]["api_tokens"].delete_one({"token": token})
@@ -1740,7 +1757,10 @@ class Database:
 
     async def update_api_token_limits(self, token: str, daily_limit_gb: float, monthly_limit_gb: float,
                                        speed_limit_mbps: float = None,
-                                       portal_username: str = None, portal_password: str = None) -> bool:
+                                       portal_username: str = None, portal_password: str = None,
+                                       expires_at=None, clear_expiry: bool = False,
+                                       validity_days: int = None,
+                                       telegram_user_id: int = None) -> bool:
         update_fields = {
             "limits": {
                 "daily_limit_gb": daily_limit_gb if daily_limit_gb else 0,
@@ -1752,6 +1772,21 @@ class Database:
             update_fields["portal_username"] = portal_username.strip() if portal_username.strip() else None
         if portal_password is not None:
             update_fields["portal_password"] = portal_password.strip() if portal_password.strip() else None
+
+        # Geçerlilik süresi güncelleme
+        if clear_expiry:
+            # 0 gün = sınırsız: expires_at ve validity_days sıfırla
+            update_fields["expires_at"] = None
+            update_fields["validity_days"] = 0
+        elif expires_at is not None:
+            update_fields["expires_at"] = expires_at
+            if validity_days is not None:
+                update_fields["validity_days"] = validity_days
+
+        # Telegram User ID güncelleme
+        if telegram_user_id is not None:
+            update_fields["user_id"] = telegram_user_id
+
         result = await self.dbs["tracking"]["api_tokens"].update_one(
             {"token": token},
             {"$set": update_fields}

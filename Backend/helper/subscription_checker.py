@@ -2,7 +2,9 @@ import asyncio
 from pyrogram import Client
 from Backend.config import Telegram
 from Backend import db
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
+
+_TZ_TR = timezone(timedelta(hours=3))  # UTC+3 Türkiye saati
 from Backend.logger import LOGGER
 
 async def subscription_checker_loop(bot: Client):
@@ -42,11 +44,12 @@ async def subscription_checker_loop(bot: Client):
                 user_id = user["_id"]
                 expiry = user["subscription_expiry"]
                 try:
+                    expiry_tr = expiry.replace(tzinfo=timezone.utc).astimezone(_TZ_TR)
                     await bot.send_message(
                         user_id,
                         f"⚠️ <b>Abonelik Süresi Yakında Doluyor</b>\n\n"
-                        f"Aboneliğiniz <b>{expiry.strftime('%Y-%m-%d %H:%M UTC')}</b> tarihinde sona erecek.\n"
-                        f"Gruba erişiminizi kaybetmeden önce aboneliğinizi yenilemek için {Telegram.SUBSCRIPTION_URL} adresine gidin ve /start komutunu gönderin!"
+                        f"Aboneliğiniz <b>{expiry_tr.strftime('%d.%m.%Y %H:%M')}</b> tarihinde sona erecek.",
+                        parse_mode=None
                     )
                     await db.mark_reminder_sent(user_id)
                     LOGGER.info(f"Abonelik hatırlatması gönderildi: {user_id}")
