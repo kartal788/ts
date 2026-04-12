@@ -702,8 +702,20 @@ async def member_stream_url_api(
     from Backend.helper.encrypt import encode_string
     base   = Telegram.BASE_URL.rstrip("/")
 
-    # Harici URL'ler doğrudan döner
+    # ── Yardımcı: proxy URL üret ────────────────────────────────────────────
+    def _apply_proxy(direct_url: str) -> str | None:
+        """PROXY aktifse ve HTTP_PROXY_URL doluysa proxy URL döner, aksi halde None."""
+        if Telegram.PROXY and Telegram.HTTP_PROXY_URL:
+            return f"{Telegram.HTTP_PROXY_URL}{direct_url}"
+        return None
+
+    # Harici URL'ler — proxy moduna göre dön
     if file_id.startswith(("http://", "https://")):
+        proxy_url = _apply_proxy(file_id)
+        if proxy_url and Telegram.PROXY_MODE == 3:
+            return {"url": proxy_url}
+        if proxy_url and Telegram.PROXY_MODE == 2:
+            return {"url": proxy_url, "url_direct": file_id}
         return {"url": file_id}
 
     # Yerel sunucu dosyaları (sunucu panelinden eklenen) — local_path olarak encode et
@@ -713,6 +725,11 @@ async def member_stream_url_api(
         encoded_id = await encode_string({"local_path": file_id})
         indir_token = media_token_manager.create(token, encoded_id, kind="indir")
         url = f"{base}/dl/{token}/{encoded_id}/{indir_token}/{safe_filename}?dl=1"
+        proxy_url = _apply_proxy(url)
+        if proxy_url and Telegram.PROXY_MODE == 3:
+            return {"url": proxy_url}
+        if proxy_url and Telegram.PROXY_MODE == 2:
+            return {"url": proxy_url, "url_direct": url}
         return {"url": url}
 
     # Dosya adını URL-güvenli hale getir (UTF-8 encoding)
@@ -744,6 +761,15 @@ async def member_stream_url_api(
     except Exception:
         pass
 
+    # ── Proxy moduna göre son URL'i belirle ──────────────────────────────────
+    # PROXY_MODE=1 veya proxy kapalı → sadece direct URL
+    # PROXY_MODE=2 → önce proxy (url), direct de url_direct olarak döner
+    # PROXY_MODE=3 → sadece proxy URL
+    proxy_url = _apply_proxy(url)
+    if proxy_url and Telegram.PROXY_MODE == 3:
+        return {"url": proxy_url, "is_gdrive": is_gdrive}
+    if proxy_url and Telegram.PROXY_MODE == 2:
+        return {"url": proxy_url, "url_direct": url, "is_gdrive": is_gdrive}
     return {"url": url, "is_gdrive": is_gdrive}
 
 

@@ -1476,7 +1476,7 @@ async def cmd_cancel_session(client: Client, message: Message):
 # ─── Dosya toplayıcı ──────────────────────────────────────────────────────────
 
 @Client.on_message(
-    (filters.private | filters.channel) & filters.document & CustomFilters.owner,
+    (filters.private | filters.channel) & (filters.document | filters.video) & CustomFilters.owner,
     group=5,
 )
 async def zip_file_collector(client: Client, message: Message):
@@ -1500,6 +1500,18 @@ async def zip_file_collector(client: Client, message: Message):
         return
 
     doc = message.document
+    # Telegram bazen video dosyalarını `video` tipinde gönderir (document değil).
+    # Bu durumda message.video üzerinden dosya bilgisini al.
+    _tg_video = None
+    if doc is None and message.video:
+        _tg_video = message.video
+        # video nesnesini document gibi kullanabilmek için bir sarmalayıcı oluştur
+        class _VideoAsDoc:
+            file_id        = _tg_video.file_id
+            file_unique_id = _tg_video.file_unique_id
+            file_size      = _tg_video.file_size
+            file_name      = getattr(_tg_video, "file_name", None) or f"video_{_tg_video.file_unique_id}.mp4"
+        doc = _VideoAsDoc()
     _video_exts = {".mkv", ".mp4", ".avi", ".mov", ".wmv", ".ts", ".m4v", ".webm", ".flv", ".mpg", ".mpeg"}
     _is_video_doc = bool(doc and (doc.file_name or "").lower().endswith(tuple(_video_exts)))
 

@@ -1295,6 +1295,12 @@ async function startDownload(fileId,encodedFilename,fileSize){
     if(!r.ok)throw new Error("stream-url "+r.status);
     const d=await r.json();
     if(!d.url)throw new Error("URL alınamadı");
+    // PROXY_MODE=2 → hem proxy (d.url) hem direct (d.url_direct) linki aç
+    if(d.url_direct){
+      const _b=document.createElement("a");
+      _b.href=d.url_direct;_b.download=filename;_b.target="_blank";_b.rel="noopener noreferrer";
+      document.body.appendChild(_b);_b.click();document.body.removeChild(_b);
+    }
     // <a download> ile indir — Drive dahil tüm URL'lerde oynatma yerine indirme tetiklenir
     const _a=document.createElement("a");
     _a.href=d.url;

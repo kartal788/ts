@@ -276,7 +276,7 @@ async def stream_handler(
                 status_code=403,
                 detail="Geçersiz veya süresi dolmuş link. Tekrar izlemek/indirmek için sayfayı yenileyin.",
             )
-        return await local_file_streamer(request, local_path, token_data, token)
+        return await local_file_streamer(request, local_path, token_data, token, force_download=bool(dl))
 
     # ── Google Drive dosyası ─────────────────────────────────────────────────
     gdrive_file_id = decoded.get("gdrive_file_id")
@@ -530,7 +530,7 @@ async def gdrive_streamer(request: Request, gdrive_file_id: str, token_data: dic
     )
 
 
-async def local_file_streamer(request: Request, local_path: str, token_data: dict = None, token: str = None):
+async def local_file_streamer(request: Request, local_path: str, token_data: dict = None, token: str = None, force_download: bool = False):
     """
     /tmp/zipwork/ içindeki yerel dosyaları doğrudan HTTP Range destekli olarak stream eder.
     Stremio ve tarayıcı seek işlemlerini destekler.
@@ -744,7 +744,7 @@ async def local_file_streamer(request: Request, local_path: str, token_data: dic
         "Content-Range": f"bytes {start}-{end}/{file_size}",
         "Accept-Ranges": "bytes",
         "Content-Length": str(req_length),
-        "Content-Disposition": _safe_disp(p.name),
+        "Content-Disposition": _safe_disp(p.name, "attachment" if force_download else "inline"),
     }
 
     if request.method == "HEAD":
@@ -757,7 +757,7 @@ async def local_file_streamer(request: Request, local_path: str, token_data: dic
         "Content-Range": f"bytes {start}-{end}/{file_size}",
         "Accept-Ranges": "bytes",
         "Content-Length": str(req_length),
-        "Content-Disposition": _safe_disp(p.name),
+        "Content-Disposition": _safe_disp(p.name, "attachment" if force_download else "inline"),
     }
 
     # Bandwidth takibini başlat (token varsa)
