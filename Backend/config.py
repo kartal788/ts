@@ -66,8 +66,8 @@ class Telegram:
 
     # ── Brute-force (kaba kuvvet) koruması ───────────────────────────────────
     # BRUTE_WINDOW  : Kaç saniye içindeki başarısız girişler sayılsın?    (varsayılan: 60 sn)
-    # BRUTE_MAX     : Pencere içinde kaç hata sonrası IP banlansın?       (varsayılan: 10)
+    # BRUTE_MAX     : Pencere içinde kaç hata sonrası IP banlansın?       (varsayılan: 5)
     # BRUTE_BAN     : IP kaç saniye boyunca engellensin?                  (varsayılan: 600 sn = 10 dk)
     BRUTE_WINDOW  = int(getenv("BRUTE_WINDOW", "60"))
-    BRUTE_MAX     = int(getenv("BRUTE_MAX",    "10"))
+    BRUTE_MAX     = int(getenv("BRUTE_MAX",    "5"))
     BRUTE_BAN     = int(getenv("BRUTE_BAN",    "600"))

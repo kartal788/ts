@@ -105,7 +105,7 @@ async def send_start_message(client: Client, message: Message):
             keyboard = InlineKeyboardMarkup(keyboard_buttons)
 
             return await message.reply_text(
-                f'<b>{Telegram.ISIM} Özel Grubuna Hoş Geldiniz</b>\n\n'
+                f'<b>{Telegram.ISIM} Abonelik Botuna Hoş Geldiniz</b>\n\n'
                 'Stremio eklentisine erişmek için aktif bir abonelik gereklidir.\n'
                 'Devam etmek için lütfen aşağıdan bir abonelik planı seçin:',
                 reply_markup=keyboard,
