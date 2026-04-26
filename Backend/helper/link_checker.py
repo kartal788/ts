@@ -50,11 +50,13 @@ class DeadLinkChecker:
             # 1. Scan Movies
             try:
                 # Find movies that have telegram links and are NOT already marked dead
-                movie_cursor = active_db["movie"].find({
+                # to_list() ile tüm dökümanlar belleğe alınır; uzun tarama sırasında
+                # MongoDB cursor timeout (CursorNotFound) hatasının önüne geçilir.
+                movie_docs = await active_db["movie"].find({
                     "telegram": {"$exists": True, "$not": {"$size": 0}},
                     "telegram.is_dead": {"$ne": True}
-                })
-                async for movie in movie_cursor:
+                }).to_list(length=None)
+                for movie in movie_docs:
                     tmdb_id = movie.get("tmdb_id")
                     for quality in movie.get("telegram", []):
                         if not quality.get("is_dead"):
@@ -69,11 +71,14 @@ class DeadLinkChecker:
 
             # 2. Scan TV Shows
             try:
-                tv_cursor = active_db["tv"].find({
+                # to_list() ile tüm dökümanlar belleğe alınır; çok sayıda bölüm/kalite
+                # kombinasyonunda asyncio.sleep birikimi MongoDB cursor timeout'una
+                # (CursorNotFound, kod 43) yol açıyordu. Bu şekilde cursor hemen kapanır.
+                tv_docs = await active_db["tv"].find({
                     "seasons.episodes.telegram": {"$exists": True, "$not": {"$size": 0}},
                     "seasons.episodes.telegram.is_dead": {"$ne": True}
-                })
-                async for tv in tv_cursor:
+                }).to_list(length=None)
+                for tv in tv_docs:
                     tmdb_id = tv.get("tmdb_id")
                     for season in tv.get("seasons", []):
                         for ep in season.get("episodes", []):

@@ -87,6 +87,7 @@ _ALLOWED_POSTER_HOSTS = {
     "image.tmdb.org",
     "www.themoviedb.org",
     "t.me",
+    "images.metahub.space",
 }
 
 
