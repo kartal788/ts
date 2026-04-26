@@ -123,11 +123,16 @@ async def cmd_duyuru(client: Client, message: Message):
             inline_text = parts[1].strip()
 
     if inline_text:
+        shifted_ents = _shift_entities(
+            list(message.entities) if message.entities else [],
+            message.text,
+            inline_text,
+        )
         _WAITING[uid] = {
             "step": "awaiting_confirm",
             "content_type": "text",
             "text": inline_text,
-            "entities": [],
+            "entities": shifted_ents,
         }
         await _show_preview(client, message, _WAITING[uid])
         return
@@ -258,17 +263,24 @@ async def duyuru_content_input(client: Client, message: Message):
     # ── Tekli metin ───────────────────────────────────────────────────────
     if message.text:
         # /duyuru komutuyla birlikte yazılmışsa prefix'i temizle
-        raw_text = message.text
+        original_text = message.text
+        raw_text = original_text
         if raw_text.startswith("/duyuru"):
             parts = raw_text.split(maxsplit=1)
             raw_text = parts[1].strip() if len(parts) > 1 else ""
         if not raw_text:
             return
+        # Entity offset'lerini temizlenmiş metne göre kaydır
+        shifted_ents = _shift_entities(
+            list(message.entities) if message.entities else [],
+            original_text,
+            raw_text,
+        )
         _WAITING[uid] = {
             "step": "awaiting_confirm",
             "content_type": "text",
             "text": raw_text,
-            "entities": message.entities,
+            "entities": shifted_ents,
         }
         await _show_preview(client, message, _WAITING[uid])
         return
@@ -390,6 +402,42 @@ def _strip_command_prefix(text: str) -> str:
     return text
 
 
+def _shift_entities(entities, original_text: str, stripped_text: str):
+    """
+    Prefix çıkarıldıktan sonra entity offset'lerini yeni metne göre kaydırır.
+    Yeni metnin dışına taşan veya sıfırdan küçük olan entity'leri atar.
+    """
+    if not entities or not original_text or not stripped_text:
+        return None
+
+    # Orijinal metinde stripped_text'in başladığı konum = kaydırma miktarı
+    try:
+        shift = original_text.index(stripped_text)
+    except ValueError:
+        # Stripped text orijinal içinde bulunamazsa entity'leri güvenli at
+        return None
+
+    adjusted = []
+    stripped_len = len(stripped_text)
+    for ent in entities:
+        new_offset = ent.offset - shift
+        # Entity tamamen prefix içindeyse veya sınır dışındaysa atla
+        if new_offset + ent.length <= 0 or new_offset >= stripped_len:
+            continue
+        # Kısmen taşanları kırp
+        if new_offset < 0:
+            ent.length += new_offset  # length küçülür
+            new_offset = 0
+        if new_offset + ent.length > stripped_len:
+            ent.length = stripped_len - new_offset
+        if ent.length <= 0:
+            continue
+        ent.offset = new_offset
+        adjusted.append(ent)
+
+    return adjusted or None
+
+
 # ── Tek kullanıcıya gönderim ──────────────────────────────────────────────────
 
 async def _send_to_user(client: Client, uid_target: int, state: dict):
@@ -399,18 +447,24 @@ async def _send_to_user(client: Client, uid_target: int, state: dict):
         await client.send_message(
             chat_id=uid_target,
             text=state["text"],
-            entities=state.get("entities"),
+            entities=state.get("entities"),  # zaten kaydırılmış, bkz. duyuru_content_input
             disable_web_page_preview=True,
         )
 
     elif content_type == "single_media":
         msg: Message = state["media_msg"]
-        # Caption'dan /duyuru komut prefix'ini temizle
-        clean_caption = _strip_command_prefix(msg.caption) if msg.caption else None
+        # Caption'dan /duyuru komut prefix'ini temizle ve entity offset'lerini kaydır
+        original_caption = msg.caption or ""
+        clean_caption = _strip_command_prefix(original_caption) if original_caption else None
+        shifted_entities = (
+            _shift_entities(list(msg.caption_entities), original_caption, clean_caption)
+            if (clean_caption and msg.caption_entities)
+            else None
+        )
         kwargs = {
             "chat_id": uid_target,
             "caption": clean_caption or None,
-            "caption_entities": msg.caption_entities if clean_caption else None,
+            "caption_entities": shifted_entities,
         }
         if msg.media == MessageMediaType.PHOTO:
             await client.send_photo(photo=msg.photo.file_id, **kwargs)
@@ -423,10 +477,14 @@ async def _send_to_user(client: Client, uid_target: int, state: dict):
         msgs: list[Message] = state["media_msgs"]
         media_list = []
         for i, m in enumerate(msgs):
-            # İlk öğenin caption'ından /duyuru prefix'ini temizle
+            # İlk öğenin caption'ından /duyuru prefix'ini temizle ve entity'leri kaydır
             raw_cap  = m.caption if i == 0 else None
             cap      = _strip_command_prefix(raw_cap) if raw_cap else None
-            cap_ents = m.caption_entities if (i == 0 and cap) else None
+            cap_ents = (
+                _shift_entities(list(m.caption_entities), raw_cap, cap)
+                if (i == 0 and cap and m.caption_entities)
+                else None
+            )
             if m.media == MessageMediaType.PHOTO:
                 media_list.append(InputMediaPhoto(
                     media=m.photo.file_id, caption=cap, caption_entities=cap_ents))
