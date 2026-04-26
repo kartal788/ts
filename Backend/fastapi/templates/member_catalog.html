@@ -135,6 +135,60 @@
     .status-unknown .status-dot{background:#6b7280;}
     .status-overlay{position:absolute;top:4px;right:4px;left:auto;bottom:auto;background:none;padding:0;pointer-events:none;}
   </style>
+
+  <!-- ── CSRF Koruması — Global fetch wrapper ──────────────────────────────
+       base.html'i extend etmeyen bu sayfada CSRF token'ı manuel olarak
+       yüklenir. State-değiştiren her fetch isteğine otomatik X-CSRF-Token
+       başlığı eklenir.
+  ────────────────────────────────────────────────────────────────────── -->
+  <script>
+  (function () {
+      let _csrfToken = null;
+      const _CSRF_METHODS = new Set(['POST', 'PUT', 'DELETE', 'PATCH']);
+      const _PUBLIC_PREFIXES = ['/stremio/', '/dl/', '/subtitles/', '/stream/'];
+
+      function _isPublic(url) {
+          try {
+              const path = new URL(url, location.origin).pathname;
+              return _PUBLIC_PREFIXES.some(p => path.startsWith(p));
+          } catch { return false; }
+      }
+
+      const _originalFetch = window.fetch.bind(window);
+
+      async function _getToken() {
+          if (_csrfToken) return _csrfToken;
+          try {
+              const res = await _originalFetch('/api/csrf-token', { credentials: 'same-origin' });
+              if (res.ok) {
+                  const data = await res.json();
+                  _csrfToken = data.token || null;
+              }
+          } catch (e) {
+              console.warn('[CSRF] Token alınamadı:', e);
+          }
+          return _csrfToken;
+      }
+
+      window.fetch = async function (input, init = {}) {
+          const method = (init.method || 'GET').toUpperCase();
+          if (_CSRF_METHODS.has(method) && !_isPublic(input instanceof Request ? input.url : input)) {
+              const token = await _getToken();
+              if (token) {
+                  init.headers = Object.assign({}, init.headers, { 'X-CSRF-Token': token });
+              }
+          }
+          return _originalFetch(input, init);
+      };
+
+      document.addEventListener('click', function (e) {
+          const a = e.target.closest('a[href]');
+          if (a && (a.href.includes('/logout') || a.href.includes('/cikis'))) {
+              _csrfToken = null;
+          }
+      });
+  })();
+  </script>
 </head>
 <body class="min-h-screen flex flex-col">
 
