@@ -142,6 +142,10 @@
                             <span class="w-2 h-2 bg-red-500 rounded-full animate-pulse inline-block"></span>
                             Canlı
                         </a>
+                        <a href="/yayin" class="text-text hover:text-primary px-3 py-2 rounded-md transition-colors text-sm flex items-center gap-1">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.069A1 1 0 0121 8.82v6.36a1 1 0 01-1.447.89L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+                            Yayın
+                        </a>
                         <a href="/link-ekle" class="text-text hover:text-primary px-3 py-2 rounded-md transition-colors text-sm flex items-center gap-1">
                             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg>
                             Link Ekle
@@ -159,16 +163,14 @@
 
                 <div class="flex items-center space-x-3">
                     <div class="relative">
-                        <form method="post" action="/set-theme" id="theme-form">
-                            <select name="theme" onchange="document.getElementById('theme-form').submit()"
-                                class="theme-card border rounded-md px-2 py-1.5 text-sm">
-                                {% for theme_key, theme_data in themes.items() %}
-                                <option value="{{ theme_key }}" {% if current_theme==theme_key %}selected{% endif %}>
-                                    {{ theme_data.name }}
-                                </option>
-                                {% endfor %}
-                            </select>
-                        </form>
+                        <select id="theme-select" onchange="applyTheme(this.value)"
+                            class="theme-card border rounded-md px-2 py-1.5 text-sm">
+                            {% for theme_key, theme_data in themes.items() %}
+                            <option value="{{ theme_key }}" {% if current_theme==theme_key %}selected{% endif %}>
+                                {{ theme_data.name }}
+                            </option>
+                            {% endfor %}
+                        </select>
                     </div>
 
                     {% if current_user %}
@@ -198,6 +200,9 @@
                 <a href="/admin/uyeler" class="block text-text hover:text-primary px-3 py-2 rounded-md transition-colors text-sm"><i class="fas fa-users mr-2 w-4"></i>Üyeler</a>
                 <a href="/canli" class="block text-text hover:text-primary px-3 py-2 rounded-md transition-colors text-sm flex items-center gap-2">
                     <span class="w-2 h-2 bg-red-500 rounded-full animate-pulse inline-block"></span>Canlı
+                </a>
+                <a href="/yayin" class="block text-text hover:text-primary px-3 py-2 rounded-md transition-colors text-sm flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.069A1 1 0 0121 8.82v6.36a1 1 0 01-1.447.89L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>Yayın
                 </a>
                 <a href="/link-ekle" class="block text-text hover:text-primary px-3 py-2 rounded-md transition-colors text-sm flex items-center gap-2"><i class="fas fa-link mr-2 w-4"></i>Link Ekle</a>
                 <a href="/admin/sunucu" class="block text-text hover:text-primary px-3 py-2 rounded-md transition-colors text-sm flex items-center gap-2"><i class="fas fa-server mr-2 w-4"></i>Sunucu</a>
@@ -237,6 +242,87 @@
                 menu.classList.remove('open');
             }
         });
+    </script>
+
+    <!-- ── CSRF Koruması — Global fetch wrapper ───────────────────────────────
+         Oturum açık olduğunda /api/csrf-token'dan token alınır ve her
+         state-değiştiren fetch isteğine X-CSRF-Token başlığı otomatik eklenir.
+         Tüm template'ler base.html'den türediğinden bu blok her sayfada çalışır.
+    ──────────────────────────────────────────────────────────────────────── -->
+    <script>
+    (function () {
+        // Token RAM'de tutulur; sayfa yenilenince /api/csrf-token'dan tekrar alınır.
+        let _csrfToken = null;
+
+        // CSRF korumasına tabi HTTP metodları
+        const _CSRF_METHODS = new Set(['POST', 'PUT', 'DELETE', 'PATCH']);
+
+        // Public path'ler — token eklenmez
+        const _PUBLIC_PREFIXES = ['/stremio/', '/dl/', '/subtitles/', '/stream/'];
+
+        function _isPublic(url) {
+            try {
+                const path = new URL(url, location.origin).pathname;
+                return _PUBLIC_PREFIXES.some(p => path.startsWith(p));
+            } catch { return false; }
+        }
+
+        async function _getToken() {
+            if (_csrfToken) return _csrfToken;
+            try {
+                const res = await _originalFetch('/api/csrf-token', { credentials: 'same-origin' });
+                if (res.ok) {
+                    const data = await res.json();
+                    _csrfToken = data.token || null;
+                }
+            } catch (e) {
+                console.warn('[CSRF] Token alınamadı:', e);
+            }
+            return _csrfToken;
+        }
+
+        // Orijinal fetch'i sakla
+        const _originalFetch = window.fetch.bind(window);
+
+        // Global fetch wrapper
+        window.fetch = async function (input, init = {}) {
+            const method = (init.method || 'GET').toUpperCase();
+
+            if (_CSRF_METHODS.has(method) && !_isPublic(input instanceof Request ? input.url : input)) {
+                const token = await _getToken();
+                if (token) {
+                    init.headers = Object.assign({}, init.headers, { 'X-CSRF-Token': token });
+                }
+            }
+            return _originalFetch(input, init);
+        };
+
+        // Token önbelleği; oturumu kapatan sayfa yenilemelerinde sıfırlanır.
+        // Çıkış linklerine tıklandığında önbelleği sıfırla.
+        document.addEventListener('click', function (e) {
+            const a = e.target.closest('a[href]');
+            if (a && (a.href.includes('/logout') || a.href.includes('/cikis'))) {
+                _csrfToken = null;
+            }
+        });
+
+        // Tema değiştirme — fetch wrapper üzerinden gider, CSRF token otomatik eklenir.
+        window.applyTheme = async function (themeName) {
+            try {
+                const res = await fetch('/set-theme', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: 'theme=' + encodeURIComponent(themeName),
+                    credentials: 'same-origin',
+                });
+                if (res.ok || res.redirected) {
+                    location.reload();
+                }
+            } catch (e) {
+                console.error('[applyTheme] Hata:', e);
+            }
+        };
+    })();
     </script>
 </body>
 </html>

@@ -7,10 +7,12 @@ services:
     volumes:
       - ./config.env:/app/config.env
       - ./gdrive_token.pickle:/app/gdrive_token.pickle
+      - ./rclone.conf:/app/rclone.conf
 
-      # NOT: İlk kullanımdan önce host'ta bu dosyayı oluşturun:
+      # NOT: İlk kullanımdan önce host'ta bu dosyaları oluşturun:
       #   touch gdrive_token.pickle
-      # Ardından /ayarlar → 📁 Dosya Ekle → token.pickle Yükle
+      #   touch rclone.conf
+      # Ardından /ayarlar → 📁 Dosya Ekle ile yükleyin
     restart: unless-stopped
     logging:
       driver: "json-file"

@@ -182,13 +182,24 @@ class Database:
             except Exception as idx_err:
                 LOGGER.warning(f"ip_bans index: {idx_err}")
 
-            # stream_analytics koleksiyonu: 30 günden eski kayıtları otomatik sil
+            # stream_analytics: TTL'yi 10 güne düşür, mevcut eski index'i yeniden oluştur
             try:
-                await self.dbs["tracking"]["stream_analytics"].create_index(
+                col_analytics = self.dbs["tracking"]["stream_analytics"]
+                # Eski TTL index'ini sil (farklı expireAfterSeconds ile yeniden oluşturmak için)
+                try:
+                    await col_analytics.drop_index("logged_at_1")
+                except Exception:
+                    pass
+                await col_analytics.create_index(
                     "logged_at",
-                    expireAfterSeconds=30 * 24 * 3600,  # 30 gün
+                    expireAfterSeconds=10 * 24 * 3600,  # 10 gün
                     background=True,
                 )
+                # Mevcut 10 günden eski kayıtları hemen temizle
+                cutoff = datetime.utcnow() - _td(days=10)
+                deleted = await col_analytics.delete_many({"logged_at": {"$lt": cutoff}})
+                if deleted.deleted_count:
+                    LOGGER.info(f"stream_analytics: {deleted.deleted_count} eski kayıt temizlendi (>10 gün)")
             except Exception as idx_err:
                 LOGGER.warning(f"stream_analytics TTL index: {idx_err}")
 
@@ -261,7 +272,7 @@ class Database:
             {"_id": user_id},
             {
                 "$set": {"subscription_expiry": new_expiry, "subscription_status": "active"},
-                "$unset": {"pending_payment": ""}
+                "$unset": {"pending_payment": "", "reminder_sent": ""}
             }
         )
 
@@ -361,6 +372,12 @@ class Database:
             {"$set": {"reminder_sent": True}}
         )
 
+    async def reset_reminder_sent(self, user_id: int):
+        await self.dbs["tracking"]["users"].update_one(
+            {"_id": user_id},
+            {"$unset": {"reminder_sent": ""}}
+        )
+
     # -------------------------------
     # Admin Subscription Management
     # -------------------------------
@@ -457,20 +474,52 @@ class Database:
             
         return False
 
-    async def assign_subscription(self, user_id: int, days: int) -> dict:
-        """Upsert a subscription for any user_id, creating a record if it doesn't exist."""
+    async def delete_user_reminders(self, user_id: int) -> dict:
+        """Üyeye ait tüm hatırlatma kayıtlarını siler.
+        tv_reminders ve movie_reminders koleksiyonlarındaki user_ids array'inden
+        user_id'yi çıkarır; artık hiç abone kalmayan kayıtları tamamen siler.
+        """
+        tv_col    = self.dbs["tracking"]["tv_reminders"]
+        movie_col = self.dbs["tracking"]["movie_reminders"]
+
+        # user_ids array'inden çıkar
+        await tv_col.update_many(
+            {"user_ids": user_id},
+            {"$pull": {"user_ids": user_id}},
+        )
+        await movie_col.update_many(
+            {"user_ids": user_id},
+            {"$pull": {"user_ids": user_id}},
+        )
+
+        # Artık hiç abone kalmayan kayıtları sil
+        tv_del    = await tv_col.delete_many({"user_ids": {"$size": 0}})
+        movie_del = await movie_col.delete_many({"user_ids": {"$size": 0}})
+
+        return {
+            "tv_removed":    tv_del.deleted_count,
+            "movie_removed": movie_del.deleted_count,
+        }
+
+    async def assign_subscription(self, user_id: int, days: int, force_expiry=None) -> dict:
+        """Upsert a subscription for any user_id, creating a record if it doesn't exist.
+        force_expiry: datetime — if given, use directly as new_expiry (ignores days).
+        """
         from datetime import timedelta
         now = datetime.utcnow()
 
-        user = await self.get_user(user_id)
-        if user:
-            current_expiry = user.get("subscription_expiry")
-            if current_expiry and current_expiry > now:
-                new_expiry = current_expiry + timedelta(days=days)
+        if force_expiry is not None:
+            new_expiry = force_expiry
+        else:
+            user = await self.get_user(user_id)
+            if user:
+                current_expiry = user.get("subscription_expiry")
+                if current_expiry and current_expiry > now:
+                    new_expiry = current_expiry + timedelta(days=days)
+                else:
+                    new_expiry = now + timedelta(days=days)
             else:
                 new_expiry = now + timedelta(days=days)
-        else:
-            new_expiry = now + timedelta(days=days)
 
         await self.dbs["tracking"]["users"].update_one(
             {"_id": user_id},
@@ -666,6 +715,7 @@ class Database:
                 runtime=metadata_info['runtime'],
                 original_language=metadata_info.get('original_language'),
                 media_type=metadata_info['media_type'],
+                status=metadata_info.get('status'),
                 certification_tr=metadata_info.get('certification_tr'),
                 certification_de=metadata_info.get('certification_de'),
                 certification_us=metadata_info.get('certification_us'),
@@ -778,7 +828,7 @@ class Database:
         existing_movie["updated_on"] = datetime.utcnow()
 
         # Yeni veriden TR/DE alanlarını mevcut kayda yaz (boşsa doldur, doluysa güncelle)
-        for field in ["title_tr", "title_de", "description_tr", "description_de", "genres_tr", "genres_de", "poster_tr", "backdrop_tr", "logo_tr", "poster_de", "backdrop_de", "logo_de", "certification_tr", "certification_de", "certification_us"]:
+        for field in ["title_tr", "title_de", "description_tr", "description_de", "genres_tr", "genres_de", "poster_tr", "backdrop_tr", "logo_tr", "poster_de", "backdrop_de", "logo_de", "certification_tr", "certification_de", "certification_us", "status"]:
             new_val = movie_dict.get(field)
             if new_val:
                 existing_movie[field] = new_val
@@ -910,7 +960,7 @@ class Database:
         existing_tv["updated_on"] = datetime.utcnow()
 
         # Yeni veriden TR/DE alanlarını mevcut kayda yaz (boşsa doldur, doluysa güncelle)
-        for field in ["title_tr", "title_de", "description_tr", "description_de", "genres_tr", "genres_de", "poster_tr", "backdrop_tr", "logo_tr", "poster_de", "backdrop_de", "logo_de", "certification_tr", "certification_de", "certification_us"]:
+        for field in ["title_tr", "title_de", "description_tr", "description_de", "genres_tr", "genres_de", "poster_tr", "backdrop_tr", "logo_tr", "poster_de", "backdrop_de", "logo_de", "certification_tr", "certification_de", "certification_us", "status"]:
             new_val = tv_show_dict.get(field)
             if new_val:
                 existing_tv[field] = new_val
@@ -982,10 +1032,38 @@ class Database:
         ) -> dict:
 
             skip = (page - 1) * page_size
-            
-            words = query.split()
+
+            # ── ReDoS & Regex Injection koruması ─────────────────────────────
+            # Kullanıcı girdisindeki tüm regex özel karakterleri escape edilir
+            # (re.escape → ".", "*", "+", "(", ")", "[" vb. → "\.", "\*" ...).
+            # Boş/sadece-boşluk girdi reddedilir; kelime başına uzunluk sınırı
+            # uygulanarak aşırı uzun token'larla tetiklenen ReDoS önlenir.
+            import re as _re
+
+            _MAX_QUERY_LEN  = 100   # toplam girdi karakter sınırı
+            _MAX_WORD_LEN   = 40    # tek kelime karakter sınırı
+            _MAX_WORD_COUNT = 10    # maksimum kelime sayısı
+
+            query = query.strip()[:_MAX_QUERY_LEN]
+            if not query:
+                return {"total_count": 0, "results": []}
+
+            words = [
+                _re.escape(w[:_MAX_WORD_LEN])
+                for w in query.split()
+                if w.strip()
+            ][:_MAX_WORD_COUNT]
+
+            if not words:
+                return {"total_count": 0, "results": []}
+
+            # Her kelime bağımsız lookahead ile eşleştirilir:
+            # (?=.*kelime1)(?=.*kelime2)... → kelime sırası önemli değil,
+            # hepsi metinde geçmeli. Tek .* yerine lookahead kullanmak
+            # MongoDB regex motorundaki backtracking yükünü önemli ölçüde azaltır.
+            pattern = "".join(f"(?=.*{w})" for w in words)
             regex_query = {
-                '$regex': '.*' + '.*'.join(words) + '.*', 
+                '$regex': pattern,
                 '$options': 'i'
             }
             
@@ -1473,11 +1551,45 @@ class Database:
     # Canlı Yayın Kataloğu  (tracking DB'deki "live" koleksiyonu)
     # ─────────────────────────────────────────────────────────────────
 
-    async def get_live_channels(self) -> list:
-        """Tüm canlı yayın kanallarını döndürür."""
+    async def get_live_channels(self, scheduled_only: bool = False) -> list:
+        """Tüm canlı yayın kanallarını döndürür.
+
+        scheduled_only=True ise Türkiye saatine (UTC+3) göre şu an aktif olan
+        zamanlama aralığına sahip kanallar döndürülür.
+        Zamanlama listesi boş olan kanallar her zaman dahil edilir.
+        """
         cursor = self.dbs["tracking"]["live"].find({}).sort("order", 1)
         docs = await cursor.to_list(None)
-        return [convert_objectid_to_str(d) for d in docs]
+        channels = [convert_objectid_to_str(d) for d in docs]
+
+        if not scheduled_only:
+            return channels
+
+        # Türkiye saati (UTC+3)
+        from datetime import timezone, timedelta
+        tr_tz = timezone(timedelta(hours=3))
+        now_tr = datetime.now(tr_tz).replace(tzinfo=None)  # naive, aynı ofset
+
+        def _is_visible(ch: dict) -> bool:
+            schedule = ch.get("schedule") or []
+            if not schedule:
+                return True  # zamanlama yok → her zaman görünür
+            for slot in schedule:
+                start_str = slot.get("start")
+                end_str   = slot.get("end")
+                # datetime-local formatı: "YYYY-MM-DDTHH:MM"
+                try:
+                    start_dt = datetime.fromisoformat(start_str) if start_str else None
+                    end_dt   = datetime.fromisoformat(end_str)   if end_str   else None
+                except (ValueError, TypeError):
+                    start_dt = end_dt = None
+                after_start = (start_dt is None) or (now_tr >= start_dt)
+                before_end  = (end_dt   is None) or (now_tr <  end_dt)
+                if after_start and before_end:
+                    return True
+            return False
+
+        return [ch for ch in channels if _is_visible(ch)]
 
     async def get_live_channel(self, channel_id: str) -> Optional[dict]:
         """Tek bir kanalı id'ye göre getirir."""
@@ -1509,6 +1621,52 @@ class Database:
         from bson import ObjectId as _OID
         result = await self.dbs["tracking"]["live"].delete_one({"_id": _OID(channel_id)})
         return result.deleted_count > 0
+
+    # ─── Yayın (Broadcast) CRUD ───────────────────────────────────────────────────
+
+    async def get_broadcasts(self) -> list:
+        """Tüm yayınları döndürür."""
+        cursor = self.dbs["tracking"]["broadcasts"].find({}).sort("order", 1)
+        docs = await cursor.to_list(None)
+        return [convert_objectid_to_str(d) for d in docs]
+
+    async def get_broadcast(self, broadcast_id: str) -> Optional[dict]:
+        """Tek bir yayını id'ye göre getirir."""
+        from bson import ObjectId as _OID
+        doc = await self.dbs["tracking"]["broadcasts"].find_one({"_id": _OID(broadcast_id)})
+        return convert_objectid_to_str(doc) if doc else None
+
+    async def add_broadcast(self, data: dict) -> dict:
+        """Yeni yayın ekler."""
+        data["created_at"] = datetime.utcnow()
+        data["updated_at"] = datetime.utcnow()
+        data.setdefault("order", 0)
+        data.setdefault("active", False)
+        data.setdefault("buffer_seconds", 15)
+        result = await self.dbs["tracking"]["broadcasts"].insert_one(data)
+        data["_id"] = str(result.inserted_id)
+        return convert_objectid_to_str(data)
+
+    async def update_broadcast(self, broadcast_id: str, data: dict) -> bool:
+        """Mevcut yayını günceller."""
+        from bson import ObjectId as _OID
+        data["updated_at"] = datetime.utcnow()
+        result = await self.dbs["tracking"]["broadcasts"].update_one(
+            {"_id": _OID(broadcast_id)}, {"$set": data}
+        )
+        return result.modified_count > 0
+
+    async def delete_broadcast(self, broadcast_id: str) -> bool:
+        """Yayını siler."""
+        from bson import ObjectId as _OID
+        result = await self.dbs["tracking"]["broadcasts"].delete_one({"_id": _OID(broadcast_id)})
+        return result.deleted_count > 0
+
+    async def get_active_broadcasts(self) -> list:
+        """Sadece aktif (yayında olan) yayınları döndürür — Stremio kataloğu için."""
+        cursor = self.dbs["tracking"]["broadcasts"].find({"active": True}).sort("order", 1)
+        docs = await cursor.to_list(None)
+        return [convert_objectid_to_str(d) for d in docs]
 
     # Get per-DB statistics (movies, tv shows, used size, etc.)
     async def get_database_stats(self):
@@ -1581,20 +1739,24 @@ class Database:
     # API Token Methods
     # -------------------------------
 
-    async def add_api_token(self, name: str, daily_limit_gb: float = None, monthly_limit_gb: float = None, speed_limit_mbps: float = None, portal_username: str = None, portal_password: str = None, user_id: int = None, expires_at=None, validity_days: int = None) -> dict:
+    async def add_api_token(self, name: str, daily_limit_gb: float = None, monthly_limit_gb: float = None, speed_limit_mbps: float = None, portal_username: str = None, portal_password: str = None, user_id: int = None, expires_at=None, validity_days: int = None, ip_limit: int = None, device_limit: int = None) -> dict:
         # If a user_id is provided, return existing token if already created
         if user_id:
             existing = await self.dbs["tracking"]["api_tokens"].find_one({"user_id": user_id})
             if existing:
                 # Limit parametresi geçildiyse mevcut token'ı da güncelle
-                if daily_limit_gb is not None or monthly_limit_gb is not None or speed_limit_mbps is not None:
+                if daily_limit_gb is not None or monthly_limit_gb is not None or speed_limit_mbps is not None or ip_limit is not None or device_limit is not None:
                     new_daily   = float(daily_limit_gb)    if daily_limit_gb    else 0.0
                     new_monthly = float(monthly_limit_gb)  if monthly_limit_gb  else 0.0
                     new_speed   = float(speed_limit_mbps)  if speed_limit_mbps  else 0.0
+                    new_ip      = int(ip_limit)     if ip_limit     is not None else existing.get("limits", {}).get("ip_limit", 0)
+                    new_device  = int(device_limit) if device_limit is not None else existing.get("limits", {}).get("device_limit", 0)
                     update_set = {
                         "limits.daily_limit_gb":   new_daily,
                         "limits.monthly_limit_gb": new_monthly,
                         "limits.speed_limit_mbps": new_speed,
+                        "limits.ip_limit":         new_ip,
+                        "limits.device_limit":     new_device,
                     }
                     if expires_at is not None:
                         update_set["expires_at"] = expires_at
@@ -1608,11 +1770,16 @@ class Database:
                     existing["limits"]["daily_limit_gb"]   = new_daily
                     existing["limits"]["monthly_limit_gb"] = new_monthly
                     existing["limits"]["speed_limit_mbps"] = new_speed
+                    existing["limits"]["ip_limit"]         = new_ip
+                    existing["limits"]["device_limit"]     = new_device
                 return convert_objectid_to_str(existing)
 
         alphabet = string.ascii_letters + string.digits
         token = ''.join(secrets.choice(alphabet) for _ in range(32))
         
+        from Backend.config import Telegram as _Cfg
+        _default_device = int(_Cfg.DEFAULT_DEVICE_LIMIT) if hasattr(_Cfg, "DEFAULT_DEVICE_LIMIT") else 0
+
         token_doc = {
             "name": name,
             "token": token,
@@ -1626,12 +1793,17 @@ class Database:
                 "daily_limit_gb": daily_limit_gb if daily_limit_gb else 0,
                 "monthly_limit_gb": monthly_limit_gb if monthly_limit_gb else 0,
                 "speed_limit_mbps": speed_limit_mbps if speed_limit_mbps else 0,
+                "ip_limit":     int(ip_limit)     if ip_limit     is not None else 0,
+                "device_limit": int(device_limit) if device_limit is not None else _default_device,
             },
             "usage": {
                 "total_bytes": 0,
                 "daily": {"date": datetime.now(_TZ_IST).strftime("%Y-%m-%d"), "bytes": 0},
                 "monthly": {"month": datetime.now(_TZ_IST).strftime("%Y-%m"), "bytes": 0}
-            }
+            },
+            "active_devices": [],   # Aktif stream session listesi
+            "daily_limit_warned":   False,  # Günlük %80 uyarısı gönderildi mi
+            "daily_limit_finished": False,  # Günlük %100 bitti bildirimi gönderildi mi
         }
         
         await self.dbs["tracking"]["api_tokens"].insert_one(token_doc)
@@ -1760,22 +1932,57 @@ class Database:
                             "$usage.monthly"
                         ]
                     },
+                    # Yeni güne geçince %80 ve %100 uyarı bayraklarını sıfırla
+                    "daily_limit_warned":   False,
+                    "daily_limit_finished": False,
+                    "daily_limit_disabled": False,
                 }}
             ]
         )
         return result.modified_count
+
+    async def get_token_daily_limit_warned(self, token: str) -> bool:
+        """Token için bugün %80 uyarısı gönderildi mi?"""
+        doc = await self.dbs["tracking"]["api_tokens"].find_one(
+            {"token": token}, {"daily_limit_warned": 1}
+        )
+        return bool(doc and doc.get("daily_limit_warned"))
+
+    async def mark_token_daily_limit_warned(self, token: str) -> None:
+        """Token için %80 uyarısı gönderildi olarak işaretle."""
+        await self.dbs["tracking"]["api_tokens"].update_one(
+            {"token": token},
+            {"$set": {"daily_limit_warned": True}}
+        )
+
+    async def get_token_daily_limit_finished(self, token: str) -> bool:
+        """Token için bugün %100 bitti bildirimi gönderildi mi?"""
+        doc = await self.dbs["tracking"]["api_tokens"].find_one(
+            {"token": token}, {"daily_limit_finished": 1}
+        )
+        return bool(doc and doc.get("daily_limit_finished"))
+
+    async def mark_token_daily_limit_finished(self, token: str) -> None:
+        """Token için %100 bitti bildirimi gönderildi olarak işaretle ve token'ı devre dışı bırak."""
+        await self.dbs["tracking"]["api_tokens"].update_one(
+            {"token": token},
+            {"$set": {"daily_limit_finished": True, "daily_limit_warned": True, "daily_limit_disabled": True}}
+        )
 
     async def update_api_token_limits(self, token: str, daily_limit_gb: float, monthly_limit_gb: float,
                                        speed_limit_mbps: float = None,
                                        portal_username: str = None, portal_password: str = None,
                                        expires_at=None, clear_expiry: bool = False,
                                        validity_days: int = None,
-                                       telegram_user_id: int = None) -> bool:
+                                       telegram_user_id: int = None,
+                                       ip_limit: int = None, device_limit: int = None) -> bool:
         update_fields = {
             "limits": {
                 "daily_limit_gb": daily_limit_gb if daily_limit_gb else 0,
                 "monthly_limit_gb": monthly_limit_gb if monthly_limit_gb else 0,
                 "speed_limit_mbps": float(speed_limit_mbps) if speed_limit_mbps else 0,
+                "ip_limit":     int(ip_limit)     if ip_limit     is not None else 0,
+                "device_limit": int(device_limit) if device_limit is not None else 0,
             }
         }
         if portal_username is not None:
@@ -1797,11 +2004,72 @@ class Database:
         if telegram_user_id is not None:
             update_fields["user_id"] = telegram_user_id
 
+        # Günlük limit artırıldıysa (daily_limit_gb > 0) daily_limit_disabled / warned / finished flag'larını sıfırla
+        # Böylece önceki kota doldu uyarısı temizlenir ve stremio erişimi yeniden açılır.
+        if daily_limit_gb and float(daily_limit_gb) > 0:
+            update_fields["daily_limit_disabled"] = False
+            update_fields["daily_limit_finished"] = False
+            update_fields["daily_limit_warned"]   = False
+
         result = await self.dbs["tracking"]["api_tokens"].update_one(
             {"token": token},
             {"$set": update_fields}
         )
         return result.modified_count > 0
+
+    # ── Cihaz Takip Metodları ──────────────────────────────────────────────────
+
+    async def add_device_session(self, token: str, session_id: str) -> bool:
+        """
+        Aktif stream session ekle (addToSet).
+        Döner: True (yeni eklendi) / False (zaten var ya da hata)
+        """
+        result = await self.dbs["tracking"]["api_tokens"].update_one(
+            {"token": token},
+            {"$addToSet": {"active_devices": session_id}}
+        )
+        return result.modified_count > 0
+
+    async def remove_device_session(self, token: str, session_id: str) -> bool:
+        """Stream bitince aktif session'ı sil."""
+        result = await self.dbs["tracking"]["api_tokens"].update_one(
+            {"token": token},
+            {"$pull": {"active_devices": session_id}}
+        )
+        return result.modified_count > 0
+
+    async def get_active_device_count(self, token: str) -> int:
+        """Token'ın anlık aktif stream (cihaz) sayısını döner.
+        
+        DB yerine ACTIVE_STREAMS RAM dict'ini kullanır — stremio_routes.py ile
+        tutarlı olması için (stream'ler DB'ye değil RAM'e kaydediliyor).
+        Sadece gerçekten veri transfer etmiş (total_bytes > 0) stream'leri sayar;
+        video player'ın probe/range request'leri 0 byte ile kayıt açar ve bunlar
+        sayıma dahil edilmez.
+        """
+        try:
+            from Backend.helper.custom_dl import ACTIVE_STREAMS
+            return sum(
+                1 for s in ACTIVE_STREAMS.values()
+                if s.get("status") == "active"
+                and s.get("meta", {}).get("user_token") == token
+                and (s.get("total_bytes") or 0) > 0
+            )
+        except Exception:
+            # Fallback: DB'deki active_devices listesine bak
+            doc = await self.dbs["tracking"]["api_tokens"].find_one(
+                {"token": token}, {"active_devices": 1}
+            )
+            return len(doc.get("active_devices", [])) if doc else 0
+
+    async def clear_device_sessions(self, token: str) -> bool:
+        """Token'ın tüm aktif session'larını temizler (admin sıfırlama)."""
+        result = await self.dbs["tracking"]["api_tokens"].update_one(
+            {"token": token},
+            {"$set": {"active_devices": []}}
+        )
+        return result.modified_count > 0
+
 
     async def get_catalog_prefs(self, token: str) -> list:
         """Return list of hidden catalog IDs for this token (lang-agnostic base IDs)."""
@@ -1979,7 +2247,20 @@ class Database:
                 "chunk_size":  stats.get("chunk_size"),
                 "logged_at":   datetime.utcnow(),
             }
-            await self.dbs["tracking"]["stream_analytics"].insert_one(record)
+            col = self.dbs["tracking"]["stream_analytics"]
+            await col.insert_one(record)
+
+            # Kullanıcı başına maksimum 10 kayıt — eskiden fazlası silinir
+            user_token = record.get("user_token")
+            if user_token:
+                count = await col.count_documents({"user_token": user_token})
+                if count > 10:
+                    oldest = await col.find(
+                        {"user_token": user_token},
+                        {"_id": 1}
+                    ).sort("logged_at", 1).limit(count - 10).to_list(None)
+                    old_ids = [d["_id"] for d in oldest]
+                    await col.delete_many({"_id": {"$in": old_ids}})
         except Exception as e:
             LOGGER.warning(f"Stream analytics log failed: {e}")
 
@@ -2010,7 +2291,7 @@ class Database:
             LOGGER.warning(f"get_user_watch_history failed: {e}")
             return []
 
-    async def get_watch_history_rich(self, token: str, limit: int = 80) -> list:
+    async def get_watch_history_rich(self, token: str, limit: int = 40) -> list:
         """
         İzleme geçmişini detaylı döner: [{imdb_id, last_watched}, ...]
         En son izlenen başta gelir.
@@ -2043,26 +2324,28 @@ class Database:
         self,
         watched_imdb_ids: list,
         page: int = 1,
-        page_size: int = 15,
+        page_size: int = 60,
         lang: str = "tr",
         last_watched_id: str = None,
         watch_history_rich: list = None,
     ) -> list:
         """
-        "Sana Özel" kataloğu — izleme geçmişine dayalı akıllı öneri algoritması.
+        "Sana Özel" kataloğu — en son izlenen içeriğe dayalı akıllı öneri algoritması.
 
         Öncelik sırası (en önde → en sonda):
           1. En son izlenen içeriğin aynı koleksiyonu / serisi (franchise)
           2. En son izlenen içeriğin oyuncuları
-          3. En çok izlenen tür (genre) eşleşmesi
+          3. En son izlenenle ortak tür (genre) eşleşmesi
           4. En çok izlenen oyuncu eşleşmesi
-          5. En çok izlenen yıl aralığı (+/- 3 yıl)
+          5. En çok izlenen yıl aralığı (+/- 4 yıl)
           6. En çok izlenen sertifika (certification)
           7. Rating'e göre sıralı geri kalanlar
 
         Kurallar:
           - İzlenmiş içerikler listede YOK
           - Film + dizi karışık
+          - Tüm storage DB'leri taranır
+          - Maksimum 60 içerik döner
         """
         if not watched_imdb_ids:
             return []
@@ -2203,22 +2486,43 @@ class Database:
                     or []
                 )
 
-            # ── 2. Tüm içerikleri çek (izlenmemişler) ───────────────────────────
-            watched_set = set(watched_imdb_ids)
-            base_match: dict = {
-                "imdb_id": {"$nin": list(watched_set), "$ne": None, "$exists": True},
-            }
+            # ── 2. Aday içerikleri çek (izlenmemişler) ──────────────────────────
+            # Tüm storage DB'leri taranır; en son izlenen içeriğin özellikleri
+            # öncelikli filtre olarak kullanılır. Limit yoktur — sıralama sonrası
+            # ilk 60 döndürülür.
 
-            or_clauses = [
+            watched_set = set(watched_imdb_ids)
+
+            # En son izlenen içeriğin genre ve oyuncularını öncelikli filtrele
+            priority_clauses = []
+            if last_genres:
+                priority_clauses += [
+                    {genre_field: {"$in": last_genres}},
+                    {"genres_tr": {"$in": last_genres}},
+                    {"genres":    {"$in": last_genres}},
+                ]
+            if last_cast_set:
+                priority_clauses.append({"cast": {"$in": list(last_cast_set)}})
+            if last_collection_id:
+                priority_clauses.append({"collection_id": last_collection_id})
+
+            # Genel profil filtreleri (fallback)
+            general_clauses = [
                 {genre_field: {"$in": top_genres}},
                 {"genres_tr": {"$in": top_genres}},
                 {"genres":    {"$in": top_genres}},
             ]
             if top_casts:
-                or_clauses.append({"cast": {"$in": top_casts}})
+                general_clauses.append({"cast": {"$in": top_casts}})
             if collection_ids:
-                or_clauses.append({"collection_id": {"$in": list(collection_ids)}})
-            base_match["$or"] = or_clauses
+                general_clauses.append({"collection_id": {"$in": list(collection_ids)}})
+
+            or_clauses = priority_clauses if priority_clauses else general_clauses
+
+            base_match: dict = {
+                "imdb_id": {"$nin": list(watched_set), "$ne": None, "$exists": True},
+                "$or": or_clauses,
+            }
 
             all_results: list = []
             seen_imdb: set    = set()
@@ -2294,7 +2598,8 @@ class Database:
 
             all_results.sort(key=_score, reverse=True)
 
-            # ── 4. Sayfalama ─────────────────────────────────────────────────────
+            # ── 4. Sayfalama — sayfa başına 15, toplam max 60 içerik ─────────────
+            all_results = all_results[:60]
             skip = (page - 1) * page_size
             return all_results[skip: skip + page_size]
 
@@ -2303,7 +2608,7 @@ class Database:
             return []
 
 
-    async def get_stream_analytics(self, limit: int = 200) -> dict:
+    async def get_stream_analytics(self, limit: int = 20) -> dict:
         """Return summary stats + recent stream records from the tracking DB."""
         try:
             col = self.dbs["tracking"]["stream_analytics"]
@@ -2340,13 +2645,13 @@ class Database:
                 row["avg_mbps"]     = round(row.get("avg_mbps", 0), 3)
                 row["peak_mbps"]    = round(row.get("peak_mbps", 0), 3)
 
-            # Recent records (newest first)
+            # Son 20 kayıt (en yeni önce)
             recent_cursor = col.find(
                 {},
                 {"_id": 0, "stream_id": 1, "client_index": 1, "dc_id": 1,
                  "total_bytes": 1, "duration_sec": 1, "avg_mbps": 1,
                  "peak_mbps": 1, "status": 1, "logged_at": 1, "title": 1}
-            ).sort("logged_at", DESCENDING).limit(limit)
+            ).sort("logged_at", DESCENDING).limit(20)
             recent = await recent_cursor.to_list(None)
             for r in recent:
                 if "logged_at" in r:
@@ -2537,8 +2842,8 @@ class Database:
         import string as _string
 
         # Rastgele kısa kullanıcı adı (okunabilir)
-        adjectives = ["hızlı","cesur","zeki","güçlü","sakin","parlak","derin","şen"]
-        nouns      = ["aslan","kartal","tilki","kurt","ayı","pars","kaplan","şahin"]
+        adjectives = ["hızlı","cesur","zeki","güçlü","sakin","kızıl","derin","şen","sessiz","gümüş","asil"]
+        nouns      = ["aslan","kartal","tilki","kurt","yıldız","pars","kaplan","şahin","güneş","fırtına","panter"]
         adj  = _secrets.choice(adjectives)
         noun = _secrets.choice(nouns)
         rand = _secrets.randbelow(9000) + 1000        # 4 haneli
@@ -2655,8 +2960,8 @@ class Database:
         """
         import secrets as _secrets
         import string as _string
-        adjectives = ["hızlı", "cesur", "zeki", "güçlü", "sakin", "parlak", "derin", "şen"]
-        nouns      = ["kartal", "aslan", "kurt", "pars", "kaplan", "şahin", "tilki", "ayı"]
+        adjectives = ["hızlı","cesur","zeki","güçlü","sakin","kızıl","derin","şen","sessiz","gümüş","asil"]
+        nouns      = ["aslan","kartal","tilki","kurt","yıldız","pars","kaplan","şahin","güneş","fırtına","panter"]
         adj        = _secrets.choice(adjectives)
         noun       = _secrets.choice(nouns)
         rand       = _secrets.randbelow(9000) + 1000
@@ -2792,6 +3097,61 @@ class Database:
     async def delete_ip_ban(self, ip: str) -> None:
         """Süresi dolmuş veya kaldırılmış bir IP ban kaydını sil."""
         await self.dbs["tracking"]["ip_bans"].delete_one({"ip": ip})
+
+    # ── Altyazı Yönetimi ────────────────────────────────────────────────────
+
+    async def add_subtitle(self, subtitle_data: dict) -> str:
+        """
+        Yeni bir altyazı kaydı ekle.
+        subtitle_data: {imdb_id, media_type, lang, lang_label, season, episode, filename, file_path, file_size, uploaded_at}
+        Döner: eklenen belgenin _id string hali
+        """
+        from bson import ObjectId
+        doc = dict(subtitle_data)
+        doc.setdefault("uploaded_at", datetime.utcnow())
+        result = await self.dbs["tracking"]["subtitles"].insert_one(doc)
+        return str(result.inserted_id)
+
+    async def get_subtitles(
+        self,
+        imdb_id: str,
+        season: Optional[int] = None,
+        episode: Optional[int] = None,
+    ) -> list:
+        """
+        Belirli bir içeriğe ait altyazıları listele.
+        Film için season/episode=None, dizi bölümü için değer ver.
+        """
+        from Backend.helper.database import convert_objectid_to_str
+        query: dict = {"imdb_id": imdb_id}
+        if season is not None:
+            query["season"] = season
+        if episode is not None:
+            query["episode"] = episode
+        cursor = self.dbs["tracking"]["subtitles"].find(query).sort("uploaded_at", -1)
+        docs = await cursor.to_list(length=200)
+        return [convert_objectid_to_str(d) for d in docs]
+
+    async def delete_subtitle(self, subtitle_id: str) -> bool:
+        """_id'ye göre altyazı kaydını sil. True → silindi."""
+        from bson import ObjectId
+        try:
+            oid = ObjectId(subtitle_id)
+        except Exception:
+            return False
+        result = await self.dbs["tracking"]["subtitles"].delete_one({"_id": oid})
+        return result.deleted_count > 0
+
+    async def get_subtitle_by_id(self, subtitle_id: str) -> Optional[dict]:
+        """Tek bir altyazı belgesini _id ile getir."""
+        from bson import ObjectId
+        from Backend.helper.database import convert_objectid_to_str
+        try:
+            oid = ObjectId(subtitle_id)
+        except Exception:
+            return None
+        doc = await self.dbs["tracking"]["subtitles"].find_one({"_id": oid})
+        return convert_objectid_to_str(doc) if doc else None
 
     async def cleanup_expired_ip_bans(self) -> int:
         """

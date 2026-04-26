@@ -25,6 +25,9 @@ Eklenmesi gereken route'lar (main.py'ye ekleyin):
 
 from __future__ import annotations
 
+import logging
+_logger = logging.getLogger(__name__)
+
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -213,7 +216,9 @@ async def admin_uyeler_list_api() -> dict:
         members = await _build_members_list()
         return {"status": "success", "members": members, "total": len(members)}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _logger.error("Internal error", exc_info=True)
+
+        raise HTTPException(status_code=500, detail="Sunucu hatası")
 
 
 # ─── API: /api/admin/uyeler/{member_id}/streams ──────────────────────────────
@@ -280,7 +285,7 @@ async def admin_uye_stream_history_api(member_id: str) -> dict:
                 "certification_de": 1,
                 "certification_us": 1,
             }
-        ).sort("logged_at", DESCENDING).limit(500)
+        ).sort("logged_at", DESCENDING).limit(20)
         streams_raw = await cursor.to_list(None)
 
         streams = []
@@ -360,4 +365,66 @@ async def admin_uye_stream_history_api(member_id: str) -> dict:
         }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _logger.error("Internal error", exc_info=True)
+
+        raise HTTPException(status_code=500, detail="Sunucu hatası")
+
+
+# ─── API: /api/admin/uyeler/{member_id}/reminders ────────────────────────────
+
+async def admin_uye_reminders_api(member_id: str) -> dict:
+    """
+    Belirli bir üyenin dizi ve film hatırlatmalarını döner.
+    member_id: user_id (sayı) veya token string olabilir.
+
+    main.py'ye eklenecek route:
+      @app.get("/api/admin/uyeler/{member_id}/reminders")
+      async def admin_uye_reminders(member_id: str, _: bool = Depends(require_auth)):
+          return await admin_uye_reminders_api(member_id)
+    """
+    try:
+        # Kullanıcının user_id'sini çöz
+        user_id: Optional[int] = None
+
+        # Önce doğrudan sayı mı dene
+        try:
+            user_id = int(member_id)
+        except (ValueError, TypeError):
+            pass
+
+        # Sayı değilse token olarak ara
+        if user_id is None:
+            token_doc = await db.dbs["tracking"]["api_tokens"].find_one(
+                {"token": member_id}, {"_id": 0, "user_id": 1}
+            )
+            if token_doc:
+                user_id = token_doc.get("user_id")
+
+        if user_id is None:
+            return {"status": "success", "tv": [], "movie": []}
+
+        # Dizi hatırlatmaları
+        tv_col = db.dbs["tracking"]["tv_reminders"]
+        tv_cursor = tv_col.find(
+            {"user_ids": user_id},
+            {"_id": 0, "tmdb_id": 1, "db_index": 1, "title": 1, "poster": 1, "status": 1}
+        )
+        tv_items = await tv_cursor.to_list(length=200)
+
+        # Film hatırlatmaları
+        movie_col = db.dbs["tracking"]["movie_reminders"]
+        movie_cursor = movie_col.find(
+            {"user_ids": user_id},
+            {"_id": 0, "tmdb_id": 1, "db_index": 1, "title": 1, "poster": 1, "status": 1}
+        )
+        movie_items = await movie_cursor.to_list(length=200)
+
+        return {
+            "status": "success",
+            "tv":     tv_items,
+            "movie":  movie_items,
+        }
+
+    except Exception as e:
+        _logger.error("admin_uye_reminders_api error", exc_info=True)
+        raise HTTPException(status_code=500, detail="Sunucu hatası")

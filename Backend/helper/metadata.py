@@ -18,13 +18,48 @@ tmdb_tr = aioTMDb(key=Telegram.TMDB_API, language="tr-TR", region="TR")
 tmdb_de = aioTMDb(key=Telegram.TMDB_API, language="de-DE", region="DE")
 tmdb = tmdb_tr  # geriye dönük uyumluluk
 
+# ── LRU Cache ─────────────────────────────────────────────────────────────────
+# Bellekte sabit boyut tutmak için OrderedDict tabanlı basit LRU.
+# Sınırsız dict yerine kullanılır; en uzun süredir erişilmeyen giriş otomatik düşer.
+from collections import OrderedDict
+
+class _LRUCache(OrderedDict):
+    """Thread-safe olmayan, asyncio ortamı için yeterli LRU cache."""
+    def __init__(self, maxsize: int = 1000):
+        super().__init__()
+        self.maxsize = maxsize
+
+    def __getitem__(self, key):
+        value = super().__getitem__(key)
+        self.move_to_end(key)   # en son kullanılan sona geçer
+        return value
+
+    def __setitem__(self, key, value):
+        if key in self:
+            self.move_to_end(key)
+        super().__setitem__(key, value)
+        if len(self) > self.maxsize:
+            self.popitem(last=False)  # en eski (baştaki) silinir
+
+    def get(self, key, default=None):
+        if key in self:
+            return self[key]   # move_to_end tetiklenir
+        return default
+
 # Cache dictionaries (per run)
-IMDB_CACHE: dict = {}
-TMDB_SEARCH_CACHE: dict = {}
-TMDB_DETAILS_CACHE: dict = {}
-EPISODE_CACHE: dict = {}
-TRANSLATE_CACHE: dict = {}     # Türkçe çeviri cache'i
-TRANSLATE_DE_CACHE: dict = {}  # Almanca çeviri cache'i
+#   maxsize değerleri kütüphane büyüklüğüne göre ayarlanabilir:
+#   - IMDB_CACHE        : başlık → IMDb ID  (küçük veri, yüksek tekrar)
+#   - TMDB_SEARCH_CACHE : arama sonuçları   (küçük-orta veri)
+#   - TMDB_DETAILS_CACHE: film/dizi detayı  (büyük veri — poster, oyuncu, sertifika)
+#   - EPISODE_CACHE     : bölüm detayları   (orta veri, çok sayıda giriş olabilir)
+#   - TRANSLATE_CACHE   : TR çeviri         (küçük veri, metin başına bir giriş)
+#   - TRANSLATE_DE_CACHE: DE çeviri         (küçük veri)
+IMDB_CACHE:         _LRUCache = _LRUCache(maxsize=2000)
+TMDB_SEARCH_CACHE:  _LRUCache = _LRUCache(maxsize=2000)
+TMDB_DETAILS_CACHE: _LRUCache = _LRUCache(maxsize=2000)
+EPISODE_CACHE:      _LRUCache = _LRUCache(maxsize=5000)
+TRANSLATE_CACHE:    _LRUCache = _LRUCache(maxsize=3000)
+TRANSLATE_DE_CACHE: _LRUCache = _LRUCache(maxsize=3000)
 
 # Aynı anda aynı içeriğe gelen paralel metadata çağrılarını tek sefere indirger.
 # key → asyncio.Future  (sonuç gelince tüm bekleyenler aynı Future'ı okur)
@@ -590,6 +625,11 @@ async def metadata(filename: str, channel: int, msg_id, override_id: str = None)
         return None
 
     title = parsed.get("title")
+    # "Orijinal Başlık - Türkçe Çeviri" formatındaki başlıklarda
+    # yalnızca tire öncesini TMDB araması için kullan.
+    # Örnek: "Dune Part Two - Dune Çöl Gezegeni Bölüm İki" → "Dune Part Two"
+    if title and " - " in title:
+        title = title.split(" - ")[0].strip()
     season = parsed.get("season")
     episode = parsed.get("episode")
     year = parsed.get("year")
@@ -601,6 +641,12 @@ async def metadata(filename: str, channel: int, msg_id, override_id: str = None)
         else:
             # Hiçbir şey bulunamazsa varsayılan 1080p
             quality = "1080p"
+
+    # CamRip/CAM kaynak tespiti: PTN "quality" alanı veya doğrudan dosya adı kontrolü
+    ptn_source = (parsed.get("quality") or "").lower()
+    if re.search(r'\bcam[-_]?rip\b|\bcamrip\b|\bcam\b', filename, re.IGNORECASE) or \
+       re.search(r'\bcam[-_]?rip\b|\bcamrip\b|\bcam\b', ptn_source):
+        quality = "CamRip"
     if isinstance(season, list) or isinstance(episode, list):
         LOGGER.warning(f"Invalid season/episode format for {filename}: {parsed}")
         return None
@@ -843,6 +889,7 @@ async def _fetch_tv_metadata_impl(title, season, episode, encoded_string, year=N
             "certification_us": getattr(tv, "certification_us", None),
             "original_language": getattr(tv, "original_language", None),
             "media_type": "tv",
+            "status": getattr(tv, "status", None),  # Returning Series / Ended / Canceled / In Production …
             "cast": cast,
             "runtime": str(runtime),
 
@@ -881,6 +928,7 @@ async def _fetch_tv_metadata_impl(title, season, episode, encoded_string, year=N
     poster_de, backdrop_de, logo_de = "", "", ""
     genres_de = []
     certification_tr = certification_de = certification_us = None
+    series_status = None
 
     raw_tmdb_id = imdb.get("moviedb_id")
     fallback_tmdb_id = int(raw_tmdb_id) if raw_tmdb_id and str(raw_tmdb_id).isdigit() else None
@@ -907,6 +955,7 @@ async def _fetch_tv_metadata_impl(title, season, episode, encoded_string, year=N
                 backdrop_de = getattr(tv_details, "backdrop_de", "") or ""
                 logo_de = getattr(tv_details, "logo_de", "") or ""
                 genres_de = getattr(tv_details, "genres_de", []) or []
+                series_status = getattr(tv_details, "status", None)
                 # TMDB'den gelen imdb_id ile DB'ye yazılacak imdb_id aynıysa sertifikaları al
                 tmdb_ext_imdb = getattr(getattr(tv_details, "external_ids", None), "imdb_id", None)
                 if not tmdb_ext_imdb or tmdb_ext_imdb == imdb_id:
@@ -954,6 +1003,7 @@ async def _fetch_tv_metadata_impl(title, season, episode, encoded_string, year=N
         "certification_us": certification_us,
         "original_language": imdb.get("spokenLanguages", [{}])[0].get("id") if imdb.get("spokenLanguages") else None,
         "media_type": "tv",
+        "status": series_status,  # TMDB'den alınan dizi yayın durumu
 
         "season_number": season,
         "episode_number": episode,

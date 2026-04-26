@@ -1,3 +1,5 @@
+import logging
+_logger = logging.getLogger(__name__)
 import math
 import secrets
 import mimetypes
@@ -20,9 +22,30 @@ from Backend.fastapi.security.tokens import verify_token
 from Backend.fastapi.security.credentials import require_auth
 import asyncio
 
+
 router = APIRouter(tags=["Streaming"])
 
 _streamer_by_client: Dict = {}
+
+# Aynı process içinde aynı token için bildirim tekrarını önleyen in-memory set'ler.
+# Gece sıfırlamasında DB bayrakları sıfırlanır; bu set'ler process restart'ta zaten temizlenir.
+_daily_warn_sent:     set = set()   # token → %80 uyarısı bu oturumda gönderildi
+_daily_finished_sent: set = set()   # token → %100 bitti bu oturumda gönderildi
+
+
+def _force_stop_token_streams(token: str) -> int:
+    """Token'a ait tüm aktif stream'lere force_stop flag'i set eder.
+    Bir sonraki chunk gönderiminde consumer duracaktır.
+    Döndürür: durdurulan stream sayısı.
+    """
+    count = 0
+    for sid, info in list(ACTIVE_STREAMS.items()):
+        if info.get("meta", {}).get("user_token") == token and info.get("status") == "active":
+            info["force_stop"] = True
+            count += 1
+    if count:
+        LOGGER.info("force_stop set for %d stream(s) of token %s", count, token[:8])
+    return count
 
 
 def _require_admin(request: Request) -> bool:
@@ -202,6 +225,38 @@ async def track_usage_from_stats(stream_id: str, token: str, token_data: dict):
                                 LOGGER.debug(f"Final usage update for {stream_id}: {delta} bytes")
                             except Exception as e:
                                 LOGGER.error(f"Final usage update failed: {e}")
+                        # Stream kapandıktan sonra sadece %100 limitini kontrol et
+                        if daily_limit_gb and daily_limit_gb > 0:
+                            final_daily_gb = (initial_daily_bytes + final_bytes) / (1024 ** 3)
+                            used_pct = round((final_daily_gb / daily_limit_gb) * 100, 1)
+                            tg_user_id = token_data.get("user_id") if token_data else None
+                            from pyrogram import enums as _pyrogram_enums
+                            # %100 — limit doldu, token devre dışı bırak
+                            if final_daily_gb >= daily_limit_gb:
+                                # Limit aşıldığında diğer aktif stream'leri de durdur
+                                _force_stop_token_streams(token)
+                                if token not in _daily_finished_sent:
+                                    try:
+                                        already_finished = await db.get_token_daily_limit_finished(token)
+                                        if not already_finished:
+                                            _daily_finished_sent.add(token)
+                                            if tg_user_id:
+                                                try:
+                                                    await StreamBot.send_message(
+                                                        chat_id=int(tg_user_id),
+                                                        text=(
+                                                            f"🔴 Günlük Limitiniz Doldu!\n"
+                                                            f"📊 Kullanım : {round(final_daily_gb, 2)} GB / {daily_limit_gb} GB (%{used_pct})\n"
+                                                            f"⚠️ Bugünkü günlük limitiniz aşıldı."
+                                                        ),
+                                                        parse_mode=_pyrogram_enums.ParseMode.HTML,
+                                                    )
+                                                    LOGGER.info(f"Daily limit 100% finished sent (on close) to user {tg_user_id} for token {token[:8]}")
+                                                except Exception as warn_err:
+                                                    LOGGER.warning(f"Daily limit finished notification failed (on close) for {token[:8]}: {warn_err}")
+                                            await db.mark_token_daily_limit_finished(token)
+                                    except Exception as e:
+                                        LOGGER.warning(f"Daily limit finished check (on close) failed for {token[:8]}: {e}")
                         break
                 return
             
@@ -216,11 +271,37 @@ async def track_usage_from_stats(stream_id: str, token: str, token_data: dict):
                 except Exception as e:
                     LOGGER.error(f"Periodic usage update failed: {e}")
             
-            # Check limits (don't stop stream, just log - client manages connection)
+            # Check limits — sadece %100 bildir ve token'ı devre dışı bırak
             if daily_limit_gb and daily_limit_gb > 0:
                 current_daily_gb = (initial_daily_bytes + current_bytes) / (1024 ** 3)
+                used_pct = round((current_daily_gb / daily_limit_gb) * 100, 1)
+                tg_user_id = token_data.get("user_id") if token_data else None
                 if current_daily_gb >= daily_limit_gb:
-                    LOGGER.debug(f"Daily limit reached for token, stream {stream_id} may be blocked by verify_token")
+                    # Limit aşıldığı her döngüde aktif stream'leri durdur
+                    _force_stop_token_streams(token)
+                    if token not in _daily_finished_sent:
+                        try:
+                            already_finished = await db.get_token_daily_limit_finished(token)
+                            if not already_finished:
+                                _daily_finished_sent.add(token)
+                                if tg_user_id:
+                                    from pyrogram import enums as _pyrogram_enums
+                                    try:
+                                        await StreamBot.send_message(
+                                            chat_id=int(tg_user_id),
+                                            text=(
+                                                f"🔴 Günlük Limitiniz Doldu!\n"
+                                                f"📊 Kullanım : {round(current_daily_gb, 2)} GB / {daily_limit_gb} GB (%{used_pct})\n"
+                                                f"⚠️ Bugünkü günlük limitiniz aşıldı."
+                                            ),
+                                            parse_mode=_pyrogram_enums.ParseMode.HTML,
+                                        )
+                                        LOGGER.info(f"Daily limit 100% finished sent to user {tg_user_id} for token {token[:8]}")
+                                    except Exception as warn_err:
+                                        LOGGER.warning(f"Daily limit finished notification failed for {token[:8]}: {warn_err}")
+                                await db.mark_token_daily_limit_finished(token)
+                        except Exception as warn_err:
+                            LOGGER.warning(f"Daily limit finished check failed for {token[:8]}: {warn_err}")
             
             if monthly_limit_gb and monthly_limit_gb > 0:
                 current_monthly_gb = (initial_monthly_bytes + current_bytes) / (1024 ** 3)
@@ -251,6 +332,31 @@ async def stream_handler(
     dl: int = 0,
     token_data: dict = Depends(verify_token),
 ):
+
+    # --- Günlük limit kontrolü: limit dolmuşsa yeni stream başlatma ---
+    _limits = token_data.get("limits", {}) if token_data else {}
+    _daily_limit_gb = _limits.get("daily_limit_gb")
+    if _daily_limit_gb and _daily_limit_gb > 0:
+        _limit_finished = await db.get_token_daily_limit_finished(token)
+        if _limit_finished:
+            # Bayrağa körü körüne güvenme: gerçek kullanımı da doğrula.
+            # Limit artırıldıysa, sıfırlama çalışmadıysa veya bayrak yanlış
+            # set edildiyse kullanıcı haksız yere bloke olabilir.
+            _tok_doc = await db.get_api_token(token)
+            _real_daily_bytes = (_tok_doc or {}).get("usage", {}).get("daily", {}).get("bytes", 0)
+            _real_daily_gb = _real_daily_bytes / (1024 ** 3)
+            if _real_daily_gb < _daily_limit_gb:
+                # Gerçek kullanım limitin altında → bayrağı temizle ve geç
+                LOGGER.warning(
+                    f"[stream] daily_limit_finished bayrağı yanlış — "                    f"gerçek kullanım {_real_daily_gb:.2f} GB / limit {_daily_limit_gb} GB — bayrak sıfırlandı. token={token[:12]}"
+                )
+                await db.dbs["tracking"]["api_tokens"].update_one(
+                    {"token": token},
+                    {"$set": {"daily_limit_finished": False, "daily_limit_warned": False, "daily_limit_disabled": False}}
+                )
+            else:
+                raise HTTPException(status_code=429, detail="Günlük limit doldu. Yeni yayın başlatılamaz.")
+
     try:
         decoded = await decode_string(id)
     except Exception as _dec_err:
@@ -292,6 +398,22 @@ async def stream_handler(
                 detail="Geçersiz veya süresi dolmuş link. Tekrar izlemek/indirmek için sayfayı yenileyin.",
             )
         return await gdrive_streamer(request, gdrive_file_id, token_data, token, force_download=bool(dl))
+
+    # ── Rclone dosyası ────────────────────────────────────────────────────────
+    rclone_remote = decoded.get("rclone_remote")
+    rclone_path   = decoded.get("rclone_path")
+    if rclone_remote and rclone_path and not msg_id:
+        from Backend.helper.stream_token import media_token_manager
+        if not media_token_manager.verify(gecicitoken, token, id):
+            LOGGER.warning(
+                f"[dl] Rclone geçersiz gecici token — gecicitoken={gecicitoken[:10]}... "
+                f"token={token[:8]}... id={id[:20]}..."
+            )
+            raise HTTPException(
+                status_code=403,
+                detail="Geçersiz veya süresi dolmuş link. Tekrar izlemek/indirmek için sayfayı yenileyin.",
+            )
+        return await rclone_streamer(request, rclone_remote, rclone_path, token_data, token, force_download=bool(dl))
 
     if not msg_id:
         raise HTTPException(status_code=400, detail="Missing id")
@@ -352,7 +474,8 @@ async def gdrive_streamer(request: Request, gdrive_file_id: str, token_data: dic
     except HTTPException:
         raise
     except Exception as _e:
-        raise HTTPException(status_code=503, detail=f"Drive bağlantı hatası: {_e}")
+        _logger.error("GDrive bağlantı hatası", exc_info=True)
+        raise HTTPException(status_code=503, detail="Google Drive bağlantısı kurulamadı")
 
     # ── Dosya metadata ────────────────────────────────────────────────────────
     try:
@@ -361,7 +484,8 @@ async def gdrive_streamer(request: Request, gdrive_file_id: str, token_data: dic
             lambda: _svc.files().get(fileId=gdrive_file_id, fields="id,name,size,mimeType").execute()
         )
     except Exception as _e:
-        raise HTTPException(status_code=404, detail=f"Drive dosyası bulunamadı: {_e}")
+        _logger.error("GDrive dosya hatası", exc_info=True)
+        raise HTTPException(status_code=404, detail="Drive dosyası bulunamadı")
 
     file_name = _meta.get("name", "video.mkv")
     file_size = int(_meta.get("size", 0))
@@ -410,9 +534,15 @@ async def gdrive_streamer(request: Request, gdrive_file_id: str, token_data: dic
         },
     }
 
+    # Aktif cihaz session'ı DB'ye kaydet
+    if token:
+        await db.add_device_session(token, stream_id)
+
     # HEAD isteği — body yok
     if request.method == "HEAD":
         ACTIVE_STREAMS.pop(stream_id, None)
+        if token:
+            await db.remove_device_session(token, stream_id)
         headers = {
             "Content-Type": mime_type,
             "Content-Length": str(req_length),
@@ -483,6 +613,12 @@ async def gdrive_streamer(request: Request, gdrive_file_id: str, token_data: dic
                         if _slp > 0.005:
                             await asyncio.sleep(_slp)
 
+                if ACTIVE_STREAMS.get(stream_id, {}).get("force_stop"):
+                    LOGGER.info("force_stop set for stream %s — stopping generator", stream_id)
+                    _info = ACTIVE_STREAMS.get(stream_id)
+                    if _info:
+                        _info["status"] = "cancelled"
+                    raise asyncio.CancelledError("daily_limit_exceeded")
                 yield data
 
         finally:
@@ -504,6 +640,8 @@ async def gdrive_streamer(request: Request, gdrive_file_id: str, token_data: dic
                         RECENT_STREAMS.appendleft(ACTIVE_STREAMS.pop(stream_id))
                 except Exception:
                     pass
+                if token:
+                    await db.remove_device_session(token, stream_id)
             asyncio.create_task(_pop())
 
     if token and token_data:
@@ -524,6 +662,235 @@ async def gdrive_streamer(request: Request, gdrive_file_id: str, token_data: dic
     from fastapi.responses import StreamingResponse as _SR
     return _SR(
         _gdrive_gen(),
+        status_code=206 if range_header else 200,
+        media_type=mime_type,
+        headers=headers,
+    )
+
+
+async def rclone_streamer(
+    request: Request,
+    rclone_remote: str,
+    rclone_path: str,
+    token_data: dict = None,
+    token: str = None,
+    force_download: bool = False,
+):
+    """
+    Rclone sürücüsündeki dosyayı HTTP Range destekli stream eder.
+    rclone cat ile pipe üzerinden veri aktarır; Stremio ve tarayıcı seek destekler.
+    """
+    import mimetypes as _mt
+    import subprocess as _sp
+    import shutil as _shutil
+    from pathlib import Path as _Path
+
+    _RCLONE_CONF = _Path(__file__).parent.parent.parent.parent / "rclone.conf"
+    if not _RCLONE_CONF.exists():
+        raise HTTPException(status_code=503, detail="rclone.conf bulunamadı. /ayarlar → Dosya Ekle ile yükleyin.")
+
+    # rclone binary bul
+    def _find_rclone() -> str:
+        found = _shutil.which("rclone")
+        if found:
+            return found
+        for c in ["/usr/bin/rclone", "/usr/local/bin/rclone", "/usr/sbin/rclone", "/opt/rclone/rclone"]:
+            if _Path(c).is_file():
+                return c
+        raise HTTPException(status_code=503, detail="rclone binary bulunamadı. Docker image yeniden build edilmeli.")
+    _RCLONE = _find_rclone()
+
+    # ── Dosya boyutunu al ─────────────────────────────────────────────────────
+    try:
+        import json as _json
+        remote_path = f"{rclone_remote}:{rclone_path}"
+        parent_dir  = str(_Path(rclone_path).parent).replace("\\", "/")
+        if parent_dir in (".", ""):
+            parent_dir = ""
+        list_target = f"{rclone_remote}:{parent_dir}"
+        _sz_result = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: _sp.run(
+                [_RCLONE, "lsjson", "--config", str(_RCLONE_CONF), list_target, "--no-modtime"],
+                capture_output=True, text=True, timeout=60
+            )
+        )
+        file_size = 0
+        file_name = _Path(rclone_path).name
+        if _sz_result.returncode == 0:
+            for it in _json.loads(_sz_result.stdout or "[]"):
+                if it.get("Name") == file_name:
+                    file_size = it.get("Size", 0)
+                    break
+        if not file_size:
+            raise HTTPException(status_code=404, detail=f"Rclone dosyası bulunamadı veya boyut bilgisi yok: {remote_path}")
+    except HTTPException:
+        raise
+    except Exception as _e:
+        _logger.error("Rclone boyut hatası", exc_info=True)
+        raise HTTPException(status_code=503, detail="Rclone bağlantı hatası")
+
+    mime_type = _mt.guess_type(file_name)[0] or "video/x-matroska"
+
+    # ── Range header ──────────────────────────────────────────────────────────
+    range_header = request.headers.get("Range", "")
+    start, end = parse_range_header(range_header, file_size)
+    req_length  = end - start + 1
+
+    # ── Hız limiti ────────────────────────────────────────────────────────────
+    _global_rate = 0.0
+    try:
+        if (Telegram.HIZ_LIMITI or "").strip():
+            _global_rate = float(Telegram.HIZ_LIMITI)
+    except ValueError:
+        pass
+    _user_rate = 0.0
+    if token_data:
+        try:
+            _user_rate = float(token_data.get("limits", {}).get("speed_limit_mbps") or 0)
+        except (ValueError, TypeError):
+            pass
+    total_rate = _user_rate if _user_rate > 0 else _global_rate
+
+    stream_id = secrets.token_hex(8)
+    ACTIVE_STREAMS[stream_id] = {
+        "stream_id": stream_id,
+        "status": "active",
+        "total_bytes": 0,
+        "start_ts": time.time(),
+        "last_ts": time.time(),
+        "avg_mbps": 0.0,
+        "instant_mbps": 0.0,
+        "peak_mbps": 0.0,
+        "rate_limit_mbps": total_rate,
+        "meta": {
+            "title": file_name,
+            "client_host": request.client.host if request.client else None,
+            "user_name": token_data.get("name", "Unknown") if token_data else "Unknown",
+            "user_token": token or "",
+        },
+    }
+
+    # Aktif cihaz session'ı DB'ye kaydet
+    if token:
+        await db.add_device_session(token, stream_id)
+
+    # HEAD isteği
+    if request.method == "HEAD":
+        ACTIVE_STREAMS.pop(stream_id, None)
+        if token:
+            await db.remove_device_session(token, stream_id)
+        headers = {
+            "Content-Type": mime_type,
+            "Content-Length": str(req_length),
+            "Content-Disposition": f'inline; filename="{file_name}"',
+            "Accept-Ranges": "bytes",
+            "Cache-Control": "public, max-age=3600",
+            "Access-Control-Allow-Origin": "*",
+        }
+        if range_header:
+            headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
+        from fastapi.responses import Response as _Resp
+        return _Resp(status_code=206 if range_header else 200, headers=headers)
+
+    # ── Streaming generator ───────────────────────────────────────────────────
+    async def _rclone_gen():
+        _sent = 0
+        _t0   = time.time()
+        _throttle_start = time.monotonic()
+        _throttle_sent  = 0
+        _chunk_size = 4 * 1024 * 1024  # 4 MB
+
+        # rclone cat ile belirtilen byte aralığını oku
+        cmd = [
+            _RCLONE, "cat",
+            "--config", str(_RCLONE_CONF),
+            f"{rclone_remote}:{rclone_path}",
+            "--offset", str(start),
+            "--count",  str(req_length),
+        ]
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            remaining = req_length
+            while remaining > 0:
+                chunk_sz = min(_chunk_size, remaining)
+                data = await proc.stdout.read(chunk_sz)
+                if not data:
+                    break
+                _sent     += len(data)
+                remaining -= len(data)
+
+                _info = ACTIVE_STREAMS.get(stream_id)
+                if _info is not None:
+                    _elapsed = (time.time() - _t0) or 0.001
+                    _info["total_bytes"] = _sent
+                    _info["last_ts"]     = time.time()
+                    _info["avg_mbps"]    = round((_sent / _elapsed) / (1024 * 1024), 2)
+
+                    _lim = _info.get("rate_limit_mbps", 0.0)
+                    if _lim > 0:
+                        _rate_bps = _lim * 1024 * 1024 / 8
+                        _throttle_sent += len(data)
+                        _exp = _throttle_sent / _rate_bps
+                        _slp = _exp - (time.monotonic() - _throttle_start)
+                        if _slp > 0.005:
+                            await asyncio.sleep(_slp)
+
+                if ACTIVE_STREAMS.get(stream_id, {}).get("force_stop"):
+                    LOGGER.info("force_stop set for stream %s — stopping generator", stream_id)
+                    _info = ACTIVE_STREAMS.get(stream_id)
+                    if _info:
+                        _info["status"] = "cancelled"
+                    raise asyncio.CancelledError("daily_limit_exceeded")
+                yield data
+
+            await proc.wait()
+
+        finally:
+            _end_ts = time.time()
+            _dur    = _end_ts - _t0
+            _avg    = round((_sent / (1024 * 1024)) / max(_dur, 1e-6), 3)
+            _info   = ACTIVE_STREAMS.get(stream_id)
+            if _info:
+                _info["status"]      = "finished"
+                _info["end_ts"]      = _end_ts
+                _info["total_bytes"] = _sent
+                _info["duration"]    = _dur
+                _info["avg_mbps"]    = _avg
+
+            async def _pop():
+                await asyncio.sleep(3)
+                try:
+                    if stream_id in ACTIVE_STREAMS:
+                        RECENT_STREAMS.appendleft(ACTIVE_STREAMS.pop(stream_id))
+                except Exception:
+                    pass
+                if token:
+                    await db.remove_device_session(token, stream_id)
+            asyncio.create_task(_pop())
+
+    if token and token_data:
+        asyncio.create_task(track_usage_from_stats(stream_id, token, token_data))
+
+    headers = {
+        "Content-Type": mime_type,
+        "Content-Length": str(req_length),
+        "Content-Disposition": f'{"attachment" if force_download else "inline"}; filename="{file_name}"',
+        "Accept-Ranges": "bytes",
+        "Cache-Control": "no-cache",
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Expose-Headers": "Content-Length, Content-Range, Accept-Ranges",
+    }
+    if range_header:
+        headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
+
+    from fastapi.responses import StreamingResponse as _SR
+    return _SR(
+        _rclone_gen(),
         status_code=206 if range_header else 200,
         media_type=mime_type,
         headers=headers,
@@ -624,6 +991,10 @@ async def local_file_streamer(request: Request, local_path: str, token_data: dic
         },
     }
 
+    # Aktif cihaz session'ı DB'ye kaydet
+    if token:
+        await db.add_device_session(token, stream_id)
+
     # Mevcut diğer kullanıcı stream'lerini dengele
     if _local_total_rate > 0 and token:
         _rebalance_user_streams(token, _local_total_rate)
@@ -666,6 +1037,12 @@ async def local_file_streamer(request: Request, local_path: str, token_data: dic
                                 await asyncio.sleep(_sleep)
                         # ────────────────────────────────────────────────────────
 
+                    if ACTIVE_STREAMS.get(stream_id, {}).get("force_stop"):
+                        LOGGER.info("force_stop set for stream %s — stopping generator", stream_id)
+                        _info = ACTIVE_STREAMS.get(stream_id)
+                        if _info:
+                            _info["status"] = "cancelled"
+                        raise asyncio.CancelledError("daily_limit_exceeded")
                     yield data
 
             _finished_normally = True
@@ -724,6 +1101,8 @@ async def local_file_streamer(request: Request, local_path: str, token_data: dic
                         RECENT_STREAMS.appendleft(ACTIVE_STREAMS.pop(stream_id))
                 except Exception:
                     pass
+                if token:
+                    await db.remove_device_session(token, stream_id)
                 # Stream kapandı — kalan kullanıcı stream'lerini dengele
                 if _local_total_rate > 0 and token:
                     _rebalance_user_streams(token, _local_total_rate)
@@ -750,6 +1129,8 @@ async def local_file_streamer(request: Request, local_path: str, token_data: dic
     if request.method == "HEAD":
         # HEAD isteğinde stream açılmaz, ACTIVE_STREAMS kaydını temizle
         ACTIVE_STREAMS.pop(stream_id, None)
+        if token:
+            await db.remove_device_session(token, stream_id)
         return Response(headers=head_headers, media_type=mime_type)
 
     # GET: Content-Length dahil — tarayıcı/oynatıcı toplam boyutu görebilsin
@@ -814,6 +1195,8 @@ async def media_streamer(
     offset = start - (start % chunk_size)
     first_part_cut = start - offset
     last_part_cut = (end % chunk_size) + 1
+    if last_part_cut == 1 and end >= chunk_size:
+        last_part_cut = chunk_size
     part_count = math.ceil(end / chunk_size) - math.floor(offset / chunk_size)
 
     from urllib.parse import unquote

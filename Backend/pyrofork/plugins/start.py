@@ -105,9 +105,9 @@ async def send_start_message(client: Client, message: Message):
             keyboard = InlineKeyboardMarkup(keyboard_buttons)
 
             return await message.reply_text(
-                f'<b>{Telegram.ISIM} Abonelik Botuna Hoş Geldiniz</b>\n\n'
-                'Stremio eklentisine erişmek için aktif bir abonelik gereklidir.\n'
-                'Devam etmek için lütfen aşağıdan bir abonelik planı seçin:',
+                f'<b>{Telegram.ISIM}  ile sinema keyfine hazır mısın? 🍿</b>\n\n'
+                'Stremio üzerinden sunduğumuz özel içeriklere erişebilmen için aktif bir aboneliğin olması gerekiyor. Merak etme, senin için en avantajlı planları aşağıda listeledik.\n\n'
+                '🚀 Hemen başlamak için bir plan seç:',
                 reply_markup=keyboard,
                 quote=True,
                 parse_mode=enums.ParseMode.HTML

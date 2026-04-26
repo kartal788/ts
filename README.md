@@ -64,9 +64,6 @@ Bu proje, **Telegram'daki dosyaları doğrudan Stremio üzerinden yayınlamanı*
 - 🔐 **Erişim Yönetimi** — Abonelikleri görüntüle, uzat, kısalt, iptal et ve yeniden ata
 - 📁 **Google Drive Entegrasyonu** — GDrive'dan içerik tarama ve onay sistemi
 - 📢 **Toplu Duyuru** — Tüm aktif abonelere tek komutla mesaj gönderme
-
-## 🆕 Yeni Özellikler
-
 - ⚡ **Hız Testi** — Her dosya için tüm botlara hız testi yapılarak en iyi bağlantı seçilir.
 - 🔄 **Geliştirilmiş Yük Dengeleyici** — Çoklu token trafiğini daha verimli dağıtan yeni algoritma.
 - 🚫 **Başarısız Bot Yönetimi** — Hatalı botlar otomatik olarak beklemede/gölge moda alınır.
@@ -79,6 +76,15 @@ Bu proje, **Telegram'daki dosyaları doğrudan Stremio üzerinden yayınlamanı*
 - 🔒 **Stream Token İmzalama** — HMAC ile imzalanmış güvenli stream token sistemi.
 - 🌐 **Proxy Desteği** — Güvenilir proxy CIDR'ları ile X-Forwarded-For başlığı doğrulama.
 
+## 🆕 Yeni Özellikler
+- ☁️ **Rclone Entegrasyonu** — Rclone desteği ile bulut depolama alanlarına (Google Drive, S3, Dropbox vb.) dosya aktarımı ve senkronizasyonu sağlanır.
+- 📡 **Sunucu Üzerinden Canlı Yayın** — Canlı yayınlar artık doğrudan sunucu üzerinden iletilerek daha stabil ve kesintisiz bir izleme deneyimi sunar.
+- 🗓️ **Canlı Yayın Planlama** — Canlı yayınlar önceden belirli bir tarih ve saate planlanabilir; yayın otomatik olarak zamanında başlatılır.
+- 📢 **Duyuru Canlı Yayını** — Yönetici panelindeki **Duyuru Yayını** modalı üzerinden doğrudan HLS canlı yayın oluşturulur ve Stremio kataloğuna eklenir. Yayına resim (slayt gösterisi) veya video (döngü oynatma) eklenebilir; arka plan müziği de eklenebilir. Dosya, URL veya sunucuda yüklü medyadan içerik seçilebilir. Kanal posteri, logosu ve sırası ayarlanabilir. Yayın başlatıldığında canlı önizleme panelde gösterilir, durdurulduğunda tüm geçici dosyalar otomatik silinir ve katalogdan kaldırılır.
+- 🖼️ **Duyuru Medya Desteği** — Duyuru mesajlarına resim, video ve müzik eklenebilir; zengin içerikli bildirimler abone cihazlarına iletilir.
+- 🎞️ **Media Edit'ten Altyazı Ekleme** — `media_edit.html` sayfası üzerinden film ve dizilere doğrudan altyazı dosyası yüklenip yönetilebilir.
+- 🔔 **Dizi ve Film Bildirimleri** — Yeni bölüm veya film eklendiğinde ilgili abonelere otomatik Telegram bildirimi gönderilir.
+- 📡 **Otomatik Dizi Durum Takibi** — Her dizinin yayın durumu (devam ediyor, sona erdi, iptal edildi vb.) her gün UTC+3 05:00'da TMDB'den çekilerek otomatik güncellenir.
 ---
 
 # ⚙️ Nasıl Çalışır?
@@ -190,6 +196,9 @@ Telegram ➜ MongoDB ➜ FastAPI ➜ Stremio ➜ Kullanıcı
 | `/sunucudansil` | Sunucudan yüklenen içeriği siler |
 | `/durdur` | Devam eden bir işlemi durdurur |
 | `/iptal` | Kuyruktaki bir görevi iptal eder |
+| `/depolama` | TS yazılımı, sistem ve Docker disk/RAM kullanımını detaylı olarak gösterir (RAM durumu, genel disk, TS'nin yazdığı konumlar, Docker depolama, silinmiş-ama-açık dosyalar ve 100MB+ büyük dosyalar) |
+| `/temizle` | Sistem temizliği yapar: MongoDB eski stream kayıtları, uygulama RAM cache'leri, /tmp dizini, pip/uv cache, log dosyası, Docker dangling objeleri ve journald logları temizlenir |
+| `/ramraporu` | Sistem ve process bazlı RAM kullanımını gösterir; en çok RAM kullanan 15 process ve botun kendi RSS/VMS değerleri raporlanır |
 
 ### `/set` Komutu Kullanımı
 

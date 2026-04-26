@@ -414,7 +414,7 @@
                     </thead>
                     <tbody>
                         {% for token in api_tokens %}
-                        <tr class="border-b border-gray-100 hover:bg-gray-50 transition-colors">
+                        <tr class="border-b border-gray-100 hover:bg-gray-50 transition-colors" data-token="{{ token.token }}">
                             <td class="py-4 px-4 font-medium">
                                 {{ token.name }}<br>
                                 <span class="text-xs theme-text-secondary">{{ token.created_at.strftime('%Y-%m-%d')
@@ -437,7 +437,7 @@
                             <td class="py-4 px-4 text-sm">
                                 <div class="text-gray-600">
                                     <div class="flex items-center gap-1">
-                                        <span class="w-4 text-gray-400">B:</span>
+                                        <span class="w-4 text-gray-400">G:</span>
                                         {% if token.limits.daily_limit_gb is not none and token.limits.daily_limit_gb > 0 %}
                                         <span
                                             data-bytes="{{ (token.limits.daily_limit_gb * 1024 * 1024 * 1024)|int }}"></span>
@@ -452,6 +452,29 @@
                                             data-bytes="{{ (token.limits.monthly_limit_gb * 1024 * 1024 * 1024)|int }}"></span>
                                         {% else %}
                                         <span>∞</span>
+                                        {% endif %}
+                                    </div>
+                                    <div class="flex items-center gap-1 mt-1">
+                                        <span class="w-4 text-gray-400">
+                                            <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                                            </svg>
+                                        </span>
+                                        {% set personal_spd = (token.limits.speed_limit_mbps | float) if (token.limits.speed_limit_mbps is defined and token.limits.speed_limit_mbps) else 0 %}
+                                        {% if personal_spd > 0 %}
+                                            {% if personal_spd >= 1000 %}
+                                                <span class="text-purple-600 font-semibold">{{ "%.1f"|format(personal_spd / 1000) }} Gbps</span>
+                                            {% else %}
+                                                <span class="text-purple-600 font-semibold">{{ personal_spd }} Mbps</span>
+                                            {% endif %}
+                                        {% elif global_speed_limit_mbps is defined and global_speed_limit_mbps > 0 %}
+                                            {% if global_speed_limit_mbps >= 1000 %}
+                                                <span class="text-green-500 font-semibold">{{ "%.1f"|format(global_speed_limit_mbps / 1000) }} Gbps</span>
+                                            {% else %}
+                                                <span class="text-green-500 font-semibold">{{ global_speed_limit_mbps }} Mbps</span>
+                                            {% endif %}
+                                        {% else %}
+                                        <span class="text-gray-400">∞</span>
                                         {% endif %}
                                     </div>
                                 </div>
@@ -552,7 +575,7 @@
                                 class="w-full theme-card border border-gray-300 rounded-lg px-4 py-2 pr-12 focus:outline-none focus:border-primary">
                             <span class="absolute right-3 top-2 text-gray-400 text-sm pointer-events-none">Gün</span>
                         </div>
-                        <p class="text-xs theme-text-secondary mt-1">0 = süresiz. Girilen gün kadar geçerlilik süresi belirlenir (bugünden itibaren hesaplanır).</p>
+                        <p class="text-xs theme-text-secondary mt-1">0 = süresiz. Girilen gün mevcut bitiş tarihine eklenir; süre yoksa bugünden başlar.</p>
                     </div>
                     <div>
                         <label class="block text-sm font-medium theme-text-secondary mb-1">📱 Telegram Kullanıcı ID</label>
@@ -735,29 +758,26 @@
 
                 // Update API Token Usage Data
                 if (stats.api_tokens && Array.isArray(stats.api_tokens)) {
-                    stats.api_tokens.forEach((token, index) => {
-                        // Find all elements with data-bytes attributes for this token
-                        const tokenRows = document.querySelectorAll('tbody tr');
+                    stats.api_tokens.forEach((token) => {
+                        const tokenStr = token.token;
+                        if (!tokenStr) return;
+                        const row = document.querySelector(`tr[data-token="${tokenStr}"]`);
+                        if (!row) return;
 
-                        // Get the token's row (skip the "No tokens found" row)
-                        if (tokenRows.length > index && !tokenRows[index].querySelector('[colspan]')) {
-                            const row = tokenRows[index];
+                        // Update daily usage
+                        const dailyUsageSpan = row.querySelector('td:nth-child(2) span.font-semibold');
+                        if (dailyUsageSpan && token.usage && token.usage.daily) {
+                            const dailyBytes = token.usage.daily.bytes || 0;
+                            dailyUsageSpan.setAttribute('data-bytes', dailyBytes);
+                            dailyUsageSpan.textContent = formatBytes(dailyBytes);
+                        }
 
-                            // Update daily usage
-                            const dailyUsageSpan = row.querySelector('td:nth-child(2) span.font-semibold');
-                            if (dailyUsageSpan && token.usage && token.usage.daily) {
-                                const dailyBytes = token.usage.daily.bytes || 0;
-                                dailyUsageSpan.setAttribute('data-bytes', dailyBytes);
-                                dailyUsageSpan.textContent = formatBytes(dailyBytes);
-                            }
-
-                            // Update monthly usage
-                            const monthlyUsageSpan = row.querySelector('td:nth-child(2) span.text-gray-500 span');
-                            if (monthlyUsageSpan && token.usage && token.usage.monthly) {
-                                const monthlyBytes = token.usage.monthly.bytes || 0;
-                                monthlyUsageSpan.setAttribute('data-bytes', monthlyBytes);
-                                monthlyUsageSpan.textContent = formatBytes(monthlyBytes);
-                            }
+                        // Update monthly usage
+                        const monthlyUsageSpan = row.querySelector('td:nth-child(2) span.text-gray-500 span');
+                        if (monthlyUsageSpan && token.usage && token.usage.monthly) {
+                            const monthlyBytes = token.usage.monthly.bytes || 0;
+                            monthlyUsageSpan.setAttribute('data-bytes', monthlyBytes);
+                            monthlyUsageSpan.textContent = formatBytes(monthlyBytes);
                         }
                     });
                 }
@@ -813,23 +833,10 @@
             return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
         };
 
-        // IP'den ülke bayrağı tahmini (RFC 1918 özel IP kontrolü)
-        const getIpFlag = (ip) => {
-            if (!ip) return '';
-            // Özel / loopback IP'ler
-            if (/^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|127\.|::1$|fc|fd)/.test(ip)) {
-                return '🏠';
-            }
-            return '🌐';
-        };
-
         container.innerHTML = pageItems.map(stream => {
             const statusBadgeClass = stream.status === 'active' ? 'bg-green-100 text-green-700' : stream.status === 'cancelled' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700';
             const userName = (stream.meta && stream.meta.user_name) ? stream.meta.user_name : 'Bilinmeyen Kullanıcı';
             const titleStr = (stream.meta && stream.meta.title) ? stream.meta.title : (stream.title || 'Bilinmeyen İçerik');
-            const clientHost = (stream.meta && stream.meta.client_host) ? stream.meta.client_host : null;
-            const ipFlag = clientHost ? getIpFlag(clientHost) : '';
-
             return `
             <div class="stream-card bg-gray-50 rounded-lg p-4 border border-gray-100">
                 <div class="flex justify-between items-start mb-3">
@@ -839,7 +846,6 @@
                             <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase ${statusBadgeClass}">${stream.status}</span>
                         </div>
                         <p class="text-xs theme-text-secondary truncate mt-0.5" title="${escapeHtml(titleStr)}">${escapeHtml(titleStr)}</p>
-
                     </div>
                     <div class="text-right shrink-0 ml-4">
                         <span class="text-[10px] font-mono bg-white px-2 py-1 rounded border border-gray-200 theme-text-secondary">
@@ -1003,7 +1009,7 @@
     async function revokeToken(token, userId) {
         const uid = userId && userId !== 'None' && userId !== '' ? userId : null;
         const msg = uid
-            ? 'Bu eklenti silinsin mi? Kullanıcının aboneliği de iptal edilecek.'
+            ? 'Bu eklenti silinsin mi? Kullanıcının aboneliği ve tüm hatırlatmaları da silinecek.'
             : 'Bu token iptal edilsin mi? Kullanıcı erişimini hemen kaybedecek.';
         if (!confirm(msg)) return;
 
@@ -1017,7 +1023,7 @@
             });
 
             if (response.ok) {
-                const msg2 = uid ? 'Eklenti ve abonelik başarıyla silindi!' : 'Token başarıyla iptal edildi!';
+                const msg2 = uid ? 'Eklenti, abonelik ve hatırlatmalar başarıyla silindi!' : 'Token başarıyla iptal edildi!';
                 showToast(msg2);
                 setTimeout(() => window.location.reload(), 1000);
             } else {

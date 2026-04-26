@@ -1136,6 +1136,10 @@ async def cmd_sunucuyayukle(client: Client, message: Message):
             f"• <code>/s v</code> ➜ 1 video dosyası bekler, doğrudan sunucuya yükler.\n"
             f"• <code>/s v2</code> ➜ 2 video dosyası bekler (ikincisi episode/part).\n"
             f"• <code>/s v [TMDB/IMDb Link]</code> ➜ Video + metadata linki ile sorgular.\n\n"
+            f"<b>📁 Ham Dosya Modu (metadata yok):</b>\n"
+            f"• <code>/s s1</code> ➜ 1 dosyayı metadata olmadan doğrudan sunucuya yükler.\n"
+            f"• <code>/s s2</code> ➜ 2 dosyayı metadata olmadan doğrudan sunucuya yükler.\n"
+            f"  ↳ Resim, müzik, zip veya herhangi bir dosya türü desteklenir.\n\n"
             f"<b>🌐 URL Modu:</b>\n"
             f"• <code>/s [URL]</code> ➜ Linkten direkt indirir.\n"
             f"• <code>/s [URL] [İsim]</code> ➜ Özel isimle indirir.\n"
@@ -1244,6 +1248,32 @@ async def cmd_sunucuyayukle(client: Client, message: Message):
 
         await _QUEUE.put({"client": client, "uid": uid,
                           "session": session, "orig_message": message})
+        return
+
+    # ── Ham Dosya Modu: /s s1, /s s2, … (metadata yok, direkt sunucuya yükle) ─
+    raw_lower = raw_arg.lower()
+
+    _raw_mode_match = re.fullmatch(r's(\d+)', raw_lower)
+    if _raw_mode_match:
+        raw_count = int(_raw_mode_match.group(1))
+        if raw_count < 1:
+            raw_count = 1
+
+        session = {
+            "count": raw_count, "mode": "raw", "collected": [],
+            "session_dir": session_dir, "session_id": session_id,
+            "chat_id": chat_id, "cancelled": False,
+        }
+        _SESSIONS[uid] = session
+        _SESSION_LOCKS[session_id] = asyncio.Lock()
+
+        await message.reply_text(
+            f"📁 <b>Ham Dosya Modu Aktif — {raw_count} dosya bekleniyor</b>\n"
+            "Metadata işlemi uygulanmayacak; dosya doğrudan sunucuya yüklenecek.\n"
+            "Resim, müzik, zip veya herhangi bir dosya türü gönderin.\n"
+            "<i>İptal: /iptal</i>",
+            parse_mode=ParseMode.HTML,
+        )
         return
 
     # ── Video modu: /s v, /s v2, /s v [link] ─────────────────────────────────
@@ -1476,22 +1506,23 @@ async def cmd_cancel_session(client: Client, message: Message):
 # ─── Dosya toplayıcı ──────────────────────────────────────────────────────────
 
 @Client.on_message(
-    (filters.private | filters.channel) & (filters.document | filters.video) & CustomFilters.owner,
+    (filters.private | filters.channel) & (filters.document | filters.video | filters.photo | filters.audio) & CustomFilters.owner,
     group=5,
 )
 async def zip_file_collector(client: Client, message: Message):
     """
-    Gelen arşiv veya video dosyalarını sırayla aynı session'a toplar.
-    "multi" modunda arşiv dosyaları, "video" modunda video dosyaları beklenir.
-    Tüm parçalar toplandıktan sonra kuyruğa işleme görevi eklenir.
+    Gelen arsiv, video veya resim dosyalarini sirayla ayni session'a toplar.
+    "multi" modunda arsiv dosyalari, "video" modunda video dosyalari beklenir.
+    "raw" modunda her turlu dosya (resim dahil) kabul edilir.
+    Tum parcalar toplandiktan sonra kuyruga isleme gorevi eklenir.
     """
     chat_id = message.chat.id
 
-    # Bu chat için aktif bir "multi" veya "video" session'ı ara
+    # Bu chat icin aktif bir "multi", "video" veya "raw" session'i ara
     session = None
     uid     = None
     for _uid, sess in _SESSIONS.items():
-        if sess["chat_id"] == chat_id and sess.get("mode") in ("multi", "video"):
+        if sess["chat_id"] == chat_id and sess.get("mode") in ("multi", "video", "raw"):
             session = sess
             uid     = _uid
             break
@@ -1500,25 +1531,55 @@ async def zip_file_collector(client: Client, message: Message):
         return
 
     doc = message.document
-    # Telegram bazen video dosyalarını `video` tipinde gönderir (document değil).
-    # Bu durumda message.video üzerinden dosya bilgisini al.
+    # Telegram bazen video dosyalarini `video` tipinde gonderir (document degil).
+    # Bu durumda message.video uzerinden dosya bilgisini al.
     _tg_video = None
     if doc is None and message.video:
         _tg_video = message.video
-        # video nesnesini document gibi kullanabilmek için bir sarmalayıcı oluştur
+        # video nesnesini document gibi kullanabilmek icin bir sarmalayici olustur
         class _VideoAsDoc:
             file_id        = _tg_video.file_id
             file_unique_id = _tg_video.file_unique_id
             file_size      = _tg_video.file_size
             file_name      = getattr(_tg_video, "file_name", None) or f"video_{_tg_video.file_unique_id}.mp4"
         doc = _VideoAsDoc()
+
+    # Telegram fotograflari `photo` tipinde gelir (document degil).
+    # raw modunda fotograflari da kabul et.
+    if doc is None and message.photo:
+        _tg_photo = message.photo
+        # En yuksek cozunurluklu boyutu al (Pyrogram'da list, son eleman en buyuk)
+        _photo_obj = _tg_photo if not isinstance(_tg_photo, list) else _tg_photo[-1]
+        class _PhotoAsDoc:
+            file_id        = _photo_obj.file_id
+            file_unique_id = _photo_obj.file_unique_id
+            file_size      = getattr(_photo_obj, "file_size", 0) or 0
+            file_name      = f"photo_{_photo_obj.file_unique_id}.jpg"
+        doc = _PhotoAsDoc()
+
+    # Telegram müzik dosyalarını `audio` tipinde gönderir (document değil).
+    # raw modunda audio dosyalarını da kabul et.
+    if doc is None and message.audio:
+        _tg_audio = message.audio
+        class _AudioAsDoc:
+            file_id        = _tg_audio.file_id
+            file_unique_id = _tg_audio.file_unique_id
+            file_size      = getattr(_tg_audio, "file_size", 0) or 0
+            file_name      = (
+                getattr(_tg_audio, "file_name", None)
+                or f"{getattr(_tg_audio, 'title', None) or 'audio'}_{_tg_audio.file_unique_id}.mp3"
+            )
+        doc = _AudioAsDoc()
+
     _video_exts = {".mkv", ".mp4", ".avi", ".mov", ".wmv", ".ts", ".m4v", ".webm", ".flv", ".mpg", ".mpeg"}
     _is_video_doc = bool(doc and (doc.file_name or "").lower().endswith(tuple(_video_exts)))
 
     mode = session.get("mode", "multi")
 
-    # Mod kontrolü: video modunda video bekliyoruz; multi modunda arşiv veya video
-    if mode == "video":
+    # Mod kontrolü
+    if mode == "raw":
+        pass  # Ham dosya modunda her türlü dosya kabul edilir
+    elif mode == "video":
         if not _is_video_doc:
             return  # Video modunda arşiv kabul etme
     else:
@@ -1540,7 +1601,7 @@ async def zip_file_collector(client: Client, message: Message):
             return  # Fazla dosya, yoksay
 
         session_dir: Path = session["session_dir"]
-        tg_fname = doc.file_name or f"file_{doc.file_unique_id}.{'mkv' if _is_video_doc else 'zip'}"
+        tg_fname = doc.file_name or f"file_{doc.file_unique_id}.{'mkv' if _is_video_doc else ('bin' if mode == 'raw' else 'zip')}"
         dest     = session_dir / tg_fname
 
         # İlk dosya geldiğinde parçalı arşiv tespiti yap (sadece multi modunda)
@@ -1551,7 +1612,7 @@ async def zip_file_collector(client: Client, message: Message):
 
         LOGGER.info(f"[yukle:{session_id}] Dosya alındı ({idx}/{count}): {tg_fname} [mod={mode}]")
 
-        mode_label = "#VideoMod" if mode == "video" else "#TgDosya"
+        mode_label = "#VideoMod" if mode == "video" else ("#HamDosya" if mode == "raw" else "#TgDosya")
 
         # Bu dosyanın indirme görevini TASKS'a ekle / güncelle
         await _task_set(
@@ -1633,18 +1694,27 @@ async def zip_file_collector(client: Client, message: Message):
             )
             await _push_status(chat_id, client, force=True)
         else:
-            # Tüm dosyalar toplandı — kuyruğa işleme görevi ekle
-            _ensure_queue()
-            _start_worker()
-            q_pos = _QUEUE.qsize() + 1
-            await _task_set(session_id, status="Kuyrukta", queue_pos=q_pos,
-                            fname=session["collected"][0].name if session["collected"] else tg_fname)
-            await _push_status(chat_id, client, force=True)
-            await _QUEUE.put({
-                "client": client, "uid": uid,
-                "session": session, "orig_message": message,
-            })
-            _SESSION_LOCKS.pop(session_id, None)
+            # Tüm dosyalar toplandı
+            if mode == "raw":
+                # Ham dosya modu — kuyruğa atmadan doğrudan işle
+                _SESSIONS.pop(uid, None)
+                _SESSION_LOCKS.pop(session_id, None)
+                asyncio.create_task(
+                    _process_session_upload_raw(client, uid, session, message)
+                )
+            else:
+                # Normal mod — kuyruğa işleme görevi ekle
+                _ensure_queue()
+                _start_worker()
+                q_pos = _QUEUE.qsize() + 1
+                await _task_set(session_id, status="Kuyrukta", queue_pos=q_pos,
+                                fname=session["collected"][0].name if session["collected"] else tg_fname)
+                await _push_status(chat_id, client, force=True)
+                await _QUEUE.put({
+                    "client": client, "uid": uid,
+                    "session": session, "orig_message": message,
+                })
+                _SESSION_LOCKS.pop(session_id, None)
 
 # ─── Oturum işleme ────────────────────────────────────────────────────────────
 
@@ -1935,6 +2005,114 @@ async def _process_session_upload(client: Client, uid: int, session: dict,
         await _push_status(chat_id, client, force=True)
         _SESSIONS.pop(uid, None)
 
+
+
+
+# ─── Ham Dosya Modu Yükleme ──────────────────────────────────────────────────
+
+async def _process_session_upload_raw(client: Client, uid: int, session: dict,
+                                       orig_message: Message):
+    """
+    Ham dosya modu (/s s1, /s s2, …) için yükleme aşaması.
+    Metadata işlemi uygulanmaz; dosyalar olduğu gibi WORK_DIR'e taşınır
+    ve DB'ye yerel path + ham dosya adı ile kaydedilir.
+    """
+    session_id  = session["session_id"]
+    session_dir: Path = session["session_dir"]
+    chat_id     = session["chat_id"]
+    collected: list[Path] = session.get("collected", [])
+
+    if not collected or session.get("cancelled"):
+        _SESSIONS.pop(uid, None)
+        return
+
+    try:
+        results = []
+        for src_path in collected:
+            if session.get("cancelled"):
+                break
+
+            fname = src_path.name
+            dest  = WORK_DIR / fname
+
+            # Aynı isimde dosya varsa sonuna _1, _2, … ekle
+            counter = 1
+            stem    = src_path.stem
+            suffix  = src_path.suffix
+            while dest.exists():
+                dest = WORK_DIR / f"{stem}_{counter}{suffix}"
+                counter += 1
+
+            LOGGER.info(f"[yukle_raw:{session_id}] Dosya taşınıyor: {src_path} → {dest}")
+            shutil.move(str(src_path), str(dest))
+
+            size_str = get_readable_file_size(dest.stat().st_size)
+
+            LOGGER.info(f"[yukle_raw:{session_id}] Yükleme OK: {dest} ({size_str})")
+            results.append(
+                f"✅ <b>{fname}</b>\n"
+                f"   📂 Yol: <code>{dest}</code>\n"
+                f"   💾 Boyut: {size_str}"
+            )
+
+        # Oturum dizinini temizle (artık dosyalar WORK_DIR'e taşındı)
+        shutil.rmtree(session_dir, ignore_errors=True)
+
+        # Disk bilgisi
+        try:
+            disk = shutil.disk_usage(WORK_DIR)
+            used_gb  = disk.used  / 1_073_741_824
+            total_gb = disk.total / 1_073_741_824
+            free_gb  = disk.free  / 1_073_741_824
+            disk_str = f"{used_gb:.1f} GB / {total_gb:.1f} GB (Boş: {free_gb:.1f} GB)"
+        except Exception:
+            disk_str = "bilinmiyor"
+
+        summary = "\n".join(results) if results else "⚠️ Hiç dosya işlenemedi."
+        done_text = (
+            f"📁 <b>Ham Dosya Yükleme Tamamlandı</b>\n\n"
+            f"{summary}\n\n"
+            f"🖥 <b>Disk:</b> {disk_str}"
+        )
+        # İlerleme mesajını sil
+        await _task_remove(session_id)
+        status_msg = _STATUS_MSGS.pop(chat_id, None)
+        _PAGE_STATE.pop(chat_id, None)
+        if status_msg:
+            try:
+                await status_msg.delete()
+            except Exception:
+                pass
+
+        try:
+            await client.send_message(chat_id, done_text, parse_mode=ParseMode.HTML)
+        except Exception as e:
+            LOGGER.warning(f"[yukle_raw:{session_id}] Tamamlandı mesajı gönderilemedi: {e}")
+
+    except asyncio.CancelledError:
+        LOGGER.info(f"[yukle_raw:{session_id}] Ham yükleme iptal edildi.")
+        _SESSIONS.pop(uid, None)
+        raise
+    except Exception as e:
+        LOGGER.error(f"[yukle_raw:{session_id}] İç hata: {e}\n{traceback.format_exc()}")
+        await _task_remove(session_id)
+        status_msg = _STATUS_MSGS.pop(chat_id, None)
+        _PAGE_STATE.pop(chat_id, None)
+        if status_msg:
+            try:
+                await status_msg.delete()
+            except Exception:
+                pass
+        try:
+            await client.send_message(
+                chat_id,
+                f"❌ <b>Ham yükleme hatası:</b> <code>{str(e)[:100]}</code>",
+                parse_mode=ParseMode.HTML,
+            )
+        except Exception:
+            pass
+    finally:
+        _SESSIONS.pop(uid, None)
 
 
 # ─── Başlangıç temizliği ──────────────────────────────────────────────────────
@@ -2294,16 +2472,34 @@ async def cb_sunucudansil(client: Client, query: CallbackQuery):
         result_msg = await _delete_file_and_db(target)
         await query.answer(result_msg, show_alert=True)
         back        = parent if parent.exists() and str(parent).startswith(str(WORK_DIR)) else WORK_DIR
+        _clear_registry()
         all_items, kb = _sil_keyboard(back, page=page)
         total_pages = max(1, (len(all_items) + _SIL_PAGE_SIZE - 1) // _SIL_PAGE_SIZE)
         _page = min(page, total_pages - 1)
-        try:
-            await query.message.edit_text(
-                _sil_text(back, page=_page, total_pages=total_pages),
-                parse_mode=ParseMode.HTML, reply_markup=kb
-            )
-        except Exception:
-            pass
+        # Sayfa taşması: son sayfadan sonra önceki sayfaya git
+        if _page != page:
+            _clear_registry()
+            all_items, kb = _sil_keyboard(back, page=_page)
+            total_pages = max(1, (len(all_items) + _SIL_PAGE_SIZE - 1) // _SIL_PAGE_SIZE)
+        if not all_items:
+            try:
+                await query.message.edit_text(
+                    f"📂 <b>{WORK_DIR} boş</b>\n{_disk_usage_str(WORK_DIR)}",
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("❌ Kapat", callback_data="sds:close:0:0")
+                    ]])
+                )
+            except Exception:
+                pass
+        else:
+            try:
+                await query.message.edit_text(
+                    _sil_text(back, page=_page, total_pages=total_pages),
+                    parse_mode=ParseMode.HTML, reply_markup=kb
+                )
+            except Exception:
+                pass
 
     elif action == "deldir":
         if not target.exists() or not target.is_dir():
@@ -2315,6 +2511,7 @@ async def cb_sunucudansil(client: Client, query: CallbackQuery):
         if db_removed:
             msg += f"\n🗄 DB'den {db_removed} kayıt kaldırıldı"
         await query.answer(msg, show_alert=True)
+        _clear_registry()
         all_items, kb = _sil_keyboard(WORK_DIR, page=0)
         total_pages   = max(1, (len(all_items) + _SIL_PAGE_SIZE - 1) // _SIL_PAGE_SIZE)
         try:

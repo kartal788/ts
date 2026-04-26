@@ -159,6 +159,63 @@
     </div>
   </div>
 
+  <!-- Hatırlatmalar -->
+  <div class="mb-8">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-lg font-bold flex items-center gap-2">
+        <i class="fas fa-bell text-indigo-400"></i>
+        Hatırlatmalar
+        <span id="rem-total-badge"
+              class="text-xs font-semibold px-2 py-0.5 rounded-full hidden"
+              style="background:color-mix(in srgb,var(--c-prim) 15%,transparent);color:var(--c-prim);border:1px solid color-mix(in srgb,var(--c-prim) 30%,transparent)">
+          0
+        </span>
+      </h2>
+      <!-- Sekme butonları -->
+      <div class="flex items-center gap-2">
+        <button id="rem-tab-tv" onclick="switchRemTab('tv')"
+          class="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-semibold transition border"
+          style="background:color-mix(in srgb,var(--c-prim) 15%,transparent);color:var(--c-prim);border-color:color-mix(in srgb,var(--c-prim) 30%,transparent)">
+          <i class="fas fa-tv"></i> Diziler
+          <span id="rem-badge-tv" class="text-xs font-bold px-1.5 py-0.5 rounded-full"
+                style="background:var(--c-prim);color:#fff;font-size:.6rem">0</span>
+        </button>
+        <button id="rem-tab-movie" onclick="switchRemTab('movie')"
+          class="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-semibold transition border theme-text-secondary"
+          style="border-color:var(--c-border)">
+          <i class="fas fa-film"></i> Filmler
+          <span id="rem-badge-movie" class="text-xs font-bold px-1.5 py-0.5 rounded-full"
+                style="background:color-mix(in srgb,var(--c-prim) 25%,transparent);color:var(--c-prim);font-size:.6rem">0</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Dizi Hatırlatmaları -->
+    <div id="rem-panel-tv">
+      <div id="rem-loading" class="theme-card rounded-2xl border p-8 text-center theme-text-secondary">
+        <i class="fas fa-spinner fa-spin text-primary mr-2"></i> Hatırlatmalar yükleniyor…
+      </div>
+      <div id="rem-grid-tv"
+           class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 hidden">
+      </div>
+      <div id="rem-empty-tv" class="hidden theme-card rounded-2xl border p-8 text-center">
+        <i class="fas fa-bell-slash text-3xl theme-text-secondary mb-3 block"></i>
+        <p class="theme-text-secondary text-sm">Bu üye henüz hiçbir diziyi hatırlatmaya eklememiş.</p>
+      </div>
+    </div>
+
+    <!-- Film Hatırlatmaları -->
+    <div id="rem-panel-movie" class="hidden">
+      <div id="rem-grid-movie"
+           class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+      </div>
+      <div id="rem-empty-movie" class="hidden theme-card rounded-2xl border p-8 text-center">
+        <i class="fas fa-bell-slash text-3xl theme-text-secondary mb-3 block"></i>
+        <p class="theme-text-secondary text-sm">Bu üye henüz hiçbir filmi hatırlatmaya eklememiş.</p>
+      </div>
+    </div>
+  </div>
+
 </div>
 
 <script>
@@ -467,5 +524,129 @@
 
   // ─── Başlat ──────────────────────────────────────────────────────────────
   loadMemberDetail();
+
+  // ─── Hatırlatmalar ───────────────────────────────────────────────────────
+  let _REM_DATA     = { tv: [], movie: [] };
+  let _REM_TAB      = "tv";
+  const _STATUS_MAP_ADMIN = {
+    'returning series':  { cls:'bg-green-500/15 text-green-400',   label:'Devam Ediyor' },
+    'continuing':        { cls:'bg-green-500/15 text-green-400',   label:'Devam Ediyor' },
+    'devam ediyor':      { cls:'bg-green-500/15 text-green-400',   label:'Devam Ediyor' },
+    'ended':             { cls:'bg-gray-500/15 text-gray-400',     label:'Final Yaptı'  },
+    'final yaptı':       { cls:'bg-gray-500/15 text-gray-400',     label:'Final Yaptı'  },
+    'bitti':             { cls:'bg-gray-500/15 text-gray-400',     label:'Final Yaptı'  },
+    'canceled':          { cls:'bg-red-500/15 text-red-400',       label:'İptal'        },
+    'cancelled':         { cls:'bg-red-500/15 text-red-400',       label:'İptal'        },
+    'iptal edildi':      { cls:'bg-red-500/15 text-red-400',       label:'İptal'        },
+    'in production':     { cls:'bg-blue-500/15 text-blue-400',     label:'Yeni Sezon'   },
+    'renewed':           { cls:'bg-blue-500/15 text-blue-400',     label:'Yeni Sezon'   },
+    'planned':           { cls:'bg-purple-500/15 text-purple-400', label:'Yakında'      },
+    'pilot':             { cls:'bg-purple-500/15 text-purple-400', label:'Pilot'        },
+  };
+
+  function _remStatusBadge(status) {
+    if (!status) return '';
+    const conf = _STATUS_MAP_ADMIN[status.trim().toLowerCase()];
+    if (!conf) return '';
+    return `<span class="absolute bottom-1.5 left-1.5 right-1.5 text-center text-[10px] font-bold px-1.5 py-0.5 rounded-md ${conf.cls} truncate">${conf.label}</span>`;
+  }
+
+  function _remCard(item, type) {
+    const poster = item.poster
+      ? (item.poster.startsWith('http') ? item.poster : `https://image.tmdb.org/t/p/w185${item.poster}`)
+      : null;
+    const typeColor = type === 'tv'
+      ? 'bg-indigo-500/80 text-white'
+      : 'bg-amber-500/80 text-black';
+    const typeLabel = type === 'tv' ? 'DİZİ' : 'FİLM';
+    const statusBadge = type === 'tv' ? _remStatusBadge(item.status) : '';
+    return `
+      <div class="theme-card rounded-xl border overflow-hidden hover:border-primary/50 transition-colors group">
+        <div class="relative" style="aspect-ratio:2/3">
+          ${poster
+            ? `<img src="${escHtml(poster)}" alt="${escHtml(item.title||'')}"
+                    class="w-full h-full object-cover"
+                    onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
+            : ''}
+          <div class="${poster ? 'hidden' : 'flex'} w-full h-full items-center justify-center theme-text-secondary"
+               style="background:var(--c-card)">
+            <i class="fas fa-${type === 'tv' ? 'tv' : 'film'} text-3xl opacity-20"></i>
+          </div>
+          <span class="absolute top-1.5 left-1.5 text-[9px] font-black tracking-wider px-1.5 py-0.5 rounded ${typeColor}">${typeLabel}</span>
+          ${statusBadge}
+        </div>
+        <div class="p-2">
+          <p class="text-xs font-semibold leading-snug line-clamp-2" style="color:var(--c-text)">${escHtml(item.title || '—')}</p>
+        </div>
+      </div>`;
+  }
+
+  function switchRemTab(tab) {
+    _REM_TAB = tab;
+    ['tv','movie'].forEach(t => {
+      const panel = document.getElementById(`rem-panel-${t}`);
+      const btn   = document.getElementById(`rem-tab-${t}`);
+      if (!panel || !btn) return;
+      if (t === tab) {
+        panel.classList.remove('hidden');
+        btn.style.cssText = `background:color-mix(in srgb,var(--c-prim) 15%,transparent);color:var(--c-prim);border-color:color-mix(in srgb,var(--c-prim) 30%,transparent)`;
+      } else {
+        panel.classList.add('hidden');
+        btn.style.cssText = `border-color:var(--c-border)`;
+        btn.classList.add('theme-text-secondary');
+      }
+    });
+  }
+
+  async function loadReminders() {
+    try {
+      const r = await fetch(`/api/admin/uyeler/${encodeURIComponent(MEMBER_ID)}/reminders`);
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      _REM_DATA = await r.json();
+
+      const tvItems    = _REM_DATA.tv    || [];
+      const movieItems = _REM_DATA.movie || [];
+      const total      = tvItems.length + movieItems.length;
+
+      // Toplam badge
+      const totalBadge = document.getElementById('rem-total-badge');
+      if (total > 0) {
+        totalBadge.textContent = total;
+        totalBadge.classList.remove('hidden');
+      }
+
+      // Sekme sayıları
+      document.getElementById('rem-badge-tv').textContent    = tvItems.length;
+      document.getElementById('rem-badge-movie').textContent = movieItems.length;
+
+      // Loading gizle
+      const loading = document.getElementById('rem-loading');
+      if (loading) loading.remove();
+
+      // Dizi kartları
+      const gridTv = document.getElementById('rem-grid-tv');
+      if (tvItems.length) {
+        gridTv.innerHTML = tvItems.map(i => _remCard(i, 'tv')).join('');
+        gridTv.classList.remove('hidden');
+      } else {
+        document.getElementById('rem-empty-tv').classList.remove('hidden');
+      }
+
+      // Film kartları
+      const gridMovie = document.getElementById('rem-grid-movie');
+      if (movieItems.length) {
+        gridMovie.innerHTML = movieItems.map(i => _remCard(i, 'movie')).join('');
+      } else {
+        document.getElementById('rem-empty-movie').classList.remove('hidden');
+      }
+
+    } catch (e) {
+      const loading = document.getElementById('rem-loading');
+      if (loading) loading.innerHTML = `<i class="fas fa-exclamation-triangle text-yellow-400 mr-2"></i>
+        <span class="theme-text-secondary text-sm">Hatırlatmalar yüklenemedi: ${escHtml(e.message)}</span>`;
+    }
+  }
+
+  loadReminders();
 </script>
 {% endblock %}

@@ -295,6 +295,37 @@
                     placeholder="Action, Komödie, Drama">
             </div>
 
+            <!-- Oyuncular -->
+            <div class="mb-6">
+                <label class="block text-sm font-medium mb-2">🎭 Oyuncular (cast)</label>
+                <div id="cast-container" class="space-y-2 mb-2">
+                    {% if media_details and media_details.cast %}
+                        {% for actor in media_details.cast %}
+                        <div class="cast-item flex items-center gap-2">
+                            <input type="text"
+                                class="cast-input flex-1 px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
+                                value="{{ actor }}" placeholder="Oyuncu adı">
+                            <button type="button" onclick="removeCastItem(this)"
+                                class="flex-shrink-0 w-8 h-8 flex items-center justify-center text-red-500 hover:text-red-700 hover:bg-red-50 rounded-md transition-colors"
+                                title="Kaldır">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                                </svg>
+                            </button>
+                        </div>
+                        {% endfor %}
+                    {% endif %}
+                </div>
+                <button type="button" onclick="addCastItem()"
+                    class="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 hover:bg-blue-50 px-3 py-1.5 rounded-md border border-blue-300 transition-colors">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                    </svg>
+                    Oyuncu Ekle
+                </button>
+                <p class="mt-1 text-xs text-gray-400">Her satıra bir oyuncu adı girin. Sıralama korunur.</p>
+            </div>
+
             <!-- Orijinal Dil -->
             <div class="mb-6">
                 <label class="block text-sm font-medium mb-2">🌐 Orijinal Dil (original_language, ISO 639-1)</label>
@@ -565,6 +596,12 @@
         const formData = new FormData(event.target);
         const updateData = {};
 
+        // Collect cast from dynamic inputs
+        const castInputs = document.querySelectorAll('#cast-container .cast-input');
+        updateData['cast'] = Array.from(castInputs)
+            .map(inp => inp.value.trim())
+            .filter(v => v.length > 0);
+
         // Convert form data to object
         for (let [key, value] of formData.entries()) {
             if (key === 'genres' || key === 'genres_tr' || key === 'genres_de') {
@@ -828,6 +865,30 @@
         } catch (e) {
             showErrorMessage('İsim güncellenemedi.');
         }
+    }
+
+    // ── Cast Management ──────────────────────────────────────────────────────
+    function addCastItem(value = '') {
+        const container = document.getElementById('cast-container');
+        const div = document.createElement('div');
+        div.className = 'cast-item flex items-center gap-2';
+        div.innerHTML = `
+            <input type="text"
+                class="cast-input flex-1 px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
+                value="${value}" placeholder="Oyuncu adı">
+            <button type="button" onclick="removeCastItem(this)"
+                class="flex-shrink-0 w-8 h-8 flex items-center justify-center text-red-500 hover:text-red-700 hover:bg-red-50 rounded-md transition-colors"
+                title="Kaldır">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                </svg>
+            </button>`;
+        container.appendChild(div);
+        div.querySelector('.cast-input').focus();
+    }
+
+    function removeCastItem(btn) {
+        btn.closest('.cast-item').remove();
     }
 
     async function saveRenameTv(btn) {
@@ -1269,6 +1330,19 @@
         document.getElementById('rq-cert-us').textContent      = preview.certification_us || '-';
         document.getElementById('rq-parsed-from').textContent  = preview._parsed_from || '-';
 
+        // Oyuncular
+        const castEl = document.getElementById('rq-cast');
+        castEl.innerHTML = '';
+        (preview.cast || []).slice(0, 15).forEach(name => {
+            const badge = document.createElement('span');
+            badge.className = 'px-2 py-0.5 bg-purple-100 text-purple-800 rounded-full text-xs font-medium';
+            badge.textContent = name;
+            castEl.appendChild(badge);
+        });
+        if (!preview.cast || preview.cast.length === 0) {
+            castEl.innerHTML = '<span class="text-xs text-gray-400">-</span>';
+        }
+
         // Görsel thumbnail'ler
         const imgPoster   = document.getElementById('rq-img-poster');
         const imgBackdrop = document.getElementById('rq-img-backdrop');
@@ -1314,7 +1388,7 @@
             'genres','genres_tr','genres_de',
             'original_language','runtime',
             'certification_tr','certification_de','certification_us',
-            'collection_id','total_seasons','total_episodes'
+            'collection_id','total_seasons','total_episodes','cast'
         ];
         for (const f of fields) {
             if (preview[f] !== undefined && preview[f] !== null && preview[f] !== '') {
@@ -1412,6 +1486,12 @@
                 </div>
             </div>
 
+            <!-- Oyuncular -->
+            <div>
+                <div class="text-xs font-semibold theme-text-secondary uppercase tracking-wide mb-1">🎭 Oyuncular</div>
+                <div id="rq-cast" class="flex flex-wrap gap-1"></div>
+            </div>
+
             <!-- Özet -->
             <div>
                 <div class="text-xs font-semibold theme-text-secondary uppercase tracking-wide mb-1">Özet</div>
@@ -1479,5 +1559,227 @@
         </div>
     </div>
 </div>
+
+{# ─── Altyazı Yönetimi Bölümü ─────────────────────────────────────────────── #}
+<div id="subtitle-section" class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+  <div class="theme-card rounded-lg shadow p-6">
+    <h2 class="text-xl font-bold mb-1 flex items-center gap-2">🎬 Altyazı Yönetimi</h2>
+    <p class="text-sm theme-text-secondary mb-5">
+      .srt veya .vtt formatında altyazı yükleyin. Yüklenen altyazılar Stremio'da otomatik görünür.
+    </p>
+
+    {# Yükleme Formu #}
+    <div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-lg p-4 mb-6">
+      <h3 class="font-semibold text-blue-800 dark:text-blue-300 mb-3">📤 Yeni Altyazı Yükle</h3>
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
+
+        <div>
+          <label class="block text-xs font-medium theme-text-secondary mb-1">Dil</label>
+          <select id="sub-lang" class="w-full border rounded-lg px-3 py-2 text-sm theme-input focus:outline-none focus:ring-2 focus:ring-blue-400">
+            <option value="tr">🇹🇷 Türkçe</option>
+            <option value="en">🇬🇧 İngilizce</option>
+            <option value="de">🇩🇪 Almanca</option>
+            <option value="fr">🇫🇷 Fransızca</option>
+            <option value="es">🇪🇸 İspanyolca</option>
+            <option value="it">🇮🇹 İtalyanca</option>
+            <option value="pt">🇵🇹 Portekizce</option>
+            <option value="ru">🇷🇺 Rusça</option>
+            <option value="ar">🇸🇦 Arapça</option>
+            <option value="ja">🇯🇵 Japonca</option>
+            <option value="ko">🇰🇷 Korece</option>
+            <option value="zh">🇨🇳 Çince</option>
+          </select>
+        </div>
+
+        {% if media_type == 'tv' %}
+        <div>
+          <label class="block text-xs font-medium theme-text-secondary mb-1">Sezon</label>
+          <input type="number" id="sub-season" min="1" placeholder="1"
+            class="w-full border rounded-lg px-3 py-2 text-sm theme-input focus:outline-none focus:ring-2 focus:ring-blue-400">
+        </div>
+        <div>
+          <label class="block text-xs font-medium theme-text-secondary mb-1">Bölüm</label>
+          <input type="number" id="sub-episode" min="1" placeholder="1"
+            class="w-full border rounded-lg px-3 py-2 text-sm theme-input focus:outline-none focus:ring-2 focus:ring-blue-400">
+        </div>
+        {% endif %}
+
+        <div class="{% if media_type == 'tv' %}lg:col-span-1{% else %}sm:col-span-2 lg:col-span-3{% endif %}">
+          <label class="block text-xs font-medium theme-text-secondary mb-1">Altyazı Dosyası (.srt / .vtt)</label>
+          <input type="file" id="sub-file" accept=".srt,.vtt"
+            class="w-full border rounded-lg px-3 py-2 text-sm theme-input focus:outline-none focus:ring-2 focus:ring-blue-400 file:mr-2 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:bg-blue-100 file:text-blue-700 cursor-pointer">
+        </div>
+      </div>
+
+      <button onclick="uploadSubtitle()"
+        class="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors text-sm inline-flex items-center gap-2">
+        <span id="sub-upload-spinner" class="hidden">⏳</span>
+        📤 Yükle
+      </button>
+      <div id="sub-upload-msg" class="mt-2 text-sm hidden"></div>
+    </div>
+
+    {# Mevcut Altyazı Listesi #}
+    <div>
+      <h3 class="font-semibold mb-3">📋 Yüklü Altyazılar</h3>
+      <div id="sub-list-wrapper">
+        <p class="text-sm theme-text-secondary">Yükleniyor…</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  const IMDB_ID    = (document.getElementById('imdb_id')?.value || '').trim();
+  const MEDIA_TYPE = '{{ media_type }}';
+  const FLAG_MAP   = { tr:'🇹🇷', en:'🇬🇧', de:'🇩🇪', fr:'🇫🇷', es:'🇪🇸', it:'🇮🇹',
+                       pt:'🇵🇹', ru:'🇷🇺', ar:'🇸🇦', ja:'🇯🇵', ko:'🇰🇷', zh:'🇨🇳' };
+
+  /* ── Liste yükle ── */
+  async function loadSubtitles() {
+    const listEl = document.getElementById('sub-list-wrapper');
+    if (!listEl) return;
+    listEl.innerHTML = '<p class="text-sm theme-text-secondary">Yükleniyor…</p>';
+
+    const season  = MEDIA_TYPE === 'tv' ? document.getElementById('sub-season')?.value  : null;
+    const episode = MEDIA_TYPE === 'tv' ? document.getElementById('sub-episode')?.value : null;
+
+    let url = `/api/subtitles/list?imdb_id=${encodeURIComponent(IMDB_ID)}`;
+    if (season)  url += `&season=${season}`;
+    if (episode) url += `&episode=${episode}`;
+
+    try {
+      const res  = await fetch(url);
+      const data = await res.json();
+      const subs = data.subtitles || [];
+
+      if (!subs.length) {
+        listEl.innerHTML = '<p class="text-sm theme-text-secondary italic">Henüz altyazı yüklenmemiş.</p>';
+        return;
+      }
+
+      const tvHeader = MEDIA_TYPE === 'tv'
+        ? '<th class="text-left py-2 pr-4 font-medium theme-text-secondary">Sezon/Bölüm</th>' : '';
+
+      listEl.innerHTML = `
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm border-collapse">
+            <thead>
+              <tr class="border-b border-gray-200 dark:border-gray-700">
+                <th class="text-left py-2 pr-4 font-medium theme-text-secondary">Dil</th>
+                ${tvHeader}
+                <th class="text-left py-2 pr-4 font-medium theme-text-secondary">Dosya</th>
+                <th class="text-left py-2 pr-4 font-medium theme-text-secondary">Boyut</th>
+                <th class="text-left py-2 pr-4 font-medium theme-text-secondary">Tarih</th>
+                <th class="text-left py-2 font-medium theme-text-secondary">İşlem</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${subs.map(s => {
+                const flag    = FLAG_MAP[s.lang] || '🌐';
+                const sizeFmt = s.file_size ? (s.file_size / 1024).toFixed(1) + ' KB' : '—';
+                const date    = s.uploaded_at
+                  ? new Date(s.uploaded_at).toLocaleString('tr-TR', {
+                      day:'2-digit', month:'2-digit', year:'numeric',
+                      hour:'2-digit', minute:'2-digit'
+                    })
+                  : '—';
+                const epCell = MEDIA_TYPE === 'tv'
+                  ? `<td class="py-2 pr-4 text-gray-500 font-mono text-xs">S${String(s.season||0).padStart(2,'0')}E${String(s.episode||0).padStart(2,'0')}</td>`
+                  : '';
+                return `
+                  <tr class="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800/40 transition-colors">
+                    <td class="py-2 pr-4">${flag} <span class="font-medium">${s.lang_label || s.lang.toUpperCase()}</span></td>
+                    ${epCell}
+                    <td class="py-2 pr-4 font-mono text-xs text-gray-500 max-w-xs truncate" title="${s.original_name || ''}">${s.original_name || s.filename}</td>
+                    <td class="py-2 pr-4 text-gray-500 whitespace-nowrap">${sizeFmt}</td>
+                    <td class="py-2 pr-4 text-gray-500 whitespace-nowrap text-xs">${date}</td>
+                    <td class="py-2">
+                      <div class="flex items-center gap-2">
+                        <a href="${s.serve_url}" target="_blank"
+                          class="px-2 py-1 text-xs bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded transition-colors"
+                          title="Dosyayı tarayıcıda aç">👁</a>
+                        <button onclick="deleteSubtitle('${s._id}')"
+                          class="px-2 py-1 text-xs bg-red-50 dark:bg-red-900/30 text-red-600 hover:bg-red-100 dark:hover:bg-red-800/50 rounded transition-colors">
+                          🗑 Sil
+                        </button>
+                      </div>
+                    </td>
+                  </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>`;
+    } catch (e) {
+      listEl.innerHTML = `<p class="text-sm text-red-500">Yüklenemedi: ${e.message}</p>`;
+    }
+  }
+
+  /* ── Yükleme ── */
+  window.uploadSubtitle = async function () {
+    const fileEl = document.getElementById('sub-file');
+    const langEl = document.getElementById('sub-lang');
+
+    if (!fileEl?.files?.length) { showMsg('Lütfen bir dosya seçin.', 'error'); return; }
+    if (!IMDB_ID) { showMsg('Bu içerik için IMDb ID bulunamadı. Önce IMDb ID giriniz.', 'error'); return; }
+
+    const fd = new FormData();
+    fd.append('file', fileEl.files[0]);
+    fd.append('imdb_id', IMDB_ID);
+    fd.append('media_type', MEDIA_TYPE);
+    fd.append('lang', langEl.value);
+
+    if (MEDIA_TYPE === 'tv') {
+      const s = document.getElementById('sub-season')?.value;
+      const e = document.getElementById('sub-episode')?.value;
+      if (!s || !e) { showMsg('Sezon ve bölüm numarası giriniz.', 'error'); return; }
+      fd.append('season', s);
+      fd.append('episode', e);
+    }
+
+    document.getElementById('sub-upload-spinner').classList.remove('hidden');
+    try {
+      const res  = await fetch('/api/subtitles/upload', { method: 'POST', body: fd });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        showMsg(`✅ "${data.filename}" başarıyla yüklendi.`, 'success');
+        fileEl.value = '';
+        loadSubtitles();
+      } else {
+        showMsg(`❌ ${data.detail || JSON.stringify(data)}`, 'error');
+      }
+    } catch (e) {
+      showMsg(`❌ Bağlantı hatası: ${e.message}`, 'error');
+    } finally {
+      document.getElementById('sub-upload-spinner').classList.add('hidden');
+    }
+  };
+
+  /* ── Silme ── */
+  window.deleteSubtitle = async function (id) {
+    if (!confirm('Bu altyazıyı kalıcı olarak silmek istediğinizden emin misiniz?')) return;
+    try {
+      const res  = await fetch(`/api/subtitles/${id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (res.ok && data.success) { loadSubtitles(); }
+      else { alert(`Silinemedi: ${data.detail || 'Hata'}`); }
+    } catch (e) { alert(`Hata: ${e.message}`); }
+  };
+
+  /* ── Mesaj ── */
+  function showMsg(text, type) {
+    const el = document.getElementById('sub-upload-msg');
+    if (!el) return;
+    el.textContent = text;
+    el.className = 'mt-2 text-sm ' + (type === 'success' ? 'text-green-600' : 'text-red-600');
+    el.classList.remove('hidden');
+    setTimeout(() => el.classList.add('hidden'), 6000);
+  }
+
+  /* ── İlk yükleme ── */
+  document.addEventListener('DOMContentLoaded', loadSubtitles);
+})();
+</script>
 
 {% endblock %}

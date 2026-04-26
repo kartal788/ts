@@ -1,7 +1,10 @@
 from fastapi import Request, Form, HTTPException, Depends
 from fastapi.responses import RedirectResponse
+import logging
+_logger = logging.getLogger(__name__)
 from fastapi.templating import Jinja2Templates
 from Backend.fastapi.security.credentials import verify_credentials, require_auth, is_authenticated, get_current_user
+from Backend.fastapi.security.csrf import ensure_csrf_secret
 from Backend.fastapi.security.brute_force import is_banned_async, ban_remaining, record_failure_async, record_success, get_client_ip
 from Backend.fastapi.security.captcha import set_captcha, verify_captcha, CaptchaData
 from Backend.fastapi.themes import get_theme, get_all_themes
@@ -126,6 +129,8 @@ async def login_post(
                 "subscription_end": None,
                 "is_admin":         True,
             }
+        # Login başarılı → CSRF secret üret/yenile
+        ensure_csrf_secret(request)
         return RedirectResponse(url="/", status_code=302)
     else:
         # Başarısız giriş → kaydet
@@ -229,10 +234,10 @@ async def dashboard_page(request: Request, _: bool = Depends(require_auth)):
         }
 
     except Exception as e:
-        print(f"Dashboard error: {e}")
+        _logger.error("Dashboard stats hatası", exc_info=True)
         system_stats = {
             "server_status": "error",
-            "error": str(e),
+            "error": "İstatistikler yüklenemedi",
             "uptime": "N/A",
             "telegram_bot": "@StreamBot",
             "connected_bots": 0,
@@ -250,6 +255,8 @@ async def dashboard_page(request: Request, _: bool = Depends(require_auth)):
     api_tokens = await db.get_all_api_tokens()
     # BASE_URL config'den alınır; yoksa request.base_url kullanılır (port bilgisi korunur)
     configured_base_url = Telegram.BASE_URL.rstrip("/") + "/" if Telegram.BASE_URL else None
+    _hiz = (Telegram.HIZ_LIMITI or "").strip()
+    global_speed_limit_mbps = float(_hiz) if _hiz else 0.0
     return templates.TemplateResponse("dashboard.html", {
         "request": request,
         "theme": theme,
@@ -261,7 +268,8 @@ async def dashboard_page(request: Request, _: bool = Depends(require_auth)):
         "system_stats": system_stats,
         "api_tokens": api_tokens,
         "configured_base_url": configured_base_url,
-        "subscription_mode": Telegram.SUBSCRIPTION
+        "subscription_mode": Telegram.SUBSCRIPTION,
+        "global_speed_limit_mbps": global_speed_limit_mbps
     })
 
 
@@ -293,7 +301,9 @@ async def edit_media_page(request: Request, tmdb_id: int, db_index: int, media_t
         if not media_details:
             raise HTTPException(status_code=404, detail="Media not found")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _logger.error("Internal error", exc_info=True)
+
+        raise HTTPException(status_code=500, detail="Sunucu hatası")
     
     return templates.TemplateResponse("media_edit.html", {
         "request": request,

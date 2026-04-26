@@ -22,6 +22,96 @@ async def process_file():
             updated_id = await db.insert_media(metadata_info, channel=channel, msg_id=msg_id, size=size, name=title)
             if updated_id:
                 LOGGER.info(f"{metadata_info['media_type']} updated with ID: {updated_id}")
+                # ── TV dizisi ise hatırlatma bildirimlerini tetikle ──────────
+                if metadata_info.get("media_type") == "tv":
+                    try:
+                        from Backend.fastapi.routes.notification_routes import (
+                            send_tv_reminder_notifications,
+                        )
+                        tmdb_id  = metadata_info.get("tmdb_id")
+                        db_index = db.current_db_index
+                        notif_title = (
+                            metadata_info.get("title_tr")
+                            or metadata_info.get("title")
+                            or title
+                        )
+                        poster  = metadata_info.get("poster", "")
+                        season  = metadata_info.get("season_number")
+                        episode = metadata_info.get("episode_number")
+
+                        if tmdb_id is not None:
+                            LOGGER.info(
+                                f"TV hatirlatma tampona aliniyor: tmdb_id={tmdb_id} "
+                                f"s={season} e={episode}"
+                            )
+                            create_task(
+                                send_tv_reminder_notifications(
+                                    tmdb_id=int(tmdb_id),
+                                    db_index=int(db_index),
+                                    title=notif_title,
+                                    poster=poster,
+                                    new_season=season,
+                                    new_episode=episode,
+                                )
+                            )
+                        else:
+                            LOGGER.warning(
+                                f"Hatirlatma atlandi: tmdb_id={tmdb_id} eksik"
+                            )
+                    except Exception as _notif_err:
+                        LOGGER.warning(f"Hatirlatma bildirimi baslatılamadi: {_notif_err}")
+                # ── Film ise hatırlatma bildirimlerini tetikle ───────────────
+                elif metadata_info.get("media_type") == "movie":
+                    try:
+                        from Backend.fastapi.routes.notification_routes import (
+                            send_movie_reminder_notifications,
+                        )
+                        tmdb_id  = metadata_info.get("tmdb_id")
+                        db_index = db.current_db_index
+                        notif_title = (
+                            metadata_info.get("title_tr")
+                            or metadata_info.get("title")
+                            or title
+                        )
+                        poster        = metadata_info.get("poster", "")
+                        quality_label = metadata_info.get("quality", "")
+
+                        # Dosya adında "german" geçiyorsa kalite etiketine ekle
+                        _raw_title = (title or "").lower()
+                        _has_german = bool(__import__("re").search(r'\bgerman\b', _raw_title))
+                        _has_camrip = bool(__import__("re").search(r'\bcam[-_]?rip\b|\bcamrip\b|\bcam\b', _raw_title))
+                        if _has_german and _has_camrip:
+                            quality_label = "GermanCamRip"
+                        elif _has_german:
+                            quality_label = f"German:{quality_label}" if quality_label else "German"
+
+                        if tmdb_id is not None:
+                            LOGGER.info(
+                                f"Film hatirlatma tampona aliniyor: tmdb_id={tmdb_id} "
+                                f"kalite={quality_label!r}"
+                            )
+                            create_task(
+                                send_movie_reminder_notifications(
+                                    tmdb_id=int(tmdb_id),
+                                    db_index=int(db_index),
+                                    title=notif_title,
+                                    poster=poster,
+                                    quality_label=quality_label,
+                                )
+                            )
+                        else:
+                            LOGGER.warning(
+                                f"Film hatirlatma atlandi: tmdb_id={tmdb_id} eksik"
+                            )
+                    except Exception as _notif_err:
+                        LOGGER.warning(f"Film hatirlatma bildirimi baslatılamadi: {_notif_err}")
+                # ── Katalog yenilemesini debounce ile tetikle ────────────────
+                try:
+                    from Backend.helper.platform_catalog import platform_catalog
+                    platform_catalog.schedule_refresh()
+                except Exception as _cat_err:
+                    LOGGER.warning(f"Katalog yenileme planlanamadı: {_cat_err}")
+                # ────────────────────────────────────────────────────────────
             else:
                 LOGGER.info("Update failed due to validation errors.")
         file_queue.task_done()

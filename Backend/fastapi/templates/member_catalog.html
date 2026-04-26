@@ -9,15 +9,16 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/flag-icons/7.2.3/css/flag-icons.min.css" crossorigin="anonymous"/>
   <style>
     :root{--c-bg:#0a0a0f;--c-card:#13131a;--c-text:#e2e2f0;--c-text2:#8b8ba8;--c-prim:#6366f1;--c-border:#2d2d3d}
-    body{background:var(--c-bg);color:var(--c-text);font-family:system-ui,sans-serif;transition:background .3s,color .3s}
+    body{background:var(--c-bg);color:var(--c-text);font-family:system-ui,sans-serif;overscroll-behavior-y:contain;touch-action:pan-y;-webkit-overflow-scrolling:touch}
     .tc{background:var(--c-card)}.ts{color:var(--c-text2)}
     .input-field{background:var(--c-card);color:var(--c-text);border:1px solid var(--c-border)}
     .input-field:focus{border-color:var(--c-prim);outline:none}
     .btn-prim{background:var(--c-prim);color:#fff}.btn-prim:hover{opacity:.85}
     .btn-outline{background:transparent;border:1px solid var(--c-border);color:var(--c-text2)}
     .btn-outline:hover{border-color:var(--c-prim);color:var(--c-text)}
-    .media-card{cursor:pointer;transition:transform .2s,box-shadow .2s;border:1px solid var(--c-border);border-radius:.75rem;overflow:hidden}
+    .media-card{cursor:pointer;transition:transform .2s,box-shadow .2s;border:1px solid var(--c-border);border-radius:.75rem;overflow:hidden;contain:layout style paint;content-visibility:auto;contain-intrinsic-size:0 210px}
     .media-card:hover{transform:translateY(-4px) scale(1.02);box-shadow:0 12px 32px rgba(0,0,0,.6);border-color:var(--c-prim)}
+    @media(hover:none),(pointer:coarse){.media-card{transition:none;will-change:auto}.media-card:hover{transform:none;box-shadow:none}}
     .media-card-wrap{position:relative}
     .poster-wrap{aspect-ratio:2/3;overflow:hidden;background:#0d0d14;position:relative}
     .poster-wrap img{object-fit:cover;width:100%;height:100%}
@@ -39,7 +40,7 @@
     .css-flag-tr{display:inline-block;width:1.4em;height:1.05em;border-radius:2px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.9);flex-shrink:0;transform:translateZ(0);isolation:isolate;vertical-align:middle;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 20'%3E%3Crect width='30' height='20' fill='%23E30A17'/%3E%3Ccircle cx='11.5' cy='10' r='5' fill='%23fff'/%3E%3Ccircle cx='13' cy='10' r='4' fill='%23E30A17'/%3E%3Cpolygon points='19,12.1 16.5,13.6 17.2,10.8 15,9.1 17.9,9.1 19,6.4 20.1,9.1 23,9.1 20.8,10.8 21.5,13.6' fill='%23fff'/%3E%3C/svg%3E");background-size:100% 100%;background-repeat:no-repeat;background-color:#E30A17}
     /* Yatay scroll satırı */
     .scroll-row-wrap{overflow-x:hidden;overflow-y:visible}
-    .scroll-row{display:flex;gap:.75rem;overflow-x:auto;overflow-y:visible;scroll-behavior:smooth;padding-bottom:8px;-ms-overflow-style:none;scrollbar-width:none}
+    .scroll-row{display:flex;gap:.75rem;overflow-x:auto;overflow-y:visible;scroll-behavior:smooth;padding-bottom:8px;-ms-overflow-style:none;scrollbar-width:none;-webkit-overflow-scrolling:touch}
     .scroll-row::-webkit-scrollbar{display:none}
     .scroll-row .media-card{flex:0 0 130px;width:130px}
     @media(min-width:640px){.scroll-row .media-card{flex:0 0 150px;width:150px}}
@@ -50,10 +51,19 @@
     .scroll-btn-r{right:0}
     .modal-box{max-height:90vh;overflow-y:hidden;border-radius:1rem;border:1px solid var(--c-border)}
     .theme-dot{width:18px;height:18px;border-radius:50%;border:2px solid transparent;cursor:pointer;flex-shrink:0;transition:transform .2s,border-color .2s}
+    .theme-transitioning,.theme-transitioning *{transition:background-color .3s,color .3s,border-color .3s !important}
     .theme-dot:hover{transform:scale(1.3)}.theme-dot.active{border-color:var(--c-text);transform:scale(1.2)}
     .lbar-bg{background:var(--c-border);border-radius:9999px;height:5px}
     .lbar-fill{height:5px;border-radius:9999px;transition:width .5s}
     @keyframes spin{to{transform:rotate(360deg)}}.spinner{animation:spin .8s linear infinite}
+    /* ── Skeleton / Lazy-load ─────────────────────────────────────────── */
+    @keyframes shimmer{0%{transform:translateX(-100%)}100%{transform:translateX(100%)}}
+    .skeleton{position:relative;overflow:hidden;background:var(--c-card);border-radius:4px}
+    .skeleton::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent 0%,rgba(255,255,255,.06) 50%,transparent 100%);animation:shimmer 1.4s infinite linear}
+    @media(hover:none),(pointer:coarse){.skeleton::after{animation-duration:2s}}
+    .poster-skeleton{position:absolute;inset:0;z-index:2}
+    .poster-wrap img.lazy{opacity:0;transition:opacity .35s ease}
+    .poster-wrap img.lazy.loaded{opacity:1}
     .chip{display:inline-flex;align-items:center;gap:4px;font-size:.7rem;padding:2px 8px;border-radius:9999px;border:1px solid var(--c-border)}
     .chip-genre{border-color:rgba(99,102,241,.4);color:var(--c-prim)}
     .chip-year{border-color:rgba(245,158,11,.4);color:#f59e0b}
@@ -73,6 +83,9 @@
       padding:.9rem;pointer-events:none;
       opacity:0;transition:opacity .18s ease,transform .18s ease;
     }
+    @media (hover: none), (pointer: coarse) {
+      .hover-preview { display: none !important; }
+    }
     .hover-preview.hp-above{top:auto;bottom:0}
     .media-card-wrap:hover .hover-preview{
       opacity:1;transform:translateX(-50%) translateY(-12px) scale(1);
@@ -87,6 +100,7 @@
     .hp-meta{display:flex;align-items:center;gap:.4rem;flex-wrap:wrap;margin-bottom:.45rem}
     .hp-imdb{display:inline-flex;align-items:center;gap:.25rem;font-size:.7rem;font-weight:700;color:#facc15}
     .hp-year{font-size:.68rem;color:var(--c-text2)}
+    .hp-extra{display:inline-flex;align-items:center;gap:.25rem;font-size:.68rem;color:var(--c-text2);background:rgba(255,255,255,.06);border:1px solid var(--c-border);border-radius:4px;padding:1px 5px}
     .hp-desc{font-size:.68rem;color:var(--c-text2);line-height:1.45;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;margin-bottom:.55rem}
     .hp-trailer-btn{display:flex;align-items:center;justify-content:center;gap:.4rem;width:100%;padding:.38rem .5rem;border-radius:.5rem;background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.4);color:#f87171;font-size:.7rem;font-weight:700;cursor:pointer;transition:background .15s,border-color .15s}
     .hp-trailer-btn:hover{background:rgba(239,68,68,.3);border-color:#f87171}
@@ -103,6 +117,23 @@
     .trailer-embed iframe{position:absolute;inset:0;width:100%;height:100%;border:none}
     .trailer-loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#000}
     .trailer-no-video{padding:2.5rem;text-align:center;color:var(--c-text2);font-size:.85rem}
+    /* ── İçerik Durum Rozetleri (poster overlay) ── */
+    .status-badge{display:inline-flex;align-items:center;gap:4px;font-size:.6rem;font-weight:800;letter-spacing:.05em;padding:3px 7px;border-radius:4px;text-transform:uppercase;white-space:nowrap;box-shadow:0 1px 6px rgba(0,0,0,.55);line-height:1.2;}
+    @media(min-width:768px){.status-badge{backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}}
+    .status-continuing{background:rgba(20,83,45,.82);color:#4ade80;border:1px solid rgba(74,222,128,.45);}
+    .status-ended{background:rgba(30,30,40,.82);color:#d1d5db;border:1px solid rgba(156,163,175,.35);}
+    .status-renewed{background:rgba(23,37,84,.82);color:#93c5fd;border:1px solid rgba(96,165,250,.45);}
+    .status-cancelled{background:rgba(69,10,10,.82);color:#fca5a5;border:1px solid rgba(248,113,113,.45);}
+    .status-upcoming{background:rgba(59,7,100,.82);color:#d8b4fe;border:1px solid rgba(192,132,252,.45);}
+    .status-unknown{background:rgba(15,15,20,.75);color:#9ca3af;border:1px solid rgba(75,85,99,.35);}
+    .status-dot{width:5px;height:5px;border-radius:50%;flex-shrink:0;}
+    .status-continuing .status-dot{background:#4ade80;box-shadow:0 0 4px #4ade80;}
+    .status-ended .status-dot{background:#9ca3af;}
+    .status-renewed .status-dot{background:#60a5fa;box-shadow:0 0 4px #60a5fa;}
+    .status-cancelled .status-dot{background:#f87171;box-shadow:0 0 4px #f87171;}
+    .status-upcoming .status-dot{background:#c084fc;box-shadow:0 0 4px #c084fc;}
+    .status-unknown .status-dot{background:#6b7280;}
+    .status-overlay{position:absolute;top:4px;right:4px;left:auto;bottom:auto;background:none;padding:0;pointer-events:none;}
   </style>
 </head>
 <body class="min-h-screen flex flex-col">
@@ -138,6 +169,16 @@
         <div id="theme-dots" class="flex gap-1 items-center"></div>
       </div>
 
+      <!-- Hatırlatmalar butonu -->
+      <a href="/uye/hatirlatmalar"
+         class="flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-lg transition"
+         style="background:rgba(99,102,241,.15);color:#a5b4fc;border:1px solid rgba(99,102,241,.35)"
+         onmouseover="this.style.background='rgba(99,102,241,.3)'"
+         onmouseout="this.style.background='rgba(99,102,241,.15)'"
+         title="Hatırlatmalarım">
+        🔔 <span class="hidden sm:inline" id="t-hatirlatmalar">Hatırlatmalar</span>
+      </a>
+
       <!-- Kullanici ikonu + isim — her ekranda gorunur -->
       <button onclick="openProfileModal()"
               class="flex items-center gap-1 hover:opacity-80 transition cursor-pointer text-xs ts"
@@ -151,14 +192,26 @@
       <span class="hidden md:inline" style="font-size:1rem;line-height:1;cursor:default" title="Bağlantı konumu">{{ country_flag }}</span>
       {% endif %}
 
-      <!-- Dil (her zaman gorunur, sagda) -->
+      <!-- Dil (her zaman gorunur, sagda) — mobilde bayrakli, PC'de sade -->
       <select id="lang-select" onchange="setLang(this.value)"
               class="input-field rounded-lg px-1.5 py-1 text-xs cursor-pointer"
               style="min-width:4rem">
-        <option value="tr" {% if lang=='tr' %}selected{% endif %}>🇹🇷 TR</option>
-        <option value="en" {% if lang=='en' %}selected{% endif %}>🇬🇧 EN</option>
-        <option value="de" {% if lang=='de' %}selected{% endif %}>🇩🇪 DE</option>
+        <option value="tr" {% if lang=='tr' %}selected{% endif %} data-label-mobile="🇹🇷 TR" data-label-desktop="TR">TR</option>
+        <option value="en" {% if lang=='en' %}selected{% endif %} data-label-mobile="🇬🇧 EN" data-label-desktop="EN">EN</option>
+        <option value="de" {% if lang=='de' %}selected{% endif %} data-label-mobile="🇩🇪 DE" data-label-desktop="DE">DE</option>
       </select>
+      <script>
+        (function(){
+          function updateLangOptions(){
+            var isMobile=window.innerWidth<768;
+            document.querySelectorAll('#lang-select option').forEach(function(o){
+              o.textContent=isMobile?o.dataset.labelMobile:o.dataset.labelDesktop;
+            });
+          }
+          updateLangOptions();
+          window.addEventListener('resize',updateLangOptions);
+        })();
+      </script>
 
       <!-- Abonelik bitis navbar ikonu kaldirildi -->
 
@@ -184,32 +237,40 @@
 </nav>
 
 <!-- KULLANIM ÇUBUĞU -->
-<div class="tc border-b py-3 px-4" style="border-color:var(--c-border)">
-  <div class="max-w-7xl mx-auto grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-4 text-sm">
-    <div>
-      <div class="flex justify-between mb-1"><span class="ts text-xs" id="t-daily-lbl">Günlük</span><span id="usage-daily-text" class="text-xs font-medium">…</span></div>
+<div class="tc border-b py-4 px-4" style="border-color:var(--c-border)">
+  <div class="max-w-7xl mx-auto flex items-stretch gap-5 overflow-x-auto" style="scrollbar-width:none;-ms-overflow-style:none">
+    <div style="min-width:140px;flex-shrink:0">
+      <div class="mb-1 text-center"><div class="ts text-xs" id="t-daily-lbl">Günlük</div><div id="usage-daily-text" class="text-xs font-medium">…</div></div>
       <div class="lbar-bg"><div id="bar-daily" class="lbar-fill" style="background:var(--c-prim);width:0%"></div></div>
     </div>
-    <div>
-      <div class="flex justify-between mb-1"><span class="ts text-xs" id="t-monthly-lbl">Aylık</span><span id="usage-monthly-text" class="text-xs font-medium">…</span></div>
+    <div style="min-width:140px;flex-shrink:0">
+      <div class="mb-1 text-center"><div class="ts text-xs" id="t-monthly-lbl">Aylık</div><div id="usage-monthly-text" class="text-xs font-medium">…</div></div>
       <div class="lbar-bg"><div id="bar-monthly" class="lbar-fill" style="background:#f59e0b;width:0%"></div></div>
     </div>
-    <div class="flex flex-col justify-center">
+    <div class="flex flex-col items-center justify-center" style="min-width:140px;flex-shrink:0">
       <div class="flex items-center gap-1">
         <span class="ts text-xs" id="t-daily-rem-lbl">Günlük Kalan</span>
-        <span id="daily-reset-badge" class="text-xs ts" style="display:none;font-size:.6rem;opacity:.7">(<span id="daily-reset-str">…</span> sonra sıfır)</span>
+        <span id="daily-reset-badge" class="text-xs ts" style="display:none;font-size:.65rem;opacity:.7">(<span id="daily-reset-str">…</span> sonra sıfır)</span>
       </div>
       <span id="usage-daily-rem" class="text-base font-bold" style="color:var(--c-prim)">…</span>
     </div>
-    <div class="flex flex-col justify-center">
+    <div class="flex flex-col items-center justify-center" style="min-width:130px;flex-shrink:0">
       <span class="ts text-xs" id="t-monthly-rem-lbl">Aylık Kalan</span>
       <span id="usage-monthly-rem" class="text-base font-bold text-yellow-400">…</span>
     </div>
+    <div class="flex flex-col items-center justify-center" style="min-width:120px;flex-shrink:0">
+      <span class="ts text-xs" id="t-speed-lbl">Hız Limiti</span>
+      <span id="usage-speed" class="text-base font-bold" style="color:#22c55e">…</span>
+    </div>
+    <div class="flex flex-col items-center justify-center" style="min-width:140px;flex-shrink:0">
+      <span class="ts text-xs" id="t-device-lbl">Eşzamanlı İzleme</span>
+      <span id="usage-device" class="text-base font-bold" style="color:#38bdf8">…</span>
+    </div>
     {% if subscription_end %}
-    <div class="flex flex-col justify-center">
+    <div class="flex flex-col items-center justify-center" style="min-width:140px;flex-shrink:0">
       <span class="ts text-xs" id="t-sub-end-lbl">Abonelik Bitiş</span>
       <span class="text-base font-bold" style="color:#f59e0b">
-        <i class="fas fa-calendar-alt mr-1" style="font-size:.75rem"></i><span id="sub-end-days2">…</span>
+        <i class="fas fa-calendar-alt mr-1" style="font-size:.85rem"></i><span id="sub-end-days2">…</span>
       </span>
     </div>
     {% endif %}
@@ -512,6 +573,13 @@
       <span id="t-next">Sonraki</span><i class="fas fa-chevron-right ml-1"></i>
     </button>
   </div>
+  <!-- Infinite scroll sentinel (mobil) -->
+  <div id="inf-sentinel" style="height:1px;margin-bottom:2rem"></div>
+  <div id="inf-spinner" style="display:none">
+    <div id="inf-skeletons" class="grid gap-3 px-1" style="grid-template-columns:repeat(auto-fill,minmax(130px,1fr))">
+      <!-- JS tarafından skeleton kartlar eklenir -->
+    </div>
+  </div>
 </div>
 
 <!-- DETAY MODALI -->
@@ -592,21 +660,62 @@ function _secsToReset(){
   return Math.floor((target-nowIST)/1000);
 }
 const I18N={
-  tr:{title:APP_NAME,movies:"Filmler",series:"Diziler",loading:"Yükleniyor…",noResult:"Sonuç bulunamadı.",prev:"Önceki",next:"Sonraki",logout:"Çıkış",dlTitle:"İndir",dlPrep:"İndirme hazırlanıyor…",dlDesc:"Güvenli link oluşturuluyor.",dlSize:"Dosya Boyutu",dailyLbl:"Günlük",monthlyLbl:"Aylık",dailyRem:"Günlük Kalan",monthlyRem:"Aylık Kalan",unlimited:"Sınırsız",limitErr:"Günlük / aylık limitiniz doldu.",season:"Sezon",episode:"Bölüm",noEp:"Bölüm bulunamadı.",searchPh:"Film veya dizi ara…",searchCastPh:"Oyuncu adı ara…",filter:"Filtrele",flGenre:"Türe Göre",flYear:"Yıla Göre",flCast:"Oyuncuya Göre",castLabel:"Oyuncular",flPlatform:"Platforma Göre",expiry:"Son Kullanma",expiryLbl:"Son:",subEndLbl:"Abonelik Bitiş",noDownload:"İndirme linki bulunamadı.",searchModeTitle:"Film/Dizi Arama",searchModeCast:"Oyuncu Arama",
+  tr:{title:APP_NAME,movies:"Filmler",series:"Diziler",loading:"Yükleniyor…",noResult:"Sonuç bulunamadı.",prev:"Önceki",next:"Sonraki",logout:"Çıkış",dlTitle:"İndir",dlPrep:"İndirme hazırlanıyor…",dlDesc:"Güvenli link oluşturuluyor.",dlSize:"Dosya Boyutu",dailyLbl:"Günlük",monthlyLbl:"Aylık",dailyRem:"Günlük Kalan",monthlyRem:"Aylık Kalan",unlimited:"Sınırsız",limitErr:"Günlük / aylık limitiniz doldu.",season:"Sezon",episode:"Bölüm",noEp:"Bölüm bulunamadı.",searchPh:"Film veya dizi ara…",searchCastPh:"Oyuncu adı ara…",filter:"Filtrele",flGenre:"Türe Göre",flYear:"Yıla Göre",flCast:"Oyuncuya Göre",castLabel:"Oyuncular",flPlatform:"Platforma Göre",expiry:"Son Kullanma",expiryLbl:"Son:",subEndLbl:"Abonelik Bitiş",speedLbl:"Hız Limiti",deviceLbl:"Eşzamanlı İzleme",noDownload:"İndirme linki bulunamadı.",searchModeTitle:"Film/Dizi Arama",searchModeCast:"Oyuncu Arama",
     navFilm:"Film",navDizi:"Dizi",navToplam:"Toplam",
     sortNewest:"⬇ Yeni Eklenenler",sortRatingDesc:"⭐ IMDB Yüksek → Düşük",sortRatingAsc:"⭐ IMDB Düşük → Yüksek",sortYearDesc:"📅 Yıl Yeni → Eski",sortYearAsc:"📅 Yıl Eski → Yeni",sortAZ:"🔤 A → Z",sortZA:"🔤 Z → A",sortCollection:"🎬 Seri Filmler",sortYerliFilm:"🇹🇷 Yerli Filmler",sortYerliDizi:"🇹🇷 Yerli Diziler",
-    fragman:"Fragman",trailerWatch:"Fragman İzle",pmMemberInfo:"Üyelik Bilgileri",pmMemberSince:"Üyelik Başlangıcı",pmExpiry:"Bitiş Tarihi",pmDuration:"Süre",pmDataUsage:"Veri Kullanımı",pmDaily:"Günlük",pmMonthly:"Aylık",pmRemaining:"Kalan:",pmResetIn:"Sıfırlanmaya:",pmTotalDl:"Toplam İndirilen",pmLast30:"Son 30 Gün Veri Kullanımı",pm30DaysAgo:"← 30 gün önce · Bugün →",pmDaysLeft:"gün kaldı",pmSoonReset:"Az sonra sıfırlanıyor…",yerliDiziler:"Yerli Diziler",trendler:"Trendler",yeniCikanlar:"Yeni Çıkanlar",seeAll:"Tümünü Gör →"},
-  en:{title:APP_NAME,movies:"Movies",series:"Series",loading:"Loading…",noResult:"No results found.",prev:"Previous",next:"Next",logout:"Sign Out",dlTitle:"Download",dlPrep:"Preparing…",dlDesc:"Generating secure link.",dlSize:"File Size",dailyLbl:"Daily",monthlyLbl:"Monthly",dailyRem:"Daily Remaining",monthlyRem:"Monthly Remaining",unlimited:"Unlimited",limitErr:"Your limit has been reached.",season:"Season",episode:"Episode",noEp:"No episodes found.",searchPh:"Search movies or series…",searchCastPh:"Search by actor name…",filter:"Filter",flGenre:"By Genre",flYear:"By Year",flCast:"By Actor",castLabel:"Cast",flPlatform:"By Platform",expiry:"Expiry",expiryLbl:"Exp:",subEndLbl:"Subscription End",noDownload:"No download link available.",searchModeTitle:"Movie/Series Search",searchModeCast:"Actor Search",
+    fragman:"Fragman",trailerWatch:"Fragman İzle",pmMemberInfo:"Üyelik Bilgileri",pmMemberSince:"Üyelik Başlangıcı",pmExpiry:"Bitiş Tarihi",pmDuration:"Süre",pmDataUsage:"Veri Kullanımı",pmDaily:"Günlük",pmMonthly:"Aylık",pmRemaining:"Kalan:",pmResetIn:"Sıfırlanmaya:",pmTotalDl:"Toplam İndirilen",pmLast30:"Son 30 Gün Veri Kullanımı",pm30DaysAgo:"← 30 gün önce · Bugün →",pmDaysLeft:"gün kaldı",pmSoonReset:"Az sonra sıfırlanıyor…",yerliDiziler:"Yerli Diziler",trendler:"Trendler",yeniCikanlar:"Yeni Çıkanlar",seeAll:"Tümünü Gör →",hpRuntime:"dk",hpSeasons:"Sezon",loadingMore:"Daha fazla yükleniyor…",hatirla:"Hatırlat",hatirlaActive:"Hatırlatılıyor",hatirlaTitle:"Yeni bölüm/sezon bildirimlerini al",hatirlaActiveTitle:"Bildirimleri kapat",filmHatirlaTitle:"Film kataloğa eklenince bildirim al",hatirlatmalar:"Hatırlatmalar",hatirlatmalarim:"Hatırlatmalarım",kaldir:"Kaldır",bildirimAcildi:"🔔 Yeni bölüm eklenince Telegram'dan bildirim alacaksınız.",bildirimKapatildi:"🔕 Bildirimler kapatıldı.",hatirlatmaKaldirildi:"🔕 Hatırlatma kaldırıldı."},
+  en:{title:APP_NAME,movies:"Movies",series:"Series",loading:"Loading…",noResult:"No results found.",prev:"Previous",next:"Next",logout:"Sign Out",dlTitle:"Download",dlPrep:"Preparing…",dlDesc:"Generating secure link.",dlSize:"File Size",dailyLbl:"Daily",monthlyLbl:"Monthly",dailyRem:"Daily Remaining",monthlyRem:"Monthly Remaining",unlimited:"Unlimited",limitErr:"Your limit has been reached.",season:"Season",episode:"Episode",noEp:"No episodes found.",searchPh:"Search movies or series…",searchCastPh:"Search by actor name…",filter:"Filter",flGenre:"By Genre",flYear:"By Year",flCast:"By Actor",castLabel:"Cast",flPlatform:"By Platform",expiry:"Expiry",expiryLbl:"Exp:",subEndLbl:"Subscription End",speedLbl:"Speed Limit",deviceLbl:"Concurrent Streams",noDownload:"No download link available.",searchModeTitle:"Movie/Series Search",searchModeCast:"Actor Search",
     navFilm:"Movies",navDizi:"Series",navToplam:"Total",
     sortNewest:"⬇ Newly Added",sortRatingDesc:"⭐ IMDB High → Low",sortRatingAsc:"⭐ IMDB Low → High",sortYearDesc:"📅 Year Newest → Oldest",sortYearAsc:"📅 Year Oldest → Newest",sortAZ:"🔤 A → Z",sortZA:"🔤 Z → A",sortCollection:"🎬 Movie Series",sortYerliFilm:"🇹🇷 Turkish Movies",sortYerliDizi:"🇹🇷 Turkish Series",
-    fragman:"Trailer",trailerWatch:"Watch Trailer",pmMemberInfo:"Membership Info",pmMemberSince:"Member Since",pmExpiry:"Expiry Date",pmDuration:"Duration",pmDataUsage:"Data Usage",pmDaily:"Daily",pmMonthly:"Monthly",pmRemaining:"Remaining:",pmResetIn:"Resets in:",pmTotalDl:"Total Downloaded",pmLast30:"Last 30 Days Data Usage",pm30DaysAgo:"← 30 days ago · Today →",pmDaysLeft:"days left",pmSoonReset:"Resetting soon…",yerliDiziler:"Turkish Series",trendler:"Trending",yeniCikanlar:"New Releases",seeAll:"See All →"},
-  de:{title:APP_NAME,movies:"Filme",series:"Serien",loading:"Laden…",noResult:"Keine Ergebnisse.",prev:"Zurück",next:"Weiter",logout:"Abmelden",dlTitle:"Herunterladen",dlPrep:"Wird vorbereitet…",dlDesc:"Sicherer Link.",dlSize:"Dateigröße",dailyLbl:"Täglich",monthlyLbl:"Monatlich",dailyRem:"Täglich verbleibend",monthlyRem:"Monatlich verbleibend",unlimited:"Unbegrenzt",limitErr:"Limit erreicht.",season:"Staffel",episode:"Episode",noEp:"Keine Episoden.",searchPh:"Suchen…",searchCastPh:"Schauspieler suchen…",filter:"Filter",flGenre:"Nach Genre",flYear:"Nach Jahr",flCast:"Nach Schauspieler",castLabel:"Besetzung",flPlatform:"Nach Plattform",expiry:"Ablauf",expiryLbl:"Bis:",subEndLbl:"Abo-Ende",noDownload:"Kein Download-Link.",searchModeTitle:"Film/Serien-Suche",searchModeCast:"Schauspieler-Suche",
+    fragman:"Trailer",trailerWatch:"Watch Trailer",pmMemberInfo:"Membership Info",pmMemberSince:"Member Since",pmExpiry:"Expiry Date",pmDuration:"Duration",pmDataUsage:"Data Usage",pmDaily:"Daily",pmMonthly:"Monthly",pmRemaining:"Remaining:",pmResetIn:"Resets in:",pmTotalDl:"Total Downloaded",pmLast30:"Last 30 Days Data Usage",pm30DaysAgo:"← 30 days ago · Today →",pmDaysLeft:"days left",pmSoonReset:"Resetting soon…",yerliDiziler:"Turkish Series",trendler:"Trending",yeniCikanlar:"New Releases",seeAll:"See All →",hpRuntime:"min",hpSeasons:"Seasons",loadingMore:"Loading more…",hatirla:"Remind",hatirlaActive:"Reminded",hatirlaTitle:"Get notified for new episodes",hatirlaActiveTitle:"Turn off notifications",filmHatirlaTitle:"Notify when film is added",hatirlatmalar:"Reminders",hatirlatmalarim:"My Reminders",kaldir:"Remove",bildirimAcildi:"🔔 Notifications on! You'll be notified via Telegram for new episodes.",bildirimKapatildi:"🔕 Notifications turned off.",hatirlatmaKaldirildi:"🔕 Reminder removed."},
+  de:{title:APP_NAME,movies:"Filme",series:"Serien",loading:"Laden…",noResult:"Keine Ergebnisse.",prev:"Zurück",next:"Weiter",logout:"Abmelden",dlTitle:"Herunterladen",dlPrep:"Wird vorbereitet…",dlDesc:"Sicherer Link.",dlSize:"Dateigröße",dailyLbl:"Täglich",monthlyLbl:"Monatlich",dailyRem:"Täglich verbleibend",monthlyRem:"Monatlich verbleibend",unlimited:"Unbegrenzt",limitErr:"Limit erreicht.",season:"Staffel",episode:"Episode",noEp:"Keine Episoden.",searchPh:"Suchen…",searchCastPh:"Schauspieler suchen…",filter:"Filter",flGenre:"Nach Genre",flYear:"Nach Jahr",flCast:"Nach Schauspieler",castLabel:"Besetzung",flPlatform:"Nach Plattform",expiry:"Ablauf",expiryLbl:"Bis:",subEndLbl:"Abo-Ende",speedLbl:"Geschwindigkeitslimit",deviceLbl:"Gleichzeitige Streams",noDownload:"Kein Download-Link.",searchModeTitle:"Film/Serien-Suche",searchModeCast:"Schauspieler-Suche",
     navFilm:"Filme",navDizi:"Serien",navToplam:"Gesamt",
     sortNewest:"⬇ Neu hinzugefügt",sortRatingDesc:"⭐ IMDB Hoch → Niedrig",sortRatingAsc:"⭐ IMDB Niedrig → Hoch",sortYearDesc:"📅 Jahr Neu → Alt",sortYearAsc:"📅 Jahr Alt → Neu",sortAZ:"🔤 A → Z",sortZA:"🔤 Z → A",sortCollection:"🎬 Filmreihen",sortYerliFilm:"🇹🇷 Türkische Filme",sortYerliDizi:"🇹🇷 Türkische Serien",
-    fragman:"Trailer",trailerWatch:"Trailer ansehen",pmMemberInfo:"Mitgliedschaftsinfo",pmMemberSince:"Mitglied seit",pmExpiry:"Ablaufdatum",pmDuration:"Laufzeit",pmDataUsage:"Datennutzung",pmDaily:"Täglich",pmMonthly:"Monatlich",pmRemaining:"Verbleibend:",pmResetIn:"Zurücksetzung in:",pmTotalDl:"Gesamt heruntergeladen",pmLast30:"Datennutzung der letzten 30 Tage",pm30DaysAgo:"← Vor 30 Tagen · Heute →",pmDaysLeft:"Tage verbleibend",pmSoonReset:"Wird bald zurückgesetzt…",yerliDiziler:"Türkische Serien",trendler:"Trends",yeniCikanlar:"Neuerscheinungen",seeAll:"Alle anzeigen →"}
+    fragman:"Trailer",trailerWatch:"Trailer ansehen",pmMemberInfo:"Mitgliedschaftsinfo",pmMemberSince:"Mitglied seit",pmExpiry:"Ablaufdatum",pmDuration:"Laufzeit",pmDataUsage:"Datennutzung",pmDaily:"Täglich",pmMonthly:"Monatlich",pmRemaining:"Verbleibend:",pmResetIn:"Zurücksetzung in:",pmTotalDl:"Gesamt heruntergeladen",pmLast30:"Datennutzung der letzten 30 Tage",pm30DaysAgo:"← Vor 30 Tagen · Heute →",pmDaysLeft:"Tage verbleibend",pmSoonReset:"Wird bald zurückgesetzt…",yerliDiziler:"Türkische Serien",trendler:"Trends",yeniCikanlar:"Neuerscheinungen",seeAll:"Alle anzeigen →",hpRuntime:"Min",hpSeasons:"Staffeln",loadingMore:"Mehr laden…",hatirla:"Erinnern",hatirlaActive:"Erinnert",hatirlaTitle:"Neue Folgen benachrichtigen",hatirlaActiveTitle:"Benachrichtigungen aus",filmHatirlaTitle:"Benachrichtigen wenn Film verfügbar",hatirlatmalar:"Erinnerungen",hatirlatmalarim:"Meine Erinnerungen",kaldir:"Entfernen",bildirimAcildi:"🔔 Benachrichtigungen aktiv! Sie werden per Telegram informiert.",bildirimKapatildi:"🔕 Benachrichtigungen deaktiviert.",hatirlatmaKaldirildi:"🔕 Erinnerung entfernt."}
 };
 let CUR_LANG="{{ lang }}"||"tr",CUR_TYPE="movie",CUR_PAGE=1,TOTAL_PAGES=1,SEARCH_Q="",CUR_SORT="newest",CUR_GENRE="",CUR_YEAR="",CUR_CAST="",CUR_PLATFORM="";
+let _IS_MOBILE=window.innerWidth<768,_INF_LOADING=false,_INF_OBSERVER=null;
 let _sTimer=null,_fTimer=null,_yerliDiziLoaded=false;
+
+// ── Dizi Durum Rozeti ─────────────────────────────────────────────────────────
+const _STATUS_MAP={
+  'returning series':{cls:'status-continuing',icon:'fa-circle-play'},
+  'continuing':{cls:'status-continuing',icon:'fa-circle-play'},
+  'devam ediyor':{cls:'status-continuing',icon:'fa-circle-play'},
+  'ended':{cls:'status-ended',icon:'fa-flag-checkered'},
+  'final yaptı':{cls:'status-ended',icon:'fa-flag-checkered'},
+  'bitti':{cls:'status-ended',icon:'fa-flag-checkered'},
+  'canceled':{cls:'status-cancelled',icon:'fa-ban'},
+  'cancelled':{cls:'status-cancelled',icon:'fa-ban'},
+  'iptal edildi':{cls:'status-cancelled',icon:'fa-ban'},
+  'in production':{cls:'status-renewed',icon:'fa-clapperboard'},
+  'renewed':{cls:'status-renewed',icon:'fa-clapperboard'},
+  'yeni sezon onayı':{cls:'status-renewed',icon:'fa-clapperboard'},
+  'yeni sezon onayı aldı':{cls:'status-renewed',icon:'fa-clapperboard'},
+  'planned':{cls:'status-upcoming',icon:'fa-hourglass-start'},
+  'pilot':{cls:'status-upcoming',icon:'fa-hourglass-start'},
+  'yakında':{cls:'status-upcoming',icon:'fa-hourglass-start'},
+};
+const _STATUS_LABELS={
+  tr:{'returning series':'Devam Ediyor','continuing':'Devam Ediyor','devam ediyor':'Devam Ediyor','ended':'Final Yaptı','final yaptı':'Final Yaptı','bitti':'Final Yaptı','canceled':'İptal Edildi','cancelled':'İptal Edildi','iptal edildi':'İptal Edildi','in production':'Yeni Sezon Onaylandı','renewed':'Yeni Sezon Onaylandı','yeni sezon onayı':'Yeni Sezon Onaylandı','yeni sezon onayı aldı':'Yeni Sezon Onaylandı','planned':'Yakında','pilot':'Pilot','yakında':'Yakında'},
+  en:{'returning series':'Continuing','continuing':'Continuing','devam ediyor':'Continuing','ended':'Ended','final yaptı':'Ended','bitti':'Ended','canceled':'Cancelled','cancelled':'Cancelled','iptal edildi':'Cancelled','in production':'Renewed','renewed':'Renewed','yeni sezon onayı':'Renewed','yeni sezon onayı aldı':'Renewed','planned':'Upcoming','pilot':'Pilot','yakında':'Upcoming'},
+  de:{'returning series':'Läuft','continuing':'Läuft','devam ediyor':'Läuft','ended':'Beendet','final yaptı':'Beendet','bitti':'Beendet','canceled':'Abgesetzt','cancelled':'Abgesetzt','iptal edildi':'Abgesetzt','in production':'Verlängert','renewed':'Verlängert','yeni sezon onayı':'Verlängert','yeni sezon onayı aldı':'Verlängert','planned':'Bald','pilot':'Pilot','yakında':'Bald'},
+};
+function buildStatusBadge(status){
+  if(!status) return '';
+  const key=status.trim().toLowerCase();
+  const conf=_STATUS_MAP[key];
+  const cls=conf?conf.cls:'status-unknown';
+  const icon=conf?conf.icon:'fa-circle-question';
+  const labels=_STATUS_LABELS[CUR_LANG]||_STATUS_LABELS.tr;
+  const label=labels[key]||status;
+  return `<span class="status-badge ${cls}"><span class="status-dot"></span><i class="fas ${icon}" style="font-size:.55rem;opacity:.9"></i>${label}</span>`;
+}
+function statusOverlay(status){
+  const badge=buildStatusBadge(status);
+  if(!badge) return '';
+  return `<div class="status-overlay">${badge}</div>`;
+}
 
 // KRITIK DUZELTME: onclick icine JSON.stringify yerine key-based store
 // Turkce/Japonca/Korece karakterler ve tek tirnak onclick'i kirar
@@ -616,11 +725,11 @@ function store(item){const k="k"+(_idx++);_STORE[k]=item;return k;}
 function tmdbStore(item){const k="t"+(_tidx++);_TMDB_STORE[k]=item;return k;}
 function t(k){return(I18N[CUR_LANG]||I18N.tr)[k]||k;}
 
-function setLang(l){CUR_LANG=l;document.documentElement.lang=l;applyI18n();const u=new URL(location);u.searchParams.set("lang",l);history.replaceState({},"",u);CUR_PAGE=1;loadMedia();reRenderTmdbSections();}
+function setLang(l){CUR_LANG=l;localStorage.setItem("bflix_lang",l);document.documentElement.lang=l;applyI18n();const u=new URL(location);u.searchParams.set("lang",l);history.replaceState({},"",u);CUR_PAGE=1;loadMedia();reRenderTmdbSections();}
 
 function applyI18n(){
   document.title=t("title");
-  const m={"t-movies":"movies","t-series":"series","t-loading":"loading","t-no-result":"noResult","t-prev":"prev","t-next":"next","t-logout":"logout","t-dl-title":"dlTitle","t-dl-prep":"dlPrep","t-dl-desc":"dlDesc","t-dl-size":"dlSize","t-daily-lbl":"dailyLbl","t-monthly-lbl":"monthlyLbl","t-daily-rem-lbl":"dailyRem","t-monthly-rem-lbl":"monthlyRem","t-filter":"filter","t-fl-genre":"flGenre","t-fl-year":"flYear","t-fl-cast":"flCast","t-cast-label":"castLabel","t-expiry-label":"expiryLbl","t-sub-end-lbl":"subEndLbl",
+  const m={"t-movies":"movies","t-series":"series","t-loading":"loading","t-loading-more":"loadingMore","t-no-result":"noResult","t-prev":"prev","t-next":"next","t-logout":"logout","t-dl-title":"dlTitle","t-dl-prep":"dlPrep","t-dl-desc":"dlDesc","t-dl-size":"dlSize","t-daily-lbl":"dailyLbl","t-monthly-lbl":"monthlyLbl","t-daily-rem-lbl":"dailyRem","t-monthly-rem-lbl":"monthlyRem","t-filter":"filter","t-fl-genre":"flGenre","t-fl-year":"flYear","t-fl-cast":"flCast","t-cast-label":"castLabel","t-expiry-label":"expiryLbl","t-sub-end-lbl":"subEndLbl","t-speed-lbl":"speedLbl","t-device-lbl":"deviceLbl",
     "t-nav-film":"navFilm","t-nav-dizi":"navDizi","t-nav-toplam":"navToplam",
     "t-nav-film-m":"navFilm","t-nav-dizi-m":"navDizi",
     "t-yerli-dizi-lbl":"yerliDiziler","t-trending-lbl":"trendler","t-newrel-lbl":"yeniCikanlar","t-see-all":"seeAll","t-modal-trailer-lbl":"trailerWatch"};
@@ -635,6 +744,12 @@ function applyI18n(){
   const pmStatMap={"pm-label-since":"pmMemberSince","pm-label-expiry":"pmExpiry","pm-label-duration":"pmDuration","pm-label-daily":"pmDaily","pm-label-monthly":"pmMonthly","pm-label-total":"pmTotalDl","pm-label-remaining":"pmRemaining","pm-label-remaining2":"pmRemaining","pm-label-reset-in":"pmResetIn"};
   for(const[id,k]of Object.entries(pmStatMap)){const el=document.getElementById(id);if(el)el.textContent=t(k);}
   const el30=document.getElementById("pm-30days-ago");if(el30)el30.textContent=t("pm30DaysAgo");
+  const elHat=document.getElementById("t-hatirlatmalar");if(elHat)elHat.textContent=t("hatirlatmalar");
+  // Ekrandaki tüm hatirla butonlarını güncelle
+  document.querySelectorAll('.hat-label').forEach(el=>{
+    const btn=el.closest('.btn-hatirla');
+    if(btn) el.textContent = btn.classList.contains('active') ? t('hatirlaActive') : t('hatirla');
+  });
   // TMDB media type badges in renderTmdbGrid — updated on next render
 }
 
@@ -685,6 +800,7 @@ async function loadSubDays(){
     function _fmtGb2(bytes){
       if(!bytes) return "0 GB";
       const gb=bytes/1073741824;
+      if(gb>=1000)return(gb/1024).toFixed(2)+" TB";
       return gb>=1?gb.toFixed(2)+" GB":(bytes/1048576).toFixed(0)+" MB";
     }
     const mEl=document.getElementById("db-movies-gb");
@@ -710,12 +826,16 @@ function renderUsageFallback(){
     daily_limit:   parseFloat("{{ usage.daily_limit|default(0) }}")||0,
     monthly_limit: parseFloat("{{ usage.monthly_limit|default(0) }}")||0,
     daily_remaining:   {% if usage.daily_remaining is not none %}parseFloat("{{ usage.daily_remaining }}"){% else %}null{% endif %},
-    monthly_remaining: {% if usage.monthly_remaining is not none %}parseFloat("{{ usage.monthly_remaining }}"){% else %}null{% endif %}
+    monthly_remaining: {% if usage.monthly_remaining is not none %}parseFloat("{{ usage.monthly_remaining }}"){% else %}null{% endif %},
+    speed_limit_mbps:  parseFloat("{{ usage.speed_limit_mbps|default(0) }}")||0,
+    speed_is_personal: {{ 'true' if usage.speed_is_personal else 'false' }},
+    device_limit:       parseInt("{{ usage.device_limit|default(0) }}")||0,
+    active_device_count: parseInt("{{ usage.active_device_count|default(0) }}")||0
   };
   renderUsage(d);
 }
 function renderUsage(d){
-  const gb=v=>v!=null?(v<1?(v*1024).toFixed(0)+" MB":v.toFixed(2)+" GB"):t("unlimited");
+  const gb=v=>v!=null?(v<1?(v*1024).toFixed(0)+" MB":v>=1000?(v/1024).toFixed(2)+" TB":v.toFixed(2)+" GB"):t("unlimited");
   const pct=(u,l)=>l>0?Math.min(100,Math.round(u/l*100)):0;
   document.getElementById("bar-daily").style.width=pct(d.daily_gb||0,d.daily_limit)+"%";
   document.getElementById("bar-monthly").style.width=pct(d.monthly_gb||0,d.monthly_limit)+"%";
@@ -724,6 +844,33 @@ function renderUsage(d){
   document.getElementById("usage-daily-rem").textContent=d.daily_remaining!=null?gb(d.daily_remaining):t("unlimited");
   const _navRem=document.getElementById("navbar-daily-rem");if(_navRem)_navRem.textContent=d.daily_remaining!=null?gb(d.daily_remaining):t("unlimited");
   document.getElementById("usage-monthly-rem").textContent=d.monthly_remaining!=null?gb(d.monthly_remaining):t("unlimited");
+  // Hız Limiti
+  const _speedEl=document.getElementById("usage-speed");
+  if(_speedEl){
+    const _spd=d.speed_limit_mbps||0;
+    if(_spd>0){
+      const _spdStr=_spd>=1000?(_spd/1000).toFixed(1)+" Gbps":_spd+" Mbps";
+      const _isPersonal=d.speed_is_personal===true;
+      _speedEl.innerHTML=`${_spdStr}<span style="font-size:.6rem;opacity:.65;margin-left:4px">${_isPersonal?"(kişisel)":"(global)"}</span>`;
+      _speedEl.style.color=_isPersonal?"#a78bfa":"#22c55e";
+    }else{
+      _speedEl.textContent=t("unlimited");
+      _speedEl.style.color="#22c55e";
+    }
+  }
+  // Eşzamanlı izleme
+  const _deviceEl=document.getElementById("usage-device");
+  if(_deviceEl){
+    const _active=parseInt(d.active_device_count)||0;
+    const _dlimit=parseInt(d.device_limit)||0;
+    if(_dlimit>0){
+      _deviceEl.textContent=`${_active} / ${_dlimit}`;
+      _deviceEl.style.color=_active>=_dlimit?"#f87171":"#38bdf8";
+    }else{
+      _deviceEl.textContent=`${_active} / ∞`;
+      _deviceEl.style.color="#38bdf8";
+    }
+  }
   const b=document.getElementById("badge-text");if(b)b.textContent=`${t("dailyRem")}: ${d.daily_remaining!=null?gb(d.daily_remaining):t("unlimited")}`;
   document.getElementById("usage-badge").classList.remove("hidden");
 
@@ -782,10 +929,10 @@ function updateBadge(){const n=[CUR_GENRE,CUR_PLATFORM,CUR_YEAR,CUR_CAST].filter
 function toggleFilters(){document.getElementById("filter-panel").classList.toggle("hidden");}
 function debouncedSearch(){clearTimeout(_sTimer);_sTimer=setTimeout(()=>{SEARCH_Q=document.getElementById("search-input").value.trim();CUR_PAGE=1;loadMedia();},400);}
 function clearSearch(){document.getElementById("search-input").value="";SEARCH_Q="";CUR_PAGE=1;loadMedia();}
-function changePage(d){const np=CUR_PAGE+d;if(np<1||np>TOTAL_PAGES)return;CUR_PAGE=np;loadMedia();window.scrollTo({top:0,behavior:"smooth"});}
+function changePage(d){if(_IS_MOBILE)return;const np=CUR_PAGE+d;if(np<1||np>TOTAL_PAGES)return;CUR_PAGE=np;loadMedia();window.scrollTo({top:0,behavior:"smooth"});}
 
-async function loadMedia(){
-  showLoading(true);
+async function loadMedia(append=false){
+  if(!append){showLoading(true);}
   const p=new URLSearchParams({media_type:CUR_TYPE,page:CUR_PAGE,page_size:24,lang:CUR_LANG,sort:CUR_SORT});
   if(SEARCH_Q){
     if(typeof SEARCH_MODE!=="undefined"&&SEARCH_MODE==="cast"){p.set("cast_name",SEARCH_Q);}
@@ -798,41 +945,99 @@ async function loadMedia(){
   try{
     const r=await fetch(`/api/uye/medya?${p}`);
     if(r.status===401){location.href="/uye/giris";return;}
-    if(r.status===403){showToast(t("limitErr"),"red");showLoading(false);return;}
+    if(r.status===429){
+      let _detail="";
+      try{const _j=await r.clone().json();_detail=_j.detail||"";}catch(e){}
+      const _msg=(_detail==="daily_limit"||_detail==="monthly_limit")?t("limitErr"):"İstek limiti aşıldı, lütfen bekleyin.";
+      showToast(_msg,"red");showLoading(false);return;
+    }
+    if(r.status===403){
+      let _detail403="";
+      try{const _j=await r.clone().json();_detail403=_j.detail||"";}catch(e){}
+      if(_detail403==="daily_limit"||_detail403==="monthly_limit"){showToast(t("limitErr"),"red");}
+      else{location.href="/uye/giris";}
+      showLoading(false);return;
+    }
     const d=await r.json();
     const items=d.movies||d.tv_shows||[];
     TOTAL_PAGES=d.total_pages||1;
-    renderGrid(items);
-    renderPagination(d.current_page||1,TOTAL_PAGES);
-    // TV dizisi olan kartlar için poster overlay'lerini yükle (arama sonuçlarında da çalışır)
+    if(append){appendGrid(items);}else{renderGrid(items);}
+    // Mobilde pagination gizle, masaüstünde göster
+    if(_IS_MOBILE){
+      document.getElementById("pagination").classList.add("hidden");
+    }else{
+      renderPagination(d.current_page||1,TOTAL_PAGES);
+    }
     prefetchTvOverlays(items);
-  }catch(e){showToast("Hata: "+e.message,"red");}
-  finally{showLoading(false);}
+  }catch(e){
+    // Ağ hatası (DNS, timeout vb.) → 3 deneme yap, sonra bildir
+    if(!append&&!_loadMedia_retrying){
+      _loadMedia_retrying=true;
+      let _retryOk=false;
+      for(let _i=0;_i<2;_i++){
+        await new Promise(r=>setTimeout(r,2000));
+        try{
+          const _r2=await fetch(`/api/uye/medya?${p}`);
+          if(_r2.ok||_r2.status===401||_r2.status===403||_r2.status===429){
+            _retryOk=true;
+            if(_r2.status===401){location.href="/uye/giris";return;}
+            if(_r2.status===429||_r2.status===403){
+              let _dj="";
+              try{const _jj=await _r2.clone().json();_dj=_jj.detail||"";}catch(ee){}
+              if(_dj==="daily_limit"||_dj==="monthly_limit"){showToast(t("limitErr"),"red");}
+              else if(_r2.status===403){location.href="/uye/giris";}
+              else{showToast("İstek limiti aşıldı, lütfen bekleyin.","red");}
+            }else{
+              const _d2=await _r2.json();
+              const _items2=_d2.movies||_d2.tv_shows||[];
+              TOTAL_PAGES=_d2.total_pages||1;
+              renderGrid(_items2);
+              if(!_IS_MOBILE)renderPagination(_d2.current_page||1,TOTAL_PAGES);
+              prefetchTvOverlays(_items2);
+            }
+            break;
+          }
+        }catch(ee){}
+      }
+      _loadMedia_retrying=false;
+      if(!_retryOk){showToast("Sunucuya ulaşılamıyor, lütfen sayfayı yenileyin.","red");}
+    }else if(!_loadMedia_retrying){
+      showToast("Hata: "+e.message,"red");
+    }
+  }
+  finally{showLoading(false);_INF_LOADING=false;infSpinner(false);}
   refreshTmdbVisibility();
 }
 
 // Dizi listesindeki tüm kartların bayrak+çözünürlük verisini arka planda toplu çek
-// Rate limit'e takılmamak için sırayla (concurrency=3) işle
+// Mobilde: scroll bittikten sonra (requestIdleCallback) ve concurrency=1 ile çek
+// Masaüstünde: concurrency=3 ile hemen çek
 async function prefetchTvOverlays(items){
   const tvItems=items.filter(i=>i.media_type==="tv"&&i.tmdb_id&&!_TV_POSTER_DATA[i.tmdb_id]);
   if(!tvItems.length)return;
-  const CONCURRENCY=3;
-  let idx=0;
-  async function worker(){
-    while(idx<tvItems.length){
-      const item=tvItems[idx++];
-      try{
-        const dbIdx=(item.db_index!=null&&item.db_index>=0)?item.db_index:-1;
-        const r=await fetch(`/api/uye/tv-detay?tmdb_id=${item.tmdb_id}&db_index=${dbIdx}&lang=${CUR_LANG}`);
-        if(!r.ok)continue;
-        const seasons=(await r.json()).seasons||[];
-        collectTvPosterData(item.tmdb_id,seasons,item.original_language||"");
-        updateTvCardOverlay(item.tmdb_id);
-      }catch(e){}
+  const CONCURRENCY=_IS_MOBILE?1:2;
+  async function _run(){
+    let idx=0;
+    async function worker(){
+      while(idx<tvItems.length){
+        const item=tvItems[idx++];
+        try{
+          const dbIdx=(item.db_index!=null&&item.db_index>=0)?item.db_index:-1;
+          const r=await fetch(`/api/uye/tv-detay?tmdb_id=${item.tmdb_id}&db_index=${dbIdx}&lang=${CUR_LANG}`);
+          if(!r.ok)continue;
+          const seasons=(await r.json()).seasons||[];
+          collectTvPosterData(item.tmdb_id,seasons,item.original_language||"");
+          updateTvCardOverlay(item.tmdb_id);
+        }catch(e){}
+      }
     }
+    await Promise.all(Array.from({length:CONCURRENCY},worker));
   }
-  // CONCURRENCY kadar paralel worker başlat
-  await Promise.all(Array.from({length:CONCURRENCY},worker));
+  if(_IS_MOBILE&&typeof requestIdleCallback==="function"){
+    requestIdleCallback(()=>_run(),{timeout:3000});
+  }else{
+    _run();
+  }
 }
 
 function poster(item){if(CUR_LANG==="tr"&&item.poster_tr)return item.poster_tr;if(CUR_LANG==="de"&&item.poster_de)return item.poster_de;return item.poster||"";}
@@ -876,9 +1081,22 @@ function renderGrid(items){
     const hpImdb=rt?`<span class="hp-imdb"><i class="fas fa-star" style="font-size:.6rem"></i>${rt}</span>`:"";
     const hpYear=yr?`<span class="hp-year">${yr}</span>`:"";
     const hpTrailerBtn=item.tmdb_id?`<button class="hp-trailer-btn" onclick="openTrailer('${item.tmdb_id}','${isTV?"tv":"movie"}','${tl}',event)"><i class="fab fa-youtube"></i> ${t("trailerWatch")}</button>`:"";
-    const hoverPreview=`<div class="hover-preview"><div class="hp-title">${tl}</div><div class="hp-meta">${hpImdb}${hpYear}</div>${hpDesc}${hpTrailerBtn}</div>`;
+    // Runtime (film) veya Sezon sayisi (dizi)
+    let hpExtra="";
+    if(!isTV&&item.runtime&&item.runtime>0){
+      const h=Math.floor(item.runtime/60),m=item.runtime%60;
+      const rtStr=h>0?(m>0?`${h}s ${m}${t("hpRuntime")}`:`${h}s`):`${m} ${t("hpRuntime")}`;
+      hpExtra=`<span class="hp-extra"><i class="fas fa-clock" style="font-size:.55rem;opacity:.7"></i> ${rtStr}</span>`;
+    }else if(isTV&&item.season_count>0){
+      hpExtra=`<span class="hp-extra"><i class="fas fa-layer-group" style="font-size:.55rem;opacity:.7"></i> ${item.season_count} ${t("hpSeasons")}</span>`;
+    }
+    const hoverPreview=`<div class="hover-preview"><div class="hp-title">${tl}</div><div class="hp-meta">${hpImdb}${hpYear}${hpExtra}</div>${hpDesc}${hpTrailerBtn}</div>`;
+    const posterInner=p
+      ?`<img class="lazy" data-src="${escAttr(p)}" alt="${tl}" onerror="this.style.display='none'"><div class="skeleton poster-skeleton"></div>`
+      :`<div style="display:flex;align-items:center;justify-content:center;height:100%"><i class="fas fa-film" style="font-size:2rem;opacity:.2"></i></div>`;
+    const hatirlaBtn=isTV&&item.tmdb_id?`<button class="btn-hatirla" data-tmdb="${item.tmdb_id}" data-dbindex="${(item.db_index!=null&&item.db_index>=0)?item.db_index:0}" data-title="${tl}" data-poster="${escAttr(p||'')}" data-status="${escAttr(item.status||'')}" onclick="toggleHatirla(this);event.stopPropagation();" title="${t('hatirlaTitle')}"><span class="hat-icon">🔔</span><span class="hat-label">${t('hatirla')}</span></button>`:(!isTV&&item.tmdb_id?`<button class="btn-hatirla btn-film-hatirla" data-tmdb="${item.tmdb_id}" data-dbindex="${(item.db_index!=null&&item.db_index>=0)?item.db_index:0}" data-title="${tl}" data-poster="${escAttr(p||'')}" data-status="${escAttr(item.status||'')}" onclick="toggleFilmHatirla(this);event.stopPropagation();" title="${t('filmHatirlaTitle')}"><span class="hat-icon">🔔</span><span class="hat-label">${t('hatirla')}</span></button>`:"");
     return `<div class="media-card-wrap"><div class="media-card"${dataAttr} onclick="openModal('${key}')">
-      <div class="poster-wrap">${p?`<img src="${escAttr(p)}" alt="${tl}" loading="lazy" onerror="this.style.display='none'">`:`<div style="display:flex;align-items:center;justify-content:center;height:100%"><i class="fas fa-film" style="font-size:2rem;opacity:.2"></i></div>`}${isTV?`<div class="lang-overlay tv-flag-overlay">${tvInitialFlag}</div><span class="tv-res-overlay"></span>`:(flagHtml||ccFlagHtml?`<div class="lang-overlay">${flagHtml}${ccFlagHtml}</div>`:"")+(resBadgeHtml||"")}</div>
+      <div class="poster-wrap">${posterInner}${isTV?`<div class="lang-overlay tv-flag-overlay">${tvInitialFlag}</div><span class="tv-res-overlay"></span>${statusOverlay(item.status)}`:(flagHtml||ccFlagHtml?`<div class="lang-overlay">${flagHtml}${ccFlagHtml}</div>`:"")+(resBadgeHtml||"")}${hatirlaBtn}</div>
       <div class="p-2 tc" style="border-top:1px solid var(--c-border)">
         <div class="text-xs font-semibold leading-snug mb-1 line-clamp-2">${tl}</div>
         <div class="flex flex-wrap gap-1 text-xs ts">
@@ -889,10 +1107,130 @@ function renderGrid(items){
     </div>${hoverPreview}</div>`;
   }).join("");
   positionHoverPreviews();
+  initLazyPosters();
+  initHatirlaButtons();
+  initFilmHatirlaButtons();
 }
 
-// Hover preview'in ekran kenarından taşmasını önle
+// Infinite scroll: grid'e yeni kartlar ekle (mevcut _STORE'u korur)
+function appendGrid(items){
+  const grid=document.getElementById("media-grid"),noR=document.getElementById("no-results");
+  noR.classList.add("hidden");
+  const frag=document.createDocumentFragment();
+  const tmp=document.createElement("div");
+  tmp.innerHTML=items.map(item=>{
+    const key=store(item);
+    const p=poster(item),tl=escAttr(title(item)),c=cert(item),yr=item.release_year||"",rt=item.rating?item.rating.toFixed(1):"",sc=item.season_count?item.season_count+" "+t("season"):"";
+    const gs=genres(item).slice(0,2);
+    const isTV=item.media_type==="tv";
+    let flagHtml="",resBadgeHtml="",ccFlagHtml="";
+    if(!isTV){
+      const flags=langFlag(item);
+      flagHtml=flags?flags.split(" ").filter(Boolean).map(f=>f==="tr"?`<span class="css-flag-tr lang-flag"></span>`:`<span class="lang-flag fi fi-${f}"></span>`).join(""):"";
+      resBadgeHtml=resBadge(item);
+      const qs=item.qualities||[];
+      if(qs.some(q=>/trsub|t[uü]rk[cç]e\.altyaz[iı]/i.test(q.name||"")))
+        ccFlagHtml=`<span class="cc-flag">CC</span>`;
+    }
+    const isYerli=isTV&&(item.original_language||"").toLowerCase()==="tr";
+    const dataAttr=isTV&&item.tmdb_id?` data-tmdbid="${item.tmdb_id}" data-origlang="${item.original_language||""}"` :"";
+    const tvInitialFlag=isYerli?`<span class="css-flag-tr lang-flag"></span>`:"";
+    const shortDesc=(CUR_LANG==="tr"&&item.description_tr?item.description_tr:CUR_LANG==="de"&&item.description_de?item.description_de:item.description)||"";
+    const hpDesc=shortDesc?`<div class="hp-desc">${escAttr(shortDesc)}</div>`:"";
+    const hpImdb=rt?`<span class="hp-imdb"><i class="fas fa-star" style="font-size:.6rem"></i>${rt}</span>`:"";
+    const hpYear=yr?`<span class="hp-year">${yr}</span>`:"";
+    const hpTrailerBtn=item.tmdb_id?`<button class="hp-trailer-btn" onclick="openTrailer('${item.tmdb_id}','${isTV?"tv":"movie"}','${tl}',event)"><i class="fab fa-youtube"></i> ${t("trailerWatch")}</button>`:"";
+    let hpExtra="";
+    if(!isTV&&item.runtime&&item.runtime>0){
+      const h=Math.floor(item.runtime/60),m=item.runtime%60;
+      const rtStr=h>0?(m>0?`${h}s ${m}${t("hpRuntime")}`:`${h}s`):`${m} ${t("hpRuntime")}`;
+      hpExtra=`<span class="hp-extra"><i class="fas fa-clock" style="font-size:.55rem;opacity:.7"></i> ${rtStr}</span>`;
+    }else if(isTV&&item.season_count>0){
+      hpExtra=`<span class="hp-extra"><i class="fas fa-layer-group" style="font-size:.55rem;opacity:.7"></i> ${item.season_count} ${t("hpSeasons")}</span>`;
+    }
+    const hoverPreview=`<div class="hover-preview"><div class="hp-title">${tl}</div><div class="hp-meta">${hpImdb}${hpYear}${hpExtra}</div>${hpDesc}${hpTrailerBtn}</div>`;
+    const posterInner2=p
+      ?`<img class="lazy" data-src="${escAttr(p)}" alt="${tl}" onerror="this.style.display='none'"><div class="skeleton poster-skeleton"></div>`
+      :`<div style="display:flex;align-items:center;justify-content:center;height:100%"><i class="fas fa-film" style="font-size:2rem;opacity:.2"></i></div>`;
+    const hatirlaBtn2=isTV&&item.tmdb_id?`<button class="btn-hatirla" data-tmdb="${item.tmdb_id}" data-dbindex="${(item.db_index!=null&&item.db_index>=0)?item.db_index:0}" data-title="${tl}" data-poster="${escAttr(p||'')}" data-status="${escAttr(item.status||'')}" onclick="toggleHatirla(this);event.stopPropagation();" title="${t('hatirlaTitle')}"><span class="hat-icon">🔔</span><span class="hat-label">${t('hatirla')}</span></button>`:(!isTV&&item.tmdb_id?`<button class="btn-hatirla btn-film-hatirla" data-tmdb="${item.tmdb_id}" data-dbindex="${(item.db_index!=null&&item.db_index>=0)?item.db_index:0}" data-title="${tl}" data-poster="${escAttr(p||'')}" data-status="${escAttr(item.status||'')}" onclick="toggleFilmHatirla(this);event.stopPropagation();" title="${t('filmHatirlaTitle')}"><span class="hat-icon">🔔</span><span class="hat-label">${t('hatirla')}</span></button>`:"");
+    return `<div class="media-card-wrap"><div class="media-card"${dataAttr} onclick="openModal('${key}')">
+      <div class="poster-wrap">${posterInner2}${isTV?`<div class="lang-overlay tv-flag-overlay">${tvInitialFlag}</div><span class="tv-res-overlay"></span>${statusOverlay(item.status)}`:(flagHtml||ccFlagHtml?`<div class="lang-overlay">${flagHtml}${ccFlagHtml}</div>`:"")+(resBadgeHtml||"")}${hatirlaBtn2}</div>
+      <div class="p-2 tc" style="border-top:1px solid var(--c-border)">
+        <div class="text-xs font-semibold leading-snug mb-1 line-clamp-2">${tl}</div>
+        <div class="flex flex-wrap gap-1 text-xs ts">
+          ${yr?`<span>${yr}</span>`:""}${rt?`<span class="chip-rating">⭐${rt}</span>`:""}${c?`<span class="chip">${c}</span>`:""}${sc?`<span>${sc}</span>`:""}
+        </div>
+        ${gs.length?`<div class="flex flex-wrap gap-1 mt-1">${gs.map(g=>`<span class="chip chip-genre" style="font-size:.6rem;padding:1px 6px">${g}</span>`).join("")}</div>`:""}
+      </div>
+    </div>${hoverPreview}</div>`;
+  }).join("");
+  while(tmp.firstChild)frag.appendChild(tmp.firstChild);
+  grid.appendChild(frag);
+  positionHoverPreviews();
+  initLazyPosters();
+  initHatirlaButtons();
+  initFilmHatirlaButtons();
+}
+
+// ── Lazy Poster Observer ──────────────────────────────────────────────────
+let _LAZY_OBS=null;
+function initLazyPosters(){
+  // Tek bir observer örneği yeterli — yeni img'leri observe et
+  if(!_LAZY_OBS){
+    _LAZY_OBS=new IntersectionObserver((entries)=>{
+      entries.forEach(entry=>{
+        if(!entry.isIntersecting) return;
+        const img=entry.target;
+        img.src=img.dataset.src;
+        img.onload=()=>{
+          img.classList.add("loaded");
+          const sk=img.nextElementSibling;
+          if(sk&&sk.classList.contains("poster-skeleton")) sk.remove();
+        };
+        img.onerror=()=>{
+          img.style.display="none";
+          const sk=img.nextElementSibling;
+          if(sk&&sk.classList.contains("poster-skeleton")) sk.remove();
+        };
+        _LAZY_OBS.unobserve(img);
+      });
+    },{rootMargin:_IS_MOBILE?"300px":"150px"});
+  }
+  // Henüz src atanmamış lazy img'leri bağla
+  document.querySelectorAll("img.lazy:not([src])").forEach(img=>_LAZY_OBS.observe(img));
+}
+
+// Infinite scroll spinner yardımcısı
+function infSpinner(on){
+  const s=document.getElementById("inf-spinner");
+  if(!s) return;
+  if(on){
+    // Mevcut grid sütun sayısını al, aynı sayıda skeleton kart üret
+    const grid=document.getElementById("media-grid");
+    const cols=grid?Math.round(grid.offsetWidth/150)||4:4;
+    const skeletonCount=cols*2; // 2 satır skeleton
+    const sk=document.getElementById("inf-skeletons");
+    if(sk){
+      sk.innerHTML=Array.from({length:skeletonCount},()=>`
+        <div class="media-card" style="pointer-events:none">
+          <div class="poster-wrap"><div class="skeleton poster-skeleton"></div></div>
+          <div class="p-2 tc" style="border-top:1px solid var(--c-border)">
+            <div class="skeleton" style="height:10px;margin-bottom:6px;border-radius:3px"></div>
+            <div class="skeleton" style="height:8px;width:60%;border-radius:3px"></div>
+          </div>
+        </div>`).join("");
+    }
+    s.style.display="block";
+  }else{
+    s.style.display="none";
+    const sk=document.getElementById("inf-skeletons");
+    if(sk) sk.innerHTML="";
+  }
+}
+
+// Hover preview'in ekran kenarından taşmasını önle — mobilde hover yok, atla
 function positionHoverPreviews(){
+  if(_IS_MOBILE) return;
   requestAnimationFrame(()=>{
     const wraps=document.querySelectorAll(".media-card-wrap");
     const vw=window.innerWidth;
@@ -908,6 +1246,8 @@ function positionHoverPreviews(){
 
 function renderPagination(cur,total){
   const pg=document.getElementById("pagination");
+  // Mobilde infinite scroll kullanılır — pagination gizli kalır
+  if(_IS_MOBILE){pg.classList.add("hidden");return;}
   if(total<=1){pg.classList.add("hidden");return;}
   pg.classList.remove("hidden");
   document.getElementById("page-info").textContent=`${cur} / ${total}`;
@@ -1084,7 +1424,7 @@ function renderMovieQualities(qs){
         ${qFlagHtml?`<div class="flex gap-1 items-center">${qFlagHtml}</div>`:""}
         ${hasTrSub?`<span class="cc-badge" style="font-size:.6rem;padding:3px 6px">CC</span>`:""}
         <button onclick="startDownload('${q.id}','${fn}',${q.size?`'${escAttr(q.size)}'`:'null'})" class="btn-prim text-xs px-3 py-2 rounded-lg hover:opacity-85 transition">
-          <i class="fas fa-download mr-1"></i>${t("dlTitle")}
+          ${q.source==='gdrive'?'<i class="fab fa-google-drive mr-1"></i>':q.source&&q.source.startsWith('rclone')?'<i class="fas fa-cloud mr-1"></i>':'<i class="fas fa-download mr-1"></i>'}${t("dlTitle")}
         </button>
       </div>
     </div>`;
@@ -1221,7 +1561,7 @@ function renderEp(ep){
           ${qFlagHtml?`<div class="flex gap-1 items-center">${qFlagHtml}</div>`:""}
           ${hasTrSub?`<span class="cc-badge" style="font-size:.6rem;padding:3px 6px">CC</span>`:""}
           <button onclick="startDownload('${q.id}','${fn}',${q.size?`'${escAttr(q.size)}'`:'null'})" class="btn-prim text-xs px-3 py-1.5 rounded-lg hover:opacity-85 transition">
-            <i class="fas fa-download mr-1"></i>${t("dlTitle")}
+            ${q.source==='gdrive'?'<i class="fab fa-google-drive mr-1"></i>':q.source&&q.source.startsWith('rclone')?'<i class="fas fa-cloud mr-1"></i>':'<i class="fas fa-download mr-1"></i>'}${t("dlTitle")}
           </button>
         </div>
       </div>`;
@@ -1301,17 +1641,45 @@ async function startDownload(fileId,encodedFilename,fileSize){
       _b.href=d.url_direct;_b.download=filename;_b.target="_blank";_b.rel="noopener noreferrer";
       document.body.appendChild(_b);_b.click();document.body.removeChild(_b);
     }
-    // <a download> ile indir — Drive dahil tüm URL'lerde oynatma yerine indirme tetiklenir
-    const _a=document.createElement("a");
-    _a.href=d.url;
-    _a.download=filename;
-    // Drive linkleri cross-origin olduğunda download attribute çalışmayabilir;
-    // bu durumda yeni sekmede aç ki tarayıcı oynatma yerine indirsin
-    if(d.is_gdrive||d.url.includes("drive.google")||(d.gdrive_direct)){
-      _a.target="_blank";_a.rel="noopener noreferrer";
+    // Cross-origin URL'lerde (Drive, Rclone vb.) <a download> çalışmaz;
+    // Chrome bu durumda dosyayı indirmek yerine oynatır.
+    // Çözüm: fetch → blob → local blob URL üzerinden indir.
+    const isCrossOrigin = d.is_gdrive||d.is_rclone||d.url.includes("drive.google")||d.gdrive_direct;
+    if(isCrossOrigin){
+      // Blob indirme: URL'yi sunucu tarafından proxy ediyorsak bu çalışır.
+      // Eğer gerçekten farklı origin ise CORS engeli devreye girer;
+      // bu durumda fallback olarak yeni sekmede açılır.
+      try{
+        const resp = await fetch(d.url);
+        if(!resp.ok) throw new Error("fetch "+resp.status);
+        const blob = await resp.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        const _a = document.createElement("a");
+        _a.href = blobUrl;
+        _a.download = filename;
+        document.body.appendChild(_a);
+        _a.click();
+        document.body.removeChild(_a);
+        setTimeout(()=>URL.revokeObjectURL(blobUrl), 10000);
+        showToast(t("dlTitle")+" başlatıldı ✓","green");
+      }catch(blobErr){
+        // CORS engeli veya ağ hatası — son çare: yeni sekme
+        const _a = document.createElement("a");
+        _a.href = d.url;
+        _a.download = filename;
+        _a.target = "_blank";
+        _a.rel = "noopener noreferrer";
+        document.body.appendChild(_a);_a.click();document.body.removeChild(_a);
+        showToast(t("dlTitle")+" başlatıldı ✓","green");
+      }
+    }else{
+      // Same-origin veya proxy URL → <a download> direkt çalışır
+      const _a=document.createElement("a");
+      _a.href=d.url;
+      _a.download=filename;
+      document.body.appendChild(_a);_a.click();document.body.removeChild(_a);
+      showToast(t("dlTitle")+" başlatıldı ✓","green");
     }
-    document.body.appendChild(_a);_a.click();document.body.removeChild(_a);
-    showToast(t("dlTitle")+" başlatıldı ✓","green");
   }catch(e){showToast("İndirme hatası: "+e.message,"red");}
   finally{
     setTimeout(()=>{
@@ -1345,9 +1713,11 @@ const THEMES={
 };
 function applyTheme(key){
   const th=THEMES[key]||THEMES.dark_cinema;
+  document.documentElement.classList.add("theme-transitioning");
   for(const[k,v]of Object.entries(th.vars))document.documentElement.style.setProperty(k,v);
   localStorage.setItem("bflix_theme",key);
   document.querySelectorAll(".theme-dot").forEach(b=>b.classList.toggle("active",b.dataset.theme===key));
+  setTimeout(()=>document.documentElement.classList.remove("theme-transitioning"),350);
 }
 function buildThemeDots(){
   const wrap=document.getElementById("theme-dots");if(!wrap)return;
@@ -1647,10 +2017,68 @@ function closeTrailer(){
 
 // INIT
 buildThemeDots();
+
+// ── Infinite Scroll (yalnız mobil: < 768px) ───────────────────────────────
+function _infResetObserver(){
+  if(_INF_OBSERVER){_INF_OBSERVER.disconnect();_INF_OBSERVER=null;}
+  if(!_IS_MOBILE) return;
+  const sentinel=document.getElementById("inf-sentinel");
+  if(!sentinel) return;
+  _INF_OBSERVER=new IntersectionObserver(async(entries)=>{
+    if(!entries[0].isIntersecting) return;
+    if(_INF_LOADING) return;
+    if(CUR_PAGE>=TOTAL_PAGES) return;
+    _INF_LOADING=true;
+    infSpinner(true);
+    CUR_PAGE++;
+    await loadMedia(true);
+  },{rootMargin:"400px"});
+  _INF_OBSERVER.observe(sentinel);
+}
+// Filtre/tip/arama değişince observer'ı sıfırla
+const _origLoadMedia=loadMedia;
+function _infResetOnNewQuery(){CUR_PAGE=1;_INF_LOADING=false;infSpinner(false);_infResetObserver();}
+
+// setType, applyFilters vb. zaten CUR_PAGE=1 + loadMedia() yapıyor;
+// observer yeniden bağlansın diye loadMedia sonunda _infResetObserver çağırıyoruz
+// ama sadece append=false (yeni sorgu) durumunda.
+// Bunu loadMedia'nın finally bloğuna ekleyemeyiz (closure sorunu);
+// bunun yerine orijinal loadMedia'yı wrap ediyoruz:
+window._origLoadMediaFn = loadMedia;
+window.loadMedia = async function(append=false){
+  await window._origLoadMediaFn(append);
+  if(!append) _infResetObserver();
+};
+
+window.addEventListener("resize",()=>{
+  const wasMobile=_IS_MOBILE;
+  _IS_MOBILE=window.innerWidth<768;
+  if(wasMobile!==_IS_MOBILE){
+    // Boyut sınırı geçildi: sayfayı sıfırla
+    CUR_PAGE=1;_INF_LOADING=false;infSpinner(false);
+    document.getElementById("media-grid").innerHTML="";
+    loadMedia();
+  }
+});
+
 applyTheme(localStorage.getItem("bflix_theme")||"dark_cinema");
-applyI18n();updatePlatformTabs();loadUsage();loadSubDays();setType('movie');loadTmdbSections();
+let _loadMedia_retrying=false;
+applyI18n();updatePlatformTabs();
+// Yükleme sırası: önce kritik içerik (katalog), sonra ikincil (usage, tmdb)
+// Hepsini aynı anda atmak rate limit sayacını gereksiz eritir.
+setTimeout(()=>{
+  // 1. Önce kataloğu getir (kullanıcının gördüğü ilk şey)
+  setType('movie');
+}, 50);
+setTimeout(()=>{
+  // 2. Kullanım bilgisi ve abonelik (50ms sonra, katalog isteği yola çıktı)
+  loadUsage();loadSubDays();
+}, 100);
+setTimeout(()=>{
+  // 3. TMDB bölümleri en son (kritik değil, ikincil içerik)
+  loadTmdbSections();
+}, 400);
 setInterval(loadUsage,60000);
-document.addEventListener("keydown",e=>{if(e.key==="Escape")closeModal();});
 
 // ── TMDB ÖNE ÇIKANLAR ────────────────────────────────────────────────────────
 let _tmdbTrendingItems=null,_tmdbNewItems=null;
@@ -1706,7 +2134,7 @@ async function loadYerliDiziSection(){
       // Yerli diziler için TR bayrağını hemen göster (overlay fetch'i bekleme)
       const trFlagHtml=`<span class="css-flag-tr lang-flag"></span>`;
       return `<div class="media-card"${tDataAttr} onclick="openModal('${key}')">
-        <div class="poster-wrap" style="position:relative">${p?`<img src="${escAttr(p)}" alt="${tl}" loading="lazy" onerror="this.style.display='none'">`:`<div style="display:flex;align-items:center;justify-content:center;height:100%"><i class="fas fa-tv" style="font-size:1.5rem;opacity:.2"></i></div>`}<div class="lang-overlay tv-flag-overlay">${trFlagHtml}</div><span class="tv-res-overlay"></span></div>
+        <div class="poster-wrap" style="position:relative">${p?`<img src="${escAttr(p)}" alt="${tl}" loading="lazy" onerror="this.style.display='none'">`:`<div style="display:flex;align-items:center;justify-content:center;height:100%"><i class="fas fa-tv" style="font-size:1.5rem;opacity:.2"></i></div>`}<div class="lang-overlay tv-flag-overlay">${trFlagHtml}</div><span class="tv-res-overlay"></span>${statusOverlay(item.status)}</div>
         <div class="p-1.5 tc" style="border-top:1px solid var(--c-border)">
           <div class="text-xs font-semibold leading-snug mb-0.5 line-clamp-2">${tl}</div>
           ${rt?`<div class="text-xs chip-rating">⭐${rt}</div>`:""}
@@ -1747,8 +2175,9 @@ function renderTmdbGrid(gridId,sectionId,items){
     const hpYear2=item.release_year?`<span class="hp-badge">${item.release_year}</span>`:"";
     const hpTrailerBtn2=item.tmdb_id?`<button class="hp-trailer-btn" onclick="openTrailer('${item.tmdb_id}','${isTV?"tv":"movie"}','${tl}',event)"><i class="fab fa-youtube"></i> ${t("trailerWatch")}</button>`:"";
     const hoverPreview2=`<div class="hover-preview"><div class="hp-title">${tl}</div><div class="hp-meta">${hpImdb2}${hpYear2}</div>${hpDesc2}${hpTrailerBtn2}</div>`;
+    const tHatirlaBtn=item.tmdb_id?(isTV?`<button class="btn-hatirla" data-tmdb="${item.tmdb_id}" data-dbindex="${(item.db_index!=null&&item.db_index>=0)?item.db_index:0}" data-title="${tl}" data-poster="${escAttr(p||'')}" data-status="${escAttr(item.status||'')}" onclick="toggleHatirla(this);event.stopPropagation();" title="${t('hatirlaTitle')}"><span class="hat-icon">🔔</span><span class="hat-label">${t('hatirla')}</span></button>`:`<button class="btn-hatirla btn-film-hatirla" data-tmdb="${item.tmdb_id}" data-dbindex="${(item.db_index!=null&&item.db_index>=0)?item.db_index:0}" data-title="${tl}" data-poster="${escAttr(p||'')}" data-status="${escAttr(item.status||'')}" onclick="toggleFilmHatirla(this);event.stopPropagation();" title="${t('filmHatirlaTitle')}"><span class="hat-icon">🔔</span><span class="hat-label">${t('hatirla')}</span></button>`):"";
     return `<div class="media-card-wrap"><div class="media-card"${tDataAttr} onclick="openModal('${key}')">
-      <div class="poster-wrap" style="position:relative">${p?`<img src="${escAttr(p)}" alt="${tl}" loading="lazy" onerror="this.style.display='none'">`:`<div style="display:flex;align-items:center;justify-content:center;height:100%"><i class="fas fa-film" style="font-size:1.5rem;opacity:.2"></i></div>`}${badge}${isTV?`<div class="lang-overlay tv-flag-overlay">${tFlagHtml}</div><span class="tv-res-overlay"></span>`:(tFlagHtml?`<div class="lang-overlay">${tFlagHtml}</div>`:"")+tResBadge}</div>
+      <div class="poster-wrap" style="position:relative">${p?`<img src="${escAttr(p)}" alt="${tl}" loading="lazy" onerror="this.style.display='none'">`:`<div style="display:flex;align-items:center;justify-content:center;height:100%"><i class="fas fa-film" style="font-size:1.5rem;opacity:.2"></i></div>`}${badge}${isTV?`<div class="lang-overlay tv-flag-overlay">${tFlagHtml}</div><span class="tv-res-overlay"></span>${statusOverlay(item.status)}`:(tFlagHtml?`<div class="lang-overlay">${tFlagHtml}</div>`:"")+tResBadge}${tHatirlaBtn}</div>
       <div class="p-1.5 tc" style="border-top:1px solid var(--c-border)">
         <div class="text-xs font-semibold leading-snug mb-0.5 line-clamp-2">${tl}</div>
         ${rt?`<div class="text-xs chip-rating">⭐${rt}</div>`:""}
@@ -1756,16 +2185,25 @@ function renderTmdbGrid(gridId,sectionId,items){
     </div>${hoverPreview2}</div>`;
   }).join("");
   sec.classList.remove("hidden");
+  initHatirlaButtons();
+  initFilmHatirlaButtons();
   // TV dizileri için overlay'leri tetikle (bayrak+çözünürlük)
   items.filter(item=>item.media_type==="tv"&&item.tmdb_id).forEach(item=>{
-    if(_TV_POSTER_DATA[item.tmdb_id])updateTvCardOverlay(item.tmdb_id);
+    if(_TV_POSTER_DATA[item.tmdb_id]){updateTvCardOverlay(item.tmdb_id);}
     else{
-      const dbIdx=(item.db_index!=null&&item.db_index>=0)?item.db_index:-1;
-      fetch(`/api/uye/tv-detay?tmdb_id=${item.tmdb_id}&db_index=${dbIdx}&lang=${CUR_LANG}`).then(r=>r.ok?r.json():null).then(data=>{
-        if(!data||!data.seasons)return;
-        collectTvPosterData(item.tmdb_id,data.seasons,item.original_language||"");
-        updateTvCardOverlay(item.tmdb_id);
-      }).catch(()=>{});
+      const _doFetch=()=>{
+        const dbIdx=(item.db_index!=null&&item.db_index>=0)?item.db_index:-1;
+        fetch(`/api/uye/tv-detay?tmdb_id=${item.tmdb_id}&db_index=${dbIdx}&lang=${CUR_LANG}`).then(r=>r.ok?r.json():null).then(data=>{
+          if(!data||!data.seasons)return;
+          collectTvPosterData(item.tmdb_id,data.seasons,item.original_language||"");
+          updateTvCardOverlay(item.tmdb_id);
+        }).catch(()=>{});
+      };
+      if(_IS_MOBILE&&typeof requestIdleCallback==="function"){
+        requestIdleCallback(_doFetch,{timeout:4000});
+      }else{
+        _doFetch();
+      }
     }
   });
 }
@@ -1819,6 +2257,7 @@ function _fmtGb(v){
   if(v==null||v===undefined)return t("unlimited");
   if(v<0.001)return"0 MB";
   if(v<1)return(v*1024).toFixed(0)+" MB";
+  if(v>=1000)return(v/1024).toFixed(2)+" TB";
   return v.toFixed(2)+" GB";
 }
 
@@ -1911,8 +2350,303 @@ function renderDailyChart(data){
   }).join("");
 }
 
+// ── Klavye Kısayolları ────────────────────────────────────────────────────────
+// ESC          → Açık modalı/fragmanı kapat
+// ← / →        → Sayfa değiştir (modal kapalıyken)
+// F            → Film moduna geç
+// D            → Dizi moduna geç
+// / veya Ctrl+K → Arama kutusuna odaklan
+// Shift+F      → Filtre panelini aç/kapat
 document.addEventListener("keydown",e=>{
-  if(e.key==="Escape"){closeModal();closeProfileModal();closeTrailer();}
+  // Her zaman: ESC → açık katmanı kapat (öncelik sırası: fragman > profil > içerik modalı)
+  if(e.key==="Escape"){
+    const trailerOpen=document.getElementById("trailer-overlay")&&
+                      document.getElementById("trailer-overlay").style.display!=="none"&&
+                      document.getElementById("trailer-overlay").style.display!=="";
+    if(trailerOpen){closeTrailer();return;}
+    closeProfileModal();
+    closeModal();
+    return;
+  }
+
+  // Eğer kullanıcı bir input/textarea/select içindeyse kısayolları tetikleme
+  const tag=document.activeElement.tagName;
+  if(tag==="INPUT"||tag==="TEXTAREA"||tag==="SELECT") return;
+
+  // Herhangi bir modal açıksa sayfalama ve mod kısayollarını engelle
+  const modalOpen=!document.getElementById("modal-overlay").classList.contains("hidden");
+  const profileOpen=document.getElementById("profile-modal")&&
+                    !document.getElementById("profile-modal").classList.contains("hidden");
+  if(modalOpen||profileOpen) return;
+
+  // ← → Sayfalama
+  if(e.key==="ArrowRight"&&!e.ctrlKey&&!e.metaKey){
+    if(CUR_PAGE<TOTAL_PAGES){changePage(1);window.scrollTo({top:0,behavior:"smooth"});}
+    return;
+  }
+  if(e.key==="ArrowLeft"&&!e.ctrlKey&&!e.metaKey){
+    if(CUR_PAGE>1){changePage(-1);window.scrollTo({top:0,behavior:"smooth"});}
+    return;
+  }
+
+  // / veya Ctrl+K → Arama kutusuna odaklan
+  if(e.key==="/"||((e.ctrlKey||e.metaKey)&&e.key==="k")){
+    e.preventDefault();
+    const si=document.getElementById("search-input");
+    if(si){si.focus();si.select();}
+    return;
+  }
+
+  // Shift+F → Filtre panelini aç/kapat
+  if(e.shiftKey&&e.key==="F"){
+    toggleFilters();
+    return;
+  }
+
+  // F → Film modu  |  D → Dizi modu  (shift olmadan, büyük/küçük harf)
+  if(!e.shiftKey&&!e.ctrlKey&&!e.metaKey&&!e.altKey){
+    if(e.key==="f"||e.key==="F"){setType("movie");return;}
+    if(e.key==="d"||e.key==="D"){setType("tv");return;}
+  }
+});
+
+/* ── Hatırlatma Toggle ────────────────────────────────────────────────────── */
+async function toggleHatirla(btn) {
+    if (btn.classList.contains('loading')) return;
+    const tmdbId  = parseInt(btn.dataset.tmdb, 10);
+    const dbIndex = parseInt(btn.dataset.dbindex, 10);
+    const title   = btn.dataset.title || '';
+    const poster  = btn.dataset.poster || '';
+    const status  = btn.dataset.status || '';
+    btn.classList.add('loading');
+    try {
+        const res = await fetch('/api/uye/hatirla', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tmdb_id: tmdbId, db_index: dbIndex, title, poster, status }),
+        });
+        if (!res.ok) {
+            if (res.status === 401) { showToast('⚠️ Oturum açmanız gerekiyor.', 'warning'); return; }
+            throw new Error(`HTTP ${res.status}`);
+        }
+        const data = await res.json();
+        setHatirlaState(btn, data.subscribed);
+        // Cache'i güncelle
+        if (_TV_REMINDER_SET) {
+            const key = `${tmdbId}_${dbIndex}`;
+            data.subscribed ? _TV_REMINDER_SET.add(key) : _TV_REMINDER_SET.delete(key);
+        }
+        showToast(
+            data.subscribed
+                ? t('bildirimAcildi')
+                : t('bildirimKapatildi'),
+            data.subscribed ? 'success' : 'info'
+        );
+        if (document.getElementById('reminders-panel')) loadRemindersPanel();
+    } catch (err) {
+        console.error('Hatırlatma hatası:', err);
+        showToast('❌ Bir hata oluştu, tekrar deneyin.', 'error');
+    } finally {
+        btn.classList.remove('loading');
+    }
+}
+
+function setHatirlaState(btn, subscribed) {
+    const icon  = btn.querySelector('.hat-icon');
+    const label = btn.querySelector('.hat-label');
+    if (subscribed) {
+        btn.classList.add('active');
+        if (icon)  icon.textContent  = '🔔';
+        if (label) label.textContent = t('hatirlaActive');
+        btn.title = t('hatirlaActiveTitle');
+    } else {
+        btn.classList.remove('active');
+        if (icon)  icon.textContent  = '🔔';
+        if (label) label.textContent = t('hatirla');
+        btn.title = t('hatirlaTitle');
+    }
+}
+
+/* ── Batch reminder state cache (tek istek, sıfır per-button fetch) ───────── */
+let _TV_REMINDER_SET   = null; // Set<"tmdbId_dbIndex"> — null = henüz yüklenmedi
+let _FILM_REMINDER_SET = null;
+let _reminderLoadPromise = null; // tekrar istek engelle
+
+async function loadReminderSets() {
+    if (_reminderLoadPromise) return _reminderLoadPromise;
+    _reminderLoadPromise = (async () => {
+        try {
+            const [tvRes, filmRes] = await Promise.all([
+                fetch('/api/uye/hatirlatmalarim'),
+                fetch('/api/uye/film-hatirlatmalarim'),
+            ]);
+            _TV_REMINDER_SET = new Set();
+            if (tvRes.ok) {
+                const d = await tvRes.json();
+                (d.reminders || []).forEach(r => _TV_REMINDER_SET.add(`${r.tmdb_id}_${r.db_index}`));
+            }
+            _FILM_REMINDER_SET = new Set();
+            if (filmRes.ok) {
+                const d = await filmRes.json();
+                (d.reminders || []).forEach(r => _FILM_REMINDER_SET.add(`${r.tmdb_id}_${r.db_index}`));
+            }
+        } catch (_) {
+            _TV_REMINDER_SET   = _TV_REMINDER_SET   || new Set();
+            _FILM_REMINDER_SET = _FILM_REMINDER_SET || new Set();
+        }
+    })();
+    return _reminderLoadPromise;
+}
+
+function _applyReminderSet(selector, set) {
+    if (!set) return;
+    document.querySelectorAll(selector).forEach(btn => {
+        const key = `${btn.dataset.tmdb}_${btn.dataset.dbindex || 0}`;
+        setHatirlaState(btn, set.has(key));
+    });
+}
+
+async function initHatirlaButtons() {
+    await loadReminderSets();
+    _applyReminderSet('.btn-hatirla:not(.btn-film-hatirla)', _TV_REMINDER_SET);
+}
+
+async function loadRemindersPanel() {
+    const panel = document.getElementById('reminders-panel');
+    if (!panel) return;
+    try {
+        const res  = await fetch('/api/uye/hatirlatmalarim');
+        if (!res.ok) return;
+        const data = await res.json();
+        const list = data.reminders || [];
+        if (!list.length) {
+            panel.innerHTML = `<div class="reminders-panel"><h4>🔔 Hatırlatmalarım</h4><p style="opacity:0.5;font-size:0.82rem">Henüz hiçbir dizi için hatırlatma eklemediniz.</p></div>`;
+            return;
+        }
+        const items = list.map(r => `
+            <div class="reminder-item" id="reminder-${r.tmdb_id}-${r.db_index}">
+                ${r.poster?`<img src="${escAttr(r.poster)}" alt="" loading="lazy">`:`<div style="width:36px;height:54px;background:rgba(255,255,255,0.1);border-radius:5px;flex-shrink:0"></div>`}
+                <span class="r-title">${escAttr(r.title||'Bilinmeyen')}</span>
+                <button class="r-cancel" onclick="cancelReminderFromPanel(${r.tmdb_id},${r.db_index},'${escAttr(r.title)}','${escAttr(r.poster||'')}')" title="Hatırlatmayı kaldır">✕</button>
+            </div>`).join('');
+        panel.innerHTML = `<div class="reminders-panel"><h4>🔔 Hatırlatmalarım (${list.length})</h4>${items}</div>`;
+    } catch (err) { console.error('Hatırlatmalar yüklenemedi:', err); }
+}
+
+async function cancelReminderFromPanel(tmdbId, dbIndex, title, poster) {
+    try {
+        const res = await fetch('/api/uye/hatirla', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tmdb_id: tmdbId, db_index: dbIndex, title, poster }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const el = document.getElementById(`reminder-${tmdbId}-${dbIndex}`);
+        if (el) el.remove();
+        const btn = document.querySelector(`.btn-hatirla[data-tmdb="${tmdbId}"][data-dbindex="${dbIndex}"]`);
+        if (btn) setHatirlaState(btn, false);
+        if (_TV_REMINDER_SET) _TV_REMINDER_SET.delete(`${tmdbId}_${dbIndex}`);
+        showToast(t('hatirlatmaKaldirildi'), 'info');
+        loadRemindersPanel();
+    } catch (err) {
+        console.error('Hatırlatma iptal hatası:', err);
+        showToast('❌ Bir hata oluştu.', 'error');
+    }
+}
+
+/* ── Film Hatırlatma Toggle ───────────────────────────────────────────────── */
+async function toggleFilmHatirla(btn) {
+    if (btn.classList.contains('loading')) return;
+    const tmdbId  = parseInt(btn.dataset.tmdb, 10);
+    const dbIndex = parseInt(btn.dataset.dbindex, 10);
+    const title   = btn.dataset.title || '';
+    const poster  = btn.dataset.poster || '';
+    const status  = btn.dataset.status || '';
+    btn.classList.add('loading');
+    try {
+        const res = await fetch('/api/uye/film-hatirla', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tmdb_id: tmdbId, db_index: dbIndex, title, poster, status }),
+        });
+        if (!res.ok) {
+            if (res.status === 401) { showToast('⚠️ Oturum açmanız gerekiyor.', 'warning'); return; }
+            throw new Error(`HTTP ${res.status}`);
+        }
+        const data = await res.json();
+        setHatirlaState(btn, data.subscribed);
+        // Cache'i güncelle
+        if (_FILM_REMINDER_SET) {
+            const key = `${tmdbId}_${dbIndex}`;
+            data.subscribed ? _FILM_REMINDER_SET.add(key) : _FILM_REMINDER_SET.delete(key);
+        }
+        showToast(
+            data.subscribed
+                ? '🔔 Film güncellendiğinde Telegram\'dan bildirim alacaksınız.'
+                : '🔕 Film bildirimi kapatıldı.',
+            data.subscribed ? 'success' : 'info'
+        );
+    } catch (err) {
+        console.error('Film hatırlatma hatası:', err);
+        showToast('❌ Bir hata oluştu, tekrar deneyin.', 'error');
+    } finally {
+        btn.classList.remove('loading');
+    }
+}
+
+async function initFilmHatirlaButtons() {
+    await loadReminderSets();
+    _applyReminderSet('.btn-film-hatirla', _FILM_REMINDER_SET);
+}
+
+async function cancelFilmReminderFromPanel(tmdbId, dbIndex, title, poster) {
+    try {
+        const res = await fetch('/api/uye/film-hatirla', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tmdb_id: tmdbId, db_index: dbIndex, title, poster }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const el = document.getElementById(`film-reminder-${tmdbId}-${dbIndex}`);
+        if (el) el.remove();
+        const btn = document.querySelector(`.btn-film-hatirla[data-tmdb="${tmdbId}"][data-dbindex="${dbIndex}"]`);
+        if (btn) setHatirlaState(btn, false);
+        if (_FILM_REMINDER_SET) _FILM_REMINDER_SET.delete(`${tmdbId}_${dbIndex}`);
+        showToast('🔕 Film hatırlatması kaldırıldı.', 'info');
+    } catch (err) {
+        console.error('Film hatırlatma iptal hatası:', err);
+        showToast('❌ Bir hata oluştu.', 'error');
+    }
+}
+
+function showToast(message, type = 'info') {
+    /* Projenizde mevcut bir toast varsa buraya yönlendirin: */
+    /* window.showNotification?.(message, type); return; */
+    const colors = {
+        success: 'linear-gradient(135deg, #6c63ff, #48cfad)',
+        info:    'linear-gradient(135deg, #4facfe, #00f2fe)',
+        warning: 'linear-gradient(135deg, #f6d365, #fda085)',
+        error:   'linear-gradient(135deg, #f093fb, #f5576c)',
+    };
+    const toast = document.createElement('div');
+    toast.style.cssText = `position:fixed;bottom:24px;right:24px;z-index:99999;padding:13px 20px;border-radius:10px;background:${colors[type]||colors.info};color:#fff;font-size:0.875rem;font-weight:500;box-shadow:0 6px 24px rgba(0,0,0,.3);max-width:360px;word-break:break-word;opacity:0;transform:translateY(12px);transition:opacity .25s ease,transform .25s ease;`;
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    requestAnimationFrame(() => { toast.style.opacity='1'; toast.style.transform='translateY(0)'; });
+    setTimeout(() => {
+        toast.style.opacity='0'; toast.style.transform='translateY(12px)';
+        setTimeout(() => toast.remove(), 300);
+    }, 4000);
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    // Dizi ve film hatırlatmalarını tek seferde önceden yükle
+    // renderGrid/appendGrid/renderTmdbGrid çağrıldığında Set hazır olsun
+    loadReminderSets().then(() => {
+        initHatirlaButtons();
+        initFilmHatirlaButtons();
+    });
+    loadRemindersPanel();
 });
 </script>
 
@@ -1948,6 +2682,114 @@ document.addEventListener("keydown",e=>{
   .pm-bar-lbl{font-size:.42rem;color:var(--c-text2);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:clip;max-width:100%;text-align:center}
   .pm-bar-lbl-today{color:var(--c-prim);font-weight:700}
   .pm-section-title{font-size:.75rem;font-weight:600;color:var(--c-text2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:.5rem;display:flex;align-items:center;gap:.4rem}
+
+/* ── Hatırlat Butonu ─────────────────────────────────────────── */
+.btn-hatirla {
+    position: absolute;
+    bottom: 8px;
+    left: 8px;
+    z-index: 10;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 10px;
+    border-radius: 8px;
+    border: 1.5px solid rgba(255,255,255,0.30);
+    background: rgba(0,0,0,0.55);
+    color: #fff;
+    font-size: 0.75rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    backdrop-filter: blur(6px);
+    white-space: nowrap;
+    user-select: none;
+    opacity: 1;
+    transform: translateY(0);
+}
+.media-card-wrap:hover .btn-hatirla,
+.btn-hatirla.active {
+    opacity: 1;
+    transform: translateY(0);
+}
+/* Hatırlatılıyor aktifken her zaman görünür — hover gerekmez */
+.btn-hatirla.active {
+    opacity: 1 !important;
+    transform: translateY(0) !important;
+}
+.btn-hatirla:hover {
+    background: rgba(0,0,0,0.75);
+    border-color: rgba(255,255,255,0.5);
+}
+.btn-hatirla.active {
+    background: linear-gradient(135deg, #6c63ff, #48cfad);
+    border-color: transparent;
+    box-shadow: 0 3px 12px rgba(108,99,255,0.5);
+}
+.btn-hatirla.active:hover {
+    opacity: 0.88;
+}
+.btn-hatirla .hat-icon {
+    font-size: 0.9rem;
+    line-height: 1;
+    transition: transform 0.25s ease;
+}
+.btn-hatirla.active .hat-icon {
+    transform: rotate(-15deg) scale(1.15);
+}
+.btn-hatirla.loading {
+    opacity: 0.6;
+    pointer-events: none;
+}
+
+/* ── Hatırlatmalarım Paneli (opsiyonel yan panel) ──────────── */
+.reminders-panel {
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 12px;
+    padding: 16px;
+    margin-top: 12px;
+}
+.reminders-panel h4 {
+    font-size: 0.9rem;
+    font-weight: 600;
+    margin: 0 0 12px 0;
+    opacity: 0.85;
+}
+.reminder-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.07);
+}
+.reminder-item:last-child { border-bottom: none; }
+.reminder-item img {
+    width: 36px;
+    height: 54px;
+    object-fit: cover;
+    border-radius: 5px;
+    flex-shrink: 0;
+}
+.reminder-item .r-title {
+    font-size: 0.83rem;
+    font-weight: 500;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.reminder-item .r-cancel {
+    background: none;
+    border: none;
+    color: rgba(255,255,255,0.45);
+    cursor: pointer;
+    font-size: 1rem;
+    padding: 2px 6px;
+    border-radius: 5px;
+    transition: color 0.15s;
+}
+.reminder-item .r-cancel:hover { color: #ff6b6b; }
 </style>
 
 <div id="profile-overlay" onclick="if(event.target===this)closeProfileModal()">
@@ -1986,9 +2828,9 @@ document.addEventListener("keydown",e=>{
       <!-- Kullanım -->
       <div class="pm-section-title"><i class="fas fa-chart-bar"></i> <span id="pm-section-data">Veri Kullanımı</span></div>
       <div style="margin-bottom:1rem">
-        <div class="flex justify-between text-xs mb-1">
-          <span class="ts" id="pm-label-daily">Günlük</span>
-          <span id="pm-daily-used" class="font-medium">—</span>
+        <div class="mb-1 text-center">
+          <div class="ts text-xs" id="pm-label-daily">Günlük</div>
+          <div id="pm-daily-used" class="font-medium text-xs">—</div>
         </div>
         <div class="pm-bar-wrap"><div id="pm-bar-daily" class="pm-bar-fill" style="width:0%"></div></div>
         <div class="flex justify-between text-xs">
@@ -1997,9 +2839,9 @@ document.addEventListener("keydown",e=>{
         </div>
       </div>
       <div style="margin-bottom:1rem">
-        <div class="flex justify-between text-xs mb-1">
-          <span class="ts" id="pm-label-monthly">Aylık</span>
-          <span id="pm-monthly-used" class="font-medium">—</span>
+        <div class="mb-1 text-center">
+          <div class="ts text-xs" id="pm-label-monthly">Aylık</div>
+          <div id="pm-monthly-used" class="font-medium text-xs">—</div>
         </div>
         <div class="pm-bar-wrap"><div id="pm-bar-monthly" class="pm-bar-fill" style="width:0%"></div></div>
         <div class="text-xs ts"><span id="pm-label-remaining2">Kalan:</span> <span id="pm-monthly-rem" class="font-semibold text-yellow-400">—</span></div>

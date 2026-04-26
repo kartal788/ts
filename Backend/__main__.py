@@ -15,6 +15,26 @@ from Backend.fastapi.main import app
 
 loop = get_event_loop()
 
+
+async def _restore_persistent_files():
+    """Bot başlarken MongoDB'deki kalıcı dosyaları diske geri yükler."""
+    from pathlib import Path
+    files_to_restore = [
+        ("rclone_conf",  Path(__file__).parent.parent / "rclone.conf"),
+        ("gdrive_pickle", Path(__file__).parent.parent / "gdrive_token.pickle"),
+    ]
+    for doc_id, dest_path in files_to_restore:
+        try:
+            doc = await db.dbs["tracking"]["bot_files"].find_one({"_id": doc_id})
+            if doc and doc.get("data"):
+                dest_path.write_bytes(doc["data"])
+                LOGGER.info(f"[startup] {doc_id} → {dest_path} geri yüklendi.")
+            else:
+                LOGGER.info(f"[startup] {doc_id} MongoDB'de bulunamadı, atlandı.")
+        except Exception as e:
+            LOGGER.warning(f"[startup] {doc_id} geri yükleme hatası: {e}")
+
+
 async def start_services():
     try:
         LOGGER.info(f"Initializing Telegram-Stremio v-{__version__}")
@@ -49,6 +69,9 @@ async def start_services():
 
         await db.connect()
         await asleep(1.2)
+
+        # Bot başlarken kalıcı dosyaları MongoDB'den geri yükle
+        await _restore_persistent_files()
         
         await StreamBot.start()
         StreamBot.username = StreamBot.me.username

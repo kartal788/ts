@@ -286,6 +286,19 @@ THEMES = {
         },
         "css_classes": "theme-dark-rose"
     },
+    "dark_obsidian": {
+        "name": "Dark Obsidian",
+        "colors": {
+            "primary": "#6366F1",
+            "secondary": "#4F46E5",
+            "accent": "#818CF8",
+            "background": "#05070D",
+            "card": "#0F172A",
+            "text": "#E5E7EB",
+            "text_secondary": "#9CA3AF"
+        },
+        "css_classes": "theme-dark-obsidian"
+    },
     "dark_orange_ember": {
         "name": "Dark Orange Ember",
         "colors": {

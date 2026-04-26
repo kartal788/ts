@@ -5,7 +5,13 @@ MongoDB'ye doğrudan bağlanarak TV koleksiyonunu okur;
 her bölümün telegram[].name alanında geçen platform
 etiketlerine göre dizileri gruplar.
 
-mongodump beklemeye GEREK YOK — uygulama açılınca hemen çalışır.
+Yenileme stratejisi:
+  - Uygulama ilk başladığında bir kez yüklenir.
+  - Yeni içerik eklendiğinde schedule_refresh() çağrılır.
+  - schedule_refresh() 15 dakikalık bir geri sayım başlatır.
+  - Geri sayım süresince yeni içerik gelirse sayaç sıfırlanır (debounce).
+  - 15 dakika boyunca hiç içerik gelmezse yenileme yapılmaz.
+  - Periyodik zamanlayıcı yoktur.
 """
 
 from __future__ import annotations
@@ -14,9 +20,14 @@ import logging
 import os
 import re
 import threading
+import time
 from typing import Dict, List, Optional, Set
 
 logger = logging.getLogger("platform_catalog")
+
+# Yeni içerik eklendikten sonra kaç saniye beklenecek (debounce).
+# Bu süre içinde yeni içerik gelirse sayaç sıfırlanır.
+REFRESH_DELAY_SEC = int(os.getenv("CATALOG_REFRESH_DELAY_SEC", str(15 * 60)))
 
 # -------------------------------------------------------------------
 # Platform etiketleri
@@ -37,7 +48,6 @@ PLATFORM_PATTERNS: Dict[str, List[re.Pattern]] = {
     "tvplus":  [re.compile(p, re.IGNORECASE) for p in [_tok("tvplus"), _tok("tv+"), _tok("dsgo"), _tok("tivibu"), _tok("tivibü")]],
 }
 
-# Dizi platformları (manifest'te görünür)
 PLATFORM_LABELS: Dict[str, str] = {
     "netflix": "Netflix",
     "disney":  "Disney+",
@@ -61,8 +71,6 @@ def _detect_platform(filename: str) -> Optional[str]:
             if pat.search(filename):
                 return platform
     return None
-
-
 
 
 def _doc_to_meta(doc: dict) -> dict:
@@ -90,20 +98,87 @@ def _doc_to_meta(doc: dict) -> dict:
         "cast":           doc.get("cast", []),
         "runtime":        doc.get("runtime", ""),
         "media_type":     doc.get("media_type", "tv"),
-        "collection_id":  doc.get("collection_id"),   # seri sıralama için
-        "telegram":       doc.get("telegram", []),     # indirme linkleri için
-        "language":       doc.get("language", ""),     # dil bayrağı için
+        "collection_id":  doc.get("collection_id"),
+        "telegram":       doc.get("telegram", []),
+        "language":       doc.get("language", ""),
     }
 
 
 class PlatformCatalog:
+    """
+    Platform bazlı katalog yöneticisi.
+
+    Yenileme yalnızca iki durumda tetiklenir:
+      1. İlk başlangıç  : refresh() doğrudan çağrılır.
+      2. Yeni içerik    : schedule_refresh() → 15 dk debounce → refresh().
+
+    schedule_refresh() her çağrıldığında sayaç sıfırlanır;
+    15 dk boyunca hiç içerik gelmezse zamanlayıcı ateşlenmez.
+    """
+
     def __init__(self) -> None:
         self._lock    = threading.RLock()
         self._catalog: Dict[str, Set[str]] = {p: set() for p in PLATFORM_PATTERNS}
         self._meta:    Dict[str, dict]     = {}
-        self._collection_ids: Set[str]     = set()   # imdb_id'ler (collection_id != None)
+        self._collection_ids: Set[str]     = set()
         self._movie_meta: Dict[str, dict]  = {}
         self._loaded  = False
+
+        # Debounce zamanlayıcısı
+        self._refresh_timer: threading.Timer | None = None
+        self._timer_lock = threading.Lock()
+        # Son schedule_refresh() çağrısının zamanı (debug/log için)
+        self._last_schedule_ts: float = 0.0
+
+    # ------------------------------------------------------------------
+    # Yenileme tetikleyici (debounce)
+    # ------------------------------------------------------------------
+
+    def schedule_refresh(self) -> None:
+        """
+        Yeni içerik eklendiğinde çağrılır.
+
+        REFRESH_DELAY_SEC saniye sonra refresh() çalıştırır.
+        Bu süre içinde tekrar çağrılırsa sayaç sıfırlanır —
+        yoğun yükleme seanslarında katalog yalnızca bir kez yenilenir.
+        """
+        now = time.monotonic()
+        with self._timer_lock:
+            self._last_schedule_ts = now
+            # Bekleyen zamanlayıcıyı iptal et
+            if self._refresh_timer is not None:
+                self._refresh_timer.cancel()
+
+            self._refresh_timer = threading.Timer(
+                REFRESH_DELAY_SEC, self._deferred_refresh
+            )
+            self._refresh_timer.daemon = True
+            self._refresh_timer.name = "platform-catalog-deferred"
+            self._refresh_timer.start()
+
+        logger.info(
+            "[catalog] Yenileme planlandı — %d dk sonra çalışacak "
+            "(yeni içerik gelirse sayaç sıfırlanır).",
+            REFRESH_DELAY_SEC // 60,
+        )
+
+    def cancel_scheduled_refresh(self) -> None:
+        """Bekleyen debounce zamanlayıcısını iptal eder (shutdown için)."""
+        with self._timer_lock:
+            if self._refresh_timer is not None:
+                self._refresh_timer.cancel()
+                self._refresh_timer = None
+
+    def _deferred_refresh(self) -> None:
+        """Zamanlayıcı callback'i — thread güvenli."""
+        with self._timer_lock:
+            self._refresh_timer = None
+        logger.info("[catalog] Debounce süresi doldu, katalog yenileniyor…")
+        self.refresh()
+
+    # ------------------------------------------------------------------
+    # Ana yenileme
+    # ------------------------------------------------------------------
 
     def refresh(self, db_uris: Optional[List[str]] = None) -> None:
         """
@@ -169,7 +244,6 @@ class PlatformCatalog:
                                 if platform:
                                     new_catalog[platform].add(imdb_id)
 
-                # ── Filmler — collection_id alanı doluysa seri kataloğuna ekle ──
                 _movie_proj = {
                     "imdb_id": 1, "tmdb_id": 1,
                     "title": 1, "title_tr": 1, "title_de": 1,
@@ -181,8 +255,8 @@ class PlatformCatalog:
                     "rating": 1, "release_year": 1,
                     "cast": 1, "runtime": 1, "media_type": 1,
                     "collection_id": 1,
-                    "telegram": 1,       # platform tespiti + qualities için
-                    "language": 1,       # dil bayrağı için
+                    "telegram": 1,
+                    "language": 1,
                 }
                 for doc in mdb["movie"].find({}, _movie_proj):
                     imdb_id = doc.get("imdb_id")
@@ -192,7 +266,6 @@ class PlatformCatalog:
                         new_movie_meta[imdb_id] = _doc_to_meta(doc)
                     if doc.get("collection_id"):
                         new_collection_ids.add(imdb_id)
-                    # Film platform tespiti — telegram listesi direkt dizide
                     for quality in doc.get("telegram", []):
                         filename = quality.get("name", "")
                         if not filename:
@@ -215,6 +288,10 @@ class PlatformCatalog:
         logger.info("Dizi kataloğu: %s", {k: len(v) for k, v in new_catalog.items()})
         logger.info("Seri filmleri: %d adet", len(new_collection_ids))
 
+    # ------------------------------------------------------------------
+    # Okuma metodları (değişmedi)
+    # ------------------------------------------------------------------
+
     def get(self, platform: str) -> List[dict]:
         with self._lock:
             ids = self._catalog.get(platform, set())
@@ -227,12 +304,10 @@ class PlatformCatalog:
             return result
 
     def get_collection_ids(self) -> Set[str]:
-        """collection_id alanı dolu olan film imdb_id'lerini döndürür."""
         with self._lock:
             return set(self._collection_ids)
 
     def get_year_catalog(self, media_type: Optional[str] = None) -> List[dict]:
-        """Tüm film ve dizi meta verilerini döndürür (yıl filtresi için)."""
         with self._lock:
             items: List[dict] = []
             if media_type in (None, "movie"):
@@ -242,17 +317,13 @@ class PlatformCatalog:
         return items
 
     def get_collection_movies(self) -> List[dict]:
-        """collection_id alanı dolu olan filmleri döndürür.
-        Aynı seriden filmler art arda, yıl sırasına göre listelenir."""
         with self._lock:
             movies = [self._movie_meta[i] for i in self._collection_ids if i in self._movie_meta]
-        # Önce collection_id'ye göre grupla, grup içinde yıla göre sırala
         movies.sort(key=lambda m: (
             str(m.get("collection_id") or ""),
             int(m.get("release_year") or 0),
         ))
         return movies
-
 
     def is_loaded(self) -> bool:
         with self._lock:

@@ -4,6 +4,7 @@ eskiverileriyenile.py — Pyrogram bot eklentisi
 /eskiverileriyenile komutuyla çalışır (sadece OWNER).
 Veritabanındaki tüm film ve dizilerin TR/DE çevirilerini
 ve TMDB görsel/sertifika alanlarını tamamlar.
+Diziler için eksik yayın durumu (status) alanını da doldurur.
 
 Güvenli kurallar:
   - Mevcut dolu alanların üzerine YAZILMAZ.
@@ -219,6 +220,9 @@ async def _tmdb_main(tmdb_id: int, media_type: str) -> dict:
         col = data.get("belongs_to_collection")
         if col and col.get("id"):
             result["collection_id"] = col["id"]
+    if media_type == "tv":
+        status = data.get("status")
+        if status: result["status"] = status
     return result
 
 
@@ -461,9 +465,10 @@ async def _process(doc: dict, col, media_type: str) -> bool:
                 if not doc.get(k) and v:
                     upd[k] = v
 
-        # original_language / collection_id
+        # original_language / collection_id / status
         need_extra = (not doc.get("original_language")) or \
-                     (media_type == "movie" and not doc.get("collection_id"))
+                     (media_type == "movie" and not doc.get("collection_id")) or \
+                     (media_type == "tv" and not doc.get("status"))
         if need_extra:
             for k, v in (await _tmdb_main(tmdb_id, media_type)).items():
                 if not doc.get(k) and v:

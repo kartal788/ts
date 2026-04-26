@@ -23,7 +23,7 @@ def get_adaptive_chunk_size(client_index: int) -> int:
     """Return the best chunk size (bytes) for this client based on recent speed.
 
     Speed tiers:
-      < 5  MB/s  → 512 KB  (small chunks, faster first-byte on slow sessions)
+      < 5  MB/s  →   1 MB  (default, smooth playback start)
       5-20 MB/s  →   1 MB  (default)
       20-60 MB/s →   2 MB  (fewer round-trips on fast sessions)
       > 60 MB/s  →   4 MB  (maximise throughput on very fast sessions)
@@ -35,8 +35,8 @@ def get_adaptive_chunk_size(client_index: int) -> int:
         return 2 * 1024 * 1024
     if speed >= 5:
         return 1 * 1024 * 1024
-    # Unknown speed or < 5 MB/s → start conservative
-    return 512 * 1024
+    # Unknown speed or < 5 MB/s → start with 1 MB for smoother playback
+    return 1 * 1024 * 1024
 
 class ByteStreamer:
     CHUNK_SIZE = 1024 * 1024  # 1 MB
@@ -414,6 +414,15 @@ class ByteStreamer:
                         sleep_needed   = expected_time - elapsed_window
                         if sleep_needed > 0.005:   # 5 ms altındaki gecikmeleri atla
                             await asyncio.sleep(sleep_needed)
+                    # ────────────────────────────────────────────────────────────
+
+                    # ── Günlük limit aşıldıysa stream'i durdur ──────────────────
+                    if ACTIVE_STREAMS.get(stream_id, {}).get("force_stop"):
+                        LOGGER.info("force_stop set for stream %s — stopping consumer", stream_id)
+                        ACTIVE_STREAMS[stream_id]["status"] = "cancelled"
+                        if not producer_task.done():
+                            producer_task.cancel()
+                        raise asyncio.CancelledError("daily_limit_exceeded")
                     # ────────────────────────────────────────────────────────────
 
                     _out_pre_ts = time.time()

@@ -32,10 +32,10 @@ async def get_system_stats_api():
             "api_tokens": api_tokens
         }
     except Exception as e:
-        print(f"System Stats API Error: {e}")
+        _logger.error("System Stats API hatası", exc_info=True)
         return {
-            "server_status": "error", 
-            "error": str(e)
+            "server_status": "error",
+            "error": "İstatistikler yüklenemedi"
         }
     
 # --- API Routes for Media Management ---
@@ -67,7 +67,9 @@ async def list_media_api(
             else:
                 return await db.sort_tv_shows([], page, page_size)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _logger.error("Internal error", exc_info=True)
+
+        raise HTTPException(status_code=500, detail="Sunucu hatası")
 
 async def delete_media_api(
     tmdb_id: int,
@@ -82,7 +84,9 @@ async def delete_media_api(
         else:
             raise HTTPException(status_code=404, detail="Media not found")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _logger.error("Internal error", exc_info=True)
+
+        raise HTTPException(status_code=500, detail="Sunucu hatası")
 
 async def update_media_api(
     request: Request,
@@ -162,14 +166,16 @@ async def update_media_api(
         if result:
             import asyncio
             from Backend.helper.platform_catalog import platform_catalog
-            loop = asyncio.get_event_loop()
-            loop.run_in_executor(None, platform_catalog.refresh)
+            from Backend.helper.platform_catalog import platform_catalog as _pc
+            _pc.schedule_refresh()
             return {"message": "Media updated successfully"}
         else:
             raise HTTPException(status_code=404, detail="Media not found or no changes made")
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _logger.error("Internal error", exc_info=True)
+
+        raise HTTPException(status_code=500, detail="Sunucu hatası")
 
 async def get_media_details_api(
     tmdb_id: int,
@@ -183,7 +189,9 @@ async def get_media_details_api(
         else:
             raise HTTPException(status_code=404, detail="Media not found")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _logger.error("Internal error", exc_info=True)
+
+        raise HTTPException(status_code=500, detail="Sunucu hatası")
 
 async def delete_movie_quality_api(tmdb_id: int, db_index: int, id: str):
     try:
@@ -193,7 +201,9 @@ async def delete_movie_quality_api(tmdb_id: int, db_index: int, id: str):
         else:
             raise HTTPException(status_code=404, detail="Quality not found")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _logger.error("Internal error", exc_info=True)
+
+        raise HTTPException(status_code=500, detail="Sunucu hatası")
 
 async def delete_tv_quality_api(
     tmdb_id: int, db_index: int, season: int, episode: int, id: str
@@ -205,7 +215,9 @@ async def delete_tv_quality_api(
         else:
             raise HTTPException(status_code=404, detail="Quality not found")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _logger.error("Internal error", exc_info=True)
+
+        raise HTTPException(status_code=500, detail="Sunucu hatası")
 
 async def delete_tv_episode_api(
     tmdb_id: int, db_index: int, season: int, episode: int
@@ -217,7 +229,9 @@ async def delete_tv_episode_api(
         else:
             raise HTTPException(status_code=404, detail="Episode not found")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _logger.error("Internal error", exc_info=True)
+
+        raise HTTPException(status_code=500, detail="Sunucu hatası")
 
 async def delete_tv_season_api(tmdb_id: int, db_index: int, season: int):
     try:
@@ -227,7 +241,9 @@ async def delete_tv_season_api(tmdb_id: int, db_index: int, season: int):
         else:
             raise HTTPException(status_code=404, detail="Season not found")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _logger.error("Internal error", exc_info=True)
+
+        raise HTTPException(status_code=500, detail="Sunucu hatası")
 
 
 # --- API Routes for Token Management ---
@@ -290,7 +306,9 @@ async def create_token_api(payload: dict):
 
         return new_token
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _logger.error("Internal error", exc_info=True)
+
+        raise HTTPException(status_code=500, detail="Sunucu hatası")
 
 async def update_token_limits_api(token: str, payload: dict):
     try:
@@ -309,14 +327,31 @@ async def update_token_limits_api(token: str, payload: dict):
             except (ValueError, TypeError, AttributeError):
                 return None
 
-        # validity_days → expires_at hesapla
+        # validity_days → expires_at hesapla (mevcut expires_at + validity_days, yoksa bugün + validity_days)
         expires_at = None
         if validity_days is not None:
             try:
                 days = int(validity_days)
                 if days > 0:
-                    from datetime import datetime, timedelta
-                    expires_at = datetime.utcnow() + timedelta(days=days)
+                    from datetime import datetime, timedelta, timezone
+                    existing_token = await db.get_api_token(token)
+                    # Başlangıç: mevcut expires_at varsa ona ekle, yoksa bugünden başlat
+                    current_expires = existing_token.get("expires_at") if existing_token else None
+                    if isinstance(current_expires, str):
+                        try:
+                            current_expires = datetime.fromisoformat(current_expires.replace("Z", "+00:00"))
+                        except Exception:
+                            current_expires = None
+                    if current_expires is not None:
+                        # Naive ise UTC-aware yap
+                        if current_expires.tzinfo is None:
+                            current_expires = current_expires.replace(tzinfo=timezone.utc)
+                        # Eğer süre zaten dolmuşsa bugünden başlat
+                        now_utc = datetime.now(timezone.utc)
+                        base_date = current_expires if current_expires > now_utc else now_utc
+                    else:
+                        base_date = datetime.now(timezone.utc)
+                    expires_at = base_date + timedelta(days=days)
                 elif days == 0:
                     expires_at = None  # 0 = sınırsız, mevcut süreyi kaldır
             except (ValueError, TypeError):
@@ -339,9 +374,13 @@ async def update_token_limits_api(token: str, payload: dict):
         if telegram_user_id:
             try:
                 tg_id = int(telegram_user_id)
-                # validity_days=0 → sınırsız (100 yıl), yoksa verilen değer
-                days_to_assign = int(validity_days) if (validity_days and int(validity_days) > 0) else 36500
-                await db.assign_subscription(tg_id, days_to_assign)
+                if expires_at is not None:
+                    # expires_at zaten created_at + validity_days olarak hesaplandı, direkt kullan
+                    await db.assign_subscription(tg_id, 0, force_expiry=expires_at)
+                elif validity_days is not None and int(validity_days) == 0:
+                    # 0 = sınırsız (100 yıl)
+                    await db.assign_subscription(tg_id, 36500)
+                # validity_days gönderilmediyse aboneliğe dokunma
             except Exception as sub_err:
                 from Backend.logger import LOGGER
                 LOGGER.warning(f"update_token_limits_api: subscription upsert failed for tg_id={telegram_user_id}: {sub_err}")
@@ -352,7 +391,9 @@ async def update_token_limits_api(token: str, payload: dict):
             return {"message": "Limits updated successfully"}
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _logger.error("Internal error", exc_info=True)
+
+        raise HTTPException(status_code=500, detail="Sunucu hatası")
 
 async def revoke_token_api(token: str, delete_subscription: bool = False, user_id: int = None):
     try:
@@ -360,13 +401,16 @@ async def revoke_token_api(token: str, delete_subscription: bool = False, user_i
         if result:
             if delete_subscription and user_id:
                 await db.manage_subscriber(user_id, "delete")
+                await db.delete_user_reminders(user_id)
             return {"message": "Token revoked successfully"}
         else:
             raise HTTPException(status_code=404, detail="Token not found")
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _logger.error("Internal error", exc_info=True)
+
+        raise HTTPException(status_code=500, detail="Sunucu hatası")
 
 
 # --- Speed Test API ---
@@ -410,7 +454,9 @@ async def speed_test_api(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _logger.error("Internal error", exc_info=True)
+
+        raise HTTPException(status_code=500, detail="Sunucu hatası")
 
 
 # --- Speed Test SSE Streaming API ---
@@ -580,17 +626,21 @@ async def get_dead_links_api() -> dict:
         dead_links = await db.get_all_dead_links()
         return {"status": "success", "data": dead_links}
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        _logger.error("Internal error", exc_info=True)
+
+        return {"status": "error", "message": "Sunucu hatası"}
 
 async def get_stream_analytics_api() -> dict:
     from Backend import db
     try:
-        data = await db.get_stream_analytics(limit=200)
+        data = await db.get_stream_analytics(limit=20)
         return {"status": "success", "data": data}
     except Exception as e:
         from Backend.logger import LOGGER
         LOGGER.error(f"Stream analytics API error: {e}")
-        return {"status": "error", "message": str(e)}
+        _logger.error("Internal error", exc_info=True)
+
+        return {"status": "error", "message": "Sunucu hatası"}
 
 async def clear_analytics_api() -> dict:
     from Backend import db
@@ -602,7 +652,9 @@ async def clear_analytics_api() -> dict:
         return {"status": "success", "message": f"{result.deleted_count} analiz kaydı temizlendi."}
     except Exception as e:
         LOGGER.error(f"Clear analytics error: {e}")
-        return {"status": "error", "message": str(e)}
+        _logger.error("Internal error", exc_info=True)
+
+        return {"status": "error", "message": "Sunucu hatası"}
 
 # ---------------------------------------------------------------------------
 # Admin Subscription Management API Routes
@@ -614,7 +666,9 @@ async def get_subscription_plans_api() -> dict:
         plans = await db.get_subscription_plans()
         return {"status": "success", "data": plans}
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        _logger.error("Internal error", exc_info=True)
+
+        return {"status": "error", "message": "Sunucu hatası"}
 
 async def add_subscription_plan_api(payload: dict) -> dict:
     from Backend import db
@@ -640,7 +694,9 @@ async def add_subscription_plan_api(payload: dict) -> dict:
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _logger.error("Internal error", exc_info=True)
+
+        raise HTTPException(status_code=500, detail="Sunucu hatası")
 
 async def update_subscription_plan_api(plan_id: str, payload: dict) -> dict:
     from Backend import db
@@ -666,7 +722,9 @@ async def update_subscription_plan_api(plan_id: str, payload: dict) -> dict:
     except HTTPException:
          raise
     except Exception as e:
-         raise HTTPException(status_code=500, detail=str(e))
+         _logger.error("Internal error", exc_info=True)
+
+         raise HTTPException(status_code=500, detail="Sunucu hatası")
 
 async def delete_subscription_plan_api(plan_id: str) -> dict:
     from Backend import db
@@ -679,7 +737,9 @@ async def delete_subscription_plan_api(plan_id: str) -> dict:
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _logger.error("Internal error", exc_info=True)
+
+        raise HTTPException(status_code=500, detail="Sunucu hatası")
 
 async def get_all_subscribers_api() -> dict:
     from Backend import db
@@ -687,7 +747,9 @@ async def get_all_subscribers_api() -> dict:
         users = await db.get_all_subscribers()
         return {"status": "success", "data": users}
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        _logger.error("Internal error", exc_info=True)
+
+        return {"status": "error", "message": "Sunucu hatası"}
 
 async def manage_subscriber_api(user_id: int, payload: dict) -> dict:
     from Backend import db
@@ -706,7 +768,9 @@ async def manage_subscriber_api(user_id: int, payload: dict) -> dict:
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _logger.error("Internal error", exc_info=True)
+
+        raise HTTPException(status_code=500, detail="Sunucu hatası")
 
 
 # --- Access Management API ---
@@ -821,7 +885,9 @@ async def get_all_tokens_api() -> dict:
         result.sort(key=lambda x: (x["is_expired"], not x["has_token"]))
         return {"tokens": result}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _logger.error("Internal error", exc_info=True)
+
+        raise HTTPException(status_code=500, detail="Sunucu hatası")
 
 
 async def revoke_token_api(token: str, delete_subscription: bool = False, user_id: int = None) -> dict:
@@ -832,11 +898,14 @@ async def revoke_token_api(token: str, delete_subscription: bool = False, user_i
             raise HTTPException(status_code=404, detail="Token not found.")
         if delete_subscription and user_id:
             await db.manage_subscriber(user_id, "delete")
+            await db.delete_user_reminders(user_id)
         return {"status": "success", "message": "Token (ve varsa abonelik) silindi."}
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _logger.error("Internal error", exc_info=True)
+
+        raise HTTPException(status_code=500, detail="Sunucu hatası")
 
 
 async def assign_plan_api(user_id: int, days: int) -> dict:
@@ -850,7 +919,9 @@ async def assign_plan_api(user_id: int, days: int) -> dict:
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _logger.error("Internal error", exc_info=True)
+
+        raise HTTPException(status_code=500, detail="Sunucu hatası")
 
 
 async def link_token_user_api(token: str, user_id: int) -> dict:
@@ -864,7 +935,9 @@ async def link_token_user_api(token: str, user_id: int) -> dict:
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _logger.error("Internal error", exc_info=True)
+
+        raise HTTPException(status_code=500, detail="Sunucu hatası")
 
 
 async def rename_movie_quality_api(request: Request, tmdb_id: int, db_index: int, quality_id: str):
@@ -882,7 +955,9 @@ async def rename_movie_quality_api(request: Request, tmdb_id: int, db_index: int
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _logger.error("Internal error", exc_info=True)
+
+        raise HTTPException(status_code=500, detail="Sunucu hatası")
 
 
 async def rename_tv_quality_api(request: Request, tmdb_id: int, db_index: int, season: int, episode: int, quality_id: str):
@@ -900,7 +975,9 @@ async def rename_tv_quality_api(request: Request, tmdb_id: int, db_index: int, s
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _logger.error("Internal error", exc_info=True)
+
+        raise HTTPException(status_code=500, detail="Sunucu hatası")
 
 
 async def requery_media_api(request: Request, tmdb_id: int, db_index: int, media_type: str):
@@ -1059,5 +1136,5 @@ async def requery_media_api(request: Request, tmdb_id: int, db_index: int, media
     except HTTPException:
         raise
     except Exception as e:
-        import traceback
-        raise HTTPException(status_code=500, detail=f"Yeniden sorgulama hatası: {str(e)}")
+        _logger.error("Yeniden sorgulama hatası", exc_info=True)
+        raise HTTPException(status_code=500, detail="Sunucu hatası")

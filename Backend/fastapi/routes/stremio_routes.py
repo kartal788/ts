@@ -1,3 +1,5 @@
+import logging
+_logger = logging.getLogger(__name__)
 from fastapi import APIRouter, HTTPException, Depends, Request
 from typing import Optional
 from urllib.parse import unquote
@@ -7,6 +9,7 @@ from Backend.helper.platform_catalog import platform_catalog, PLATFORM_LABELS
 import PTN
 from datetime import datetime, timezone, timedelta
 from Backend.fastapi.security.tokens import verify_token
+import time as _time
 
 
 # --- Configuration ---
@@ -14,6 +17,50 @@ BASE_URL = Telegram.BASE_URL
 ADDON_NAME = Telegram.ISIM
 ADDON_VERSION = __version__
 PAGE_SIZE = 15
+
+# ── "Sana Özel" Bellek Cache ────────────────────────────────────────────────────
+# Yapı: { (token, lang): {"items": list, "cached_at": float} }
+# Her üye için 60 içerik RAM'de tutulur, 30 dakikada bir yenilenir.
+_SIMILAR_CACHE: dict = {}
+_SIMILAR_CACHE_TTL = 30 * 60  # 30 dakika (saniye)
+
+
+def _similar_cache_get(token: str, lang: str):
+    """Cache'te geçerli kayıt varsa döner, yoksa None."""
+    key = (token, lang)
+    entry = _SIMILAR_CACHE.get(key)
+    if entry is None:
+        return None
+    if _time.monotonic() - entry["cached_at"] > _SIMILAR_CACHE_TTL:
+        del _SIMILAR_CACHE[key]
+        return None
+    return entry["items"]
+
+
+def _similar_cache_set(token: str, lang: str, items: list) -> None:
+    """60 içeriği cache'e yazar."""
+    _SIMILAR_CACHE[(token, lang)] = {
+        "items": items,
+        "cached_at": _time.monotonic(),
+    }
+
+
+async def _similar_cache_cleanup_loop() -> None:
+    """Her saat başı TTL'i dolmuş cache girişlerini temizler.
+    Uygulama yeniden başlatılmadan uzun süre çalıştığında
+    RAM'in şişmesini önler.
+    main.py _startup() içinde create_task ile başlatılır."""
+    import asyncio
+    while True:
+        await asyncio.sleep(3600)  # 1 saat bekle
+        now = _time.monotonic()
+        expired_keys = [
+            k for k, v in list(_SIMILAR_CACHE.items())
+            if now - v["cached_at"] > _SIMILAR_CACHE_TTL
+        ]
+        for k in expired_keys:
+            _SIMILAR_CACHE.pop(k, None)
+
 
 router = APIRouter(prefix="/stremio", tags=["Stremio Addon"])
 
@@ -94,6 +141,18 @@ def get_genres_for_lang(lang: str) -> list:
     elif lang == "en":
         return GENRES_EN
     return GENRES_TR
+
+# Canlı yayın tür filtreleri (dile göre)
+LIVE_GENRES_TR = ["Ulusal", "Haber", "Spor", "Belgesel", "Sinema", "Çocuk", "Müzik", "Eğlence", "Yaşam", "Dini"]
+LIVE_GENRES_DE = ["National", "Nachrichten", "Sport", "Dokumentation", "Kino", "Kinder", "Musik", "Unterhaltung", "Lifestyle", "Religiös"]
+LIVE_GENRES_EN = ["National", "News", "Sports", "Documentary", "Cinema", "Kids", "Music", "Entertainment", "Lifestyle", "Religious"]
+
+def get_live_genres_for_lang(lang: str) -> list:
+    if lang == "de":
+        return LIVE_GENRES_DE
+    elif lang == "en":
+        return LIVE_GENRES_EN
+    return LIVE_GENRES_TR
 
 # Yıl kataloğu için sabit yıl listesi (2026'dan 2000'e)
 YEAR_OPTIONS = [str(y) for y in range(2026, 1919, -1)]
@@ -560,10 +619,26 @@ async def get_manifest(token: str, lang: str = "en", token_data: dict = Depends(
     lbl = LANG_LABELS[lang]
 
     if Telegram.HIDE_CATALOG:
-        resources = ["stream"]
+        resources = [
+            "stream",
+            {
+                "name": "subtitles",
+                "types": ["movie", "series"],
+                "idPrefixes": ["tt"]
+            }
+        ]
         catalogs = []
     else:
-        resources = ["catalog", "meta", "stream"]
+        resources = [
+            "catalog",
+            "meta",
+            "stream",
+            {
+                "name": "subtitles",
+                "types": ["movie", "series"],
+                "idPrefixes": ["tt"]
+            }
+        ]
         # --- Tüm olası katalogları oluştur ---
         all_catalogs = [
             # ── Öneri kataloğu (izleme geçmişine dayalı — film + dizi karışık) ──
@@ -713,9 +788,10 @@ async def get_manifest(token: str, lang: str = "en", token_data: dict = Depends(
                 "id": f"live_{lang}",
                 "name": lbl["live"],
                 "extra": [
+                    {"name": "genre", "isRequired": False, "options": get_live_genres_for_lang(lang)},
                     {"name": "skip"},
                 ],
-                "extraSupported": ["skip"],
+                "extraSupported": ["genre", "skip"],
             },
         ]
 
@@ -829,7 +905,7 @@ async def get_manifest(token: str, lang: str = "en", token_data: dict = Depends(
         "types": ["movie", "series", "channel"],
         "resources": resources,
         "catalogs": catalogs,
-        "idPrefixes": ["tt", "live_"],
+        "idPrefixes": ["tt", "live_", "yayin_"],
         "behaviorHints": {
             "configurable": True,
             "configurationRequired": False
@@ -998,6 +1074,9 @@ async def configure_addon(token: str, lang: str = "en"):
     hidden_catalogs = cat_prefs.get("hidden_catalogs", []) if isinstance(cat_prefs, dict) else (cat_prefs or [])
     saved_order = cat_prefs.get("catalog_order", []) if isinstance(cat_prefs, dict) else []
 
+
+
+
     # Kanal sırası tercihlerini çek
     saved_channel_order = await _db.get_channel_order(token)
     all_channels = await _db.get_live_channels()
@@ -1075,9 +1154,10 @@ async def configure_addon(token: str, lang: str = "en"):
     monthly_limit_str= "—"
 
     if token_doc:
-        from datetime import timezone as _tz
-        today_str = __import__("datetime").datetime.now(_tz.utc).strftime("%Y-%m-%d")
-        month_str = __import__("datetime").datetime.now(_tz.utc).strftime("%Y-%m")
+        from Backend.helper.database import _daily_key as _dk
+        today_str = _dk()
+        from zoneinfo import ZoneInfo as _ZI
+        month_str = __import__("datetime").datetime.now(_ZI("Europe/Istanbul")).strftime("%Y-%m")
 
         usage   = token_doc.get("usage", {})
         limits  = token_doc.get("limits", {})
@@ -1325,6 +1405,7 @@ async def configure_addon(token: str, lang: str = "en"):
     <button class="btn-save" id="saveChBtn" onclick="saveChannels()" style="background:linear-gradient(135deg,#7c3aed,#4f46e5)">{t['btn_save_channels']}</button>
     <div class="save-msg" id="saveChMsg"></div>
   </div>
+
 </div>
 
 <script>
@@ -1523,7 +1604,7 @@ async def get_catalog(token: str, media_type: str, id: str, extra: Optional[str]
             # ── Canlı Yayın kataloğu ──────────────────────────────────────
             if id.startswith("live_") and media_type == "channel":
                 from Backend import db as _db
-                channels = await _db.get_live_channels()
+                channels = await _db.get_live_channels(scheduled_only=True)
 
                 # Üyenin kayıtlı kanal sırasını uygula
                 channel_order = await _db.get_channel_order(token)
@@ -1532,20 +1613,59 @@ async def get_catalog(token: str, media_type: str, id: str, extra: Optional[str]
                     default_start = len(channel_order)
                     channels.sort(key=lambda ch: order_map.get(ch.get("_id", ""), default_start))
 
+                # ── Aktif Yayınları kanallarla birleştir ve order değerine göre sırala ──
+                active_broadcasts = await _db.get_active_broadcasts()
+
+                combined = []
+                for ch in channels:
+                    combined.append({"_order": ch.get("order", 0), "_kind": "channel", "_data": ch})
+                for bc in active_broadcasts:
+                    combined.append({"_order": bc.get("order", 0), "_kind": "broadcast", "_data": bc})
+
+                # order değerine göre sırala; eşitlerde kanallar önce
+                combined.sort(key=lambda x: (x["_order"], 0 if x["_kind"] == "channel" else 1))
+
+                # ── Tür filtresi ──────────────────────────────────────────
+                if genre_filter:
+                    def _item_has_genre(item: dict, gf: str) -> bool:
+                        genres = item["_data"].get("genres") or []
+                        return gf in genres
+                    combined = [item for item in combined if _item_has_genre(item, genre_filter)]
+
+                # Sayfalama birleşik listeye uygulanır
+                combined_page = combined[stremio_skip: stremio_skip + PAGE_SIZE]
+
                 metas = []
-                for ch in channels[stremio_skip: stremio_skip + PAGE_SIZE]:
-                    ch_id = ch.get("_id", "")
-                    metas.append({
-                        "id": f"live_{ch_id}",
-                        "type": "channel",
-                        "name": ch.get("name", ""),
-                        "poster": ch.get("poster", "") or ch.get("logo", ""),
-                        "logo": ch.get("logo", ""),
-                        "background": ch.get("backdrop", ""),
-                        "description": ch.get("description", ""),
-                        "genres": ch.get("genres", []),
-                        "posterShape": "square",
-                    })
+                for item in combined_page:
+                    if item["_kind"] == "channel":
+                        ch = item["_data"]
+                        ch_id = ch.get("_id", "")
+                        metas.append({
+                            "id": f"live_{ch_id}",
+                            "type": "channel",
+                            "name": ch.get("name", ""),
+                            "poster": ch.get("poster", "") or ch.get("logo", ""),
+                            "logo": ch.get("logo", ""),
+                            "background": ch.get("backdrop", ""),
+                            "description": ch.get("description", ""),
+                            "genres": ch.get("genres", []),
+                            "posterShape": "square",
+                        })
+                    else:
+                        bc = item["_data"]
+                        bid = bc["_id"]
+                        metas.append({
+                            "id":          f"yayin_{bid}",
+                            "type":        "channel",
+                            "name":        bc.get("name", "Yayın"),
+                            "poster":      bc.get("poster") or bc.get("logo") or "",
+                            "background":  bc.get("poster") or "",
+                            "logo":        bc.get("logo") or "",
+                            "description": bc.get("description") or "",
+                            "genres":      bc.get("genres") or [],
+                            "posterShape": "square",
+                        })
+
                 return {"metas": metas}
 
             # ── Yıl kataloğu ─────────────────────────────────────────────
@@ -1644,30 +1764,42 @@ async def get_catalog(token: str, media_type: str, id: str, extra: Optional[str]
             elif id.startswith("similar_"):
                 from Backend import db as _db_similar
 
-                # Zengin izleme geçmişi: [{imdb_id, last_watched, watch_count}]
-                history_rich = await _db_similar.get_watch_history_rich(token, limit=80)
+                # Cache'te geçerli veri varsa DB'ye gitmeden dön
+                all_similar = _similar_cache_get(token, lang)
 
-                if not history_rich:
-                    # İzleme kaydı yok → katalog boş
+                if all_similar is None:
+                    # Cache boş veya süresi dolmuş — DB'den hesapla
+                    history_rich = await _db_similar.get_watch_history_rich(token, limit=40)
+
+                    if not history_rich:
+                        return {"metas": []}
+
+                    watched_ids = [r["imdb_id"] for r in history_rich]
+                    last_watched_id = watched_ids[0] if watched_ids else None
+
+                    all_similar = await _db_similar.get_similar_items(
+                        watched_imdb_ids=watched_ids,
+                        page=1,
+                        page_size=60,
+                        lang=lang,
+                        last_watched_id=last_watched_id,
+                        watch_history_rich=history_rich,
+                    )
+
+                    if not all_similar:
+                        return {"metas": []}
+
+                    # 60 içeriği RAM'e yaz
+                    _similar_cache_set(token, lang, all_similar)
+
+                # Sayfalama: cache'teki 60 içerikten ilgili sayfayı dön
+                skip = (page - 1) * PAGE_SIZE
+                page_items = all_similar[skip: skip + PAGE_SIZE]
+
+                if not page_items:
                     return {"metas": []}
 
-                watched_ids = [r["imdb_id"] for r in history_rich]
-                last_watched_id = watched_ids[0] if watched_ids else None
-
-                similar = await _db_similar.get_similar_items(
-                    watched_imdb_ids=watched_ids,
-                    page=page,
-                    page_size=PAGE_SIZE,
-                    lang=lang,
-                    last_watched_id=last_watched_id,
-                    watch_history_rich=history_rich,
-                )
-
-                if not similar:
-                    # Algoritma boş döndürdü (çok yeni kullanıcı, veri yetersiz)
-                    return {"metas": []}
-
-                metas = [convert_to_stremio_meta(item, lang) for item in similar]
+                metas = [convert_to_stremio_meta(item, lang) for item in page_items]
                 return {"metas": metas}
 
             # ── TMDB Katalogları ──────────────────────────────────────
@@ -1741,6 +1873,31 @@ async def get_meta(token: str, media_type: str, id: str, lang: str = "tr", token
                 "background": ch.get("backdrop", ""),
                 "description": ch.get("description", ""),
                 "genres": ch.get("genres", []),
+                "posterShape": "square",
+            }
+        }
+
+    # ── Canlı Yayın (yayin_) meta ────────────────────────────────────
+    if media_type == "channel" and id.startswith("yayin_"):
+        broadcast_id = id[len("yayin_"):]
+        try:
+            from Backend import db as _db
+            bc = await _db.get_broadcast(broadcast_id)
+        except Exception:
+            return {"meta": {}}
+        if not bc:
+            return {"meta": {}}
+        bid = bc.get("_id", "")
+        return {
+            "meta": {
+                "id": f"yayin_{bid}",
+                "type": "channel",
+                "name": bc.get("name", "Yayın"),
+                "poster": bc.get("poster") or bc.get("logo") or "",
+                "logo": bc.get("logo") or "",
+                "background": bc.get("poster") or "",
+                "description": bc.get("description") or "",
+                "genres": bc.get("genres") or [],
                 "posterShape": "square",
             }
         }
@@ -1907,7 +2064,7 @@ async def get_streams(
             link_logo = lnk.get("logo", "").strip() or ch.get("logo", "")
             stream: dict = {
                 "name": label,   # sadece etiket
-                "title": label,
+                "title": "",
                 "url": url,
                 "behaviorHints": {"notWebReady": False},
             }
@@ -1915,6 +2072,86 @@ async def get_streams(
                 stream["thumbnail"] = link_logo
             streams.append(stream)
         return {"streams": streams}
+
+    # ── Canlı Yayın (yayin_) stream ──────────────────────────────────
+    if media_type == "channel" and id.startswith("yayin_"):
+        broadcast_id = id[len("yayin_"):]
+        try:
+            from Backend import db as _db
+            # Önce tek broadcast'i almayı dene, yoksa aktif yayınlardan filtrele
+            bc = None
+            try:
+                bc = await _db.get_broadcast(broadcast_id)
+            except Exception:
+                active = await _db.get_active_broadcasts()
+                for item in active:
+                    if str(item.get("_id", "")) == str(broadcast_id):
+                        bc = item
+                        break
+        except Exception:
+            return {"streams": []}
+        if not bc:
+            return {"streams": []}
+        from Backend.config import Telegram as _TG
+        BASE_URL = _TG.BASE_URL.rstrip("/")
+        stream_url = f"{BASE_URL}/yayin/stream/{broadcast_id}/playlist.m3u8?token={token}"
+        logo = bc.get("logo") or ""
+        bc_name = bc.get("name", "Canlı Yayın")
+
+        # ── Proxy Modu ────────────────────────────────────────────────
+        # PROXY_MODE=1 → sadece normal link
+        # PROXY_MODE=2 → önce proxy, sonra normal (her ikisi)
+        # PROXY_MODE=3 → sadece proxy
+        proxy_url = (
+            f"{_TG.HTTP_PROXY_URL}{stream_url}"
+            if _TG.PROXY and _TG.HTTP_PROXY_URL
+            else None
+        )
+
+        # ── Yayın aktif değilse → standby video stream ekle ─────────
+        is_active = bc.get("active", False)
+        standby_url = None
+        from Backend.fastapi.routes.yayin_routes import _standby_active as _sa
+        sm = bc.get("standby_media") or {}
+        # Sadece video tipi desteklenir (resim HLS ile oynatılamaz)
+        if not is_active and sm.get("path") and sm.get("media_type") == "video" and _sa(bc):
+            standby_url = f"{BASE_URL}/yayin/standby/{broadcast_id}/playlist.m3u8?token={token}"
+
+        def _make_entry(name: str, url: str, title: str = "") -> dict:
+            entry: dict = {
+                "name": name,
+                "title": title,
+                "url": url,
+                "behaviorHints": {"notWebReady": False},
+            }
+            if logo:
+                entry["thumbnail"] = logo
+            return entry
+
+        streams_out = []
+
+        if is_active:
+            # Yayın canlı → normal stream
+            if _TG.PROXY and proxy_url and _TG.PROXY_MODE == 2:
+                streams_out = [
+                    _make_entry(f"{bc_name} 🔀 Proxy", proxy_url),
+                    _make_entry(f"{bc_name} ⚡ Direct", stream_url),
+                ]
+            elif _TG.PROXY and proxy_url and _TG.PROXY_MODE == 3:
+                streams_out = [_make_entry(f"{bc_name} 🔀 Proxy", proxy_url)]
+            else:
+                streams_out = [_make_entry(bc_name, stream_url)]
+        elif standby_url:
+            # Yayın henüz başlamadı, standby medya tanımlı ve süresi geçmemiş
+            media_type_label = "🎬 Video" if sm.get("media_type") == "video" else "🖼️ Resim"
+            streams_out = [_make_entry(
+                f"{bc_name} — Yayın Bekleniyor",
+                standby_url,
+                title=f"Yayın Öncesi {media_type_label}"
+            )]
+        # else: yayın yok, standby yok → boş liste
+
+        return {"streams": streams_out}
 
     try:
         parts = id.split(":")
@@ -2004,7 +2241,8 @@ async def get_streams(
                 _encoded_id = await _encode_str({"local_path": _abs_path})
                 _video_tok = media_token_manager.create(token, _encoded_id, kind="video")
                 _safe_fn = _q(filename or "video.mkv", safe=".-_")
-                url = f"{BASE_URL}/dl/{token}/{_encoded_id}/{_video_tok}/{_safe_fn}"
+                _base_url = Telegram.BASE_URL.rstrip("/")
+                url = f"{_base_url}/dl/{token}/{_encoded_id}/{_video_tok}/{_safe_fn}"
             else:
                 url = file_id
         elif file_id.startswith(("http://", "https://")):
@@ -2026,7 +2264,8 @@ async def get_streams(
 
             # GDrive veya Telegram: gecici token ile URL üret
             video_tok = media_token_manager.create(token, file_id, kind="video")
-            url = f"{BASE_URL}/dl/{token}/{file_id}/{video_tok}/video.mkv"
+            _base_url = Telegram.BASE_URL.rstrip("/")
+            url = f"{_base_url}/dl/{token}/{file_id}/{video_tok}/video.mkv"
 
         # ── Proxy Modu ────────────────────────────────────────────────────────
         # PROXY_MODE=1 → sadece normal link
@@ -2114,7 +2353,9 @@ async def save_catalog_prefs(token: str, request: Request, token_data: dict = De
         await _db_prefs.save_catalog_prefs_full(token, hidden, order)
         return JSONResponse({"ok": True})
     except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        _logger.error("Internal error", exc_info=True)
+
+        return JSONResponse({"ok": False, "error": "Sunucu hatası"}, status_code=500)
 
 
 # ── Kanal sırası kaydı ────────────────────────────────────────────────────
@@ -2137,7 +2378,9 @@ async def save_channel_order(token: str, request: Request, token_data: dict = De
         await _db.save_channel_order(token, filtered_order)
         return JSONResponse({"ok": True})
     except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        _logger.error("Internal error", exc_info=True)
+
+        return JSONResponse({"ok": False, "error": "Sunucu hatası"}, status_code=500)
 
 
 # ── Dahili endpoint: scheduler tarafından tetiklenir ─────────────────────────
@@ -2147,7 +2390,7 @@ async def refresh_platform_catalog():
     """Mongodump klasöründen platform kataloğunu yeniden yükler."""
     import asyncio
     loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, platform_catalog.refresh)
+    platform_catalog.schedule_refresh()
     return {
         "ok": True,
         "stats": platform_catalog.stats(),
@@ -2191,3 +2434,90 @@ async def tmdb_catalog_stats():
         "last_refresh": last_str,
         "stats": _tmdb.stats(),
     }
+
+
+# ── Stremio Subtitles Endpoint ────────────────────────────────────────────────
+
+@router.get("/{token}/subtitles/{media_type}/{id_path:path}.json")
+@router.get("/{token}/{lang}/subtitles/{media_type}/{id_path:path}.json")
+async def get_subtitles(
+    token: str,
+    media_type: str,
+    id_path: str,
+    lang: str = "tr",
+    token_data: dict = Depends(verify_token),
+):
+    """
+    Stremio Subtitles Addon API endpoint'i.
+
+    Stremio id'yi bazen extra query bilgisiyle gönderir:
+      tt1234567/filename=video.mkv&videoSize=123&videoHash=abc
+    Bu yüzden {id_path:path} ile tüm path yakalanır, içinden tt... ID parse edilir.
+    """
+    if token_data.get("subscription_expired") or token_data.get("limit_exceeded"):
+        return {"subtitles": []}
+
+    # id_path'ten gerçek IMDb/Stremio ID'sini çıkar
+    # Stremio bazen: "tt1234567/filename=video.mkv&videoSize=...&videoHash=..."
+    # Bazen: "tt1234567:1:3/filename=..."  (dizi için)
+    import re as _re_sub
+    raw_id = id_path.split("/")[0]  # "/" dan öncesi gerçek ID
+    raw_id = raw_id.split("?")[0]   # query string varsa temizle
+
+    try:
+        parts = raw_id.split(":")
+        imdb_id = parts[0]
+        season_num = int(parts[1]) if len(parts) > 1 else None
+        episode_num = int(parts[2]) if len(parts) > 2 else None
+    except (ValueError, IndexError):
+        return {"subtitles": []}
+
+    if not imdb_id or not imdb_id.startswith("tt"):
+        return {"subtitles": []}
+
+    # DB'den altyazıları çek
+    try:
+        subs = await db.get_subtitles(imdb_id, season_num, episode_num)
+    except Exception:
+        return {"subtitles": []}
+
+    if not subs:
+        return {"subtitles": []}
+
+    base_url = BASE_URL.rstrip("/")
+
+    # Dil etiketleri: Stremio ISO 639-1 kodu bekler
+    _LANG_DISPLAY = {
+        "tr": "Türkçe",
+        "en": "English",
+        "de": "Deutsch",
+        "fr": "Français",
+        "es": "Español",
+        "it": "Italiano",
+        "pt": "Português",
+        "ru": "Русский",
+        "ar": "العربية",
+        "ja": "日本語",
+        "ko": "한국어",
+        "zh": "中文",
+        "nl": "Nederlands",
+        "pl": "Polski",
+        "sv": "Svenska",
+        "no": "Norsk",
+        "da": "Dansk",
+    }
+
+    result = []
+    for s in subs:
+        sub_id = s.get("_id", "")
+        sub_lang = s.get("lang", "tr")
+        lang_label = _LANG_DISPLAY.get(sub_lang, s.get("lang_label", sub_lang.upper()))
+        result.append({
+            "id": sub_id,
+            "url": f"{base_url}/subtitles/serve/{sub_id}",
+            "lang": sub_lang,
+            # Stremio bazı istemcilerde 'label' alanını gösterir
+            "label": lang_label,
+        })
+
+    return {"subtitles": result}

@@ -1,5 +1,5 @@
 import asyncio
-from pyrogram import Client
+from pyrogram import Client, enums
 from Backend.config import Telegram
 from Backend import db
 from datetime import datetime, timezone, timedelta
@@ -11,34 +11,39 @@ async def subscription_checker_loop(bot: Client):
     while True:
         try:
             if not Telegram.SUBSCRIPTION:
-                await asyncio.sleep(3600)
+                await asyncio.sleep(300)
                 continue
 
             LOGGER.info("Abonelik kontrolcüsü çalışıyor...")
 
-            # 1. Süresi dolmuş kullanıcıları getir ve gruptan çıkar
+            # Süresi dolmuş kullanıcıları getir ve gruptan çıkar
             expired_users = await db.get_expired_users()
             for user in expired_users:
                 user_id = user["_id"]
+
+                # 1. Önce DB'yi güncelle — tekrar tetiklenmesin
+                await db.mark_user_expired(user_id)
+
+                # 2. Kullanıcıyı bilgilendir
                 try:
-                    # Kullanıcıyı kalıcı ban atmadan gruptan çıkarmak için ban + unban uygula
-                    await bot.ban_chat_member(Telegram.SUBSCRIPTION_GROUP_ID, user_id)
-                    await bot.unban_chat_member(Telegram.SUBSCRIPTION_GROUP_ID, user_id)
-
-                    await db.mark_user_expired(user_id)
-
-                    # Kullanıcıyı bilgilendir
                     await bot.send_message(
                         user_id,
-                        "❌ <b>Abonelik Süresi Doldu</b>\n\n"
-                        "Aboneliğinizin süresi doldu ve özel gruptan çıkarıldınız.\n"
-                        f"Aboneliğinizi yenilemek ve gruba tekrar erişim sağlamak için {Telegram.SUBSCRIPTION_URL} adresine gidin ve /start komutunu gönderin."
+                        "❌ Abonelik süreniz sona erdi.\n"
+                        "Aboneliğinizi yenilemek için /start komutunu gönderin.",
+                        parse_mode=enums.ParseMode.DISABLED
                     )
+                except Exception as e:
+                    LOGGER.error(f"Bildirim gönderilemedi {user_id}: {e}")
+
+                # 3. Gruptan çıkar (ban hata verse de mesaj gitmiş olur)
+                try:
+                    await bot.ban_chat_member(Telegram.SUBSCRIPTION_GROUP_ID, user_id)
+                    await bot.unban_chat_member(Telegram.SUBSCRIPTION_GROUP_ID, user_id)
                     LOGGER.info(f"Süresi dolmuş kullanıcı gruptan çıkarıldı: {user_id}")
                 except Exception as e:
-                    LOGGER.error(f"Kullanıcı gruptan çıkarılırken/bildirim gönderilirken hata oluştu {user_id}: {e}")
+                    LOGGER.error(f"Kullanıcı gruptan çıkarılamadı {user_id}: {e}")
 
-            # 2. 24 saat içinde süresi dolacak kullanıcılara hatırlatma gönder
+            # 24 saat içinde süresi dolacak kullanıcılara hatırlatma gönder
             expiring_users = await db.get_expiring_users(hours=24)
             for user in expiring_users:
                 user_id = user["_id"]
@@ -47,17 +52,16 @@ async def subscription_checker_loop(bot: Client):
                     expiry_tr = expiry.replace(tzinfo=timezone.utc).astimezone(_TZ_TR)
                     await bot.send_message(
                         user_id,
-                        f"⚠️ <b>Abonelik Süresi Yakında Doluyor</b>\n\n"
-                        f"Aboneliğiniz <b>{expiry_tr.strftime('%d.%m.%Y %H:%M')}</b> tarihinde sona erecek.",
-                        parse_mode=None
+                        f"⚠️ Aboneliğiniz {expiry_tr.strftime('%d.%m.%Y %H:%M')} tarihinde sona erecek.\n",
+                        parse_mode=enums.ParseMode.DISABLED
                     )
                     await db.mark_reminder_sent(user_id)
                     LOGGER.info(f"Abonelik hatırlatması gönderildi: {user_id}")
                 except Exception as e:
                     LOGGER.error(f"Kullanıcıya hatırlatma gönderilirken hata oluştu {user_id}: {e}")
 
-            # Her saat kontrol et
-            await asyncio.sleep(3600)
+            # Her 5 dakikada bir kontrol et
+            await asyncio.sleep(300)
 
         except Exception as e:
             LOGGER.error(f"Abonelik kontrolcüsü döngüsünde hata: {e}")

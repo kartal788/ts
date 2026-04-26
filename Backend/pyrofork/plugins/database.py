@@ -184,7 +184,7 @@ class Database:
             {"_id": user_id},
             {
                 "$set": {"subscription_expiry": new_expiry, "subscription_status": "active"},
-                "$unset": {"pending_payment": ""}
+                "$unset": {"pending_payment": "", "reminder_sent": ""}
             }
         )
 
@@ -282,6 +282,12 @@ class Database:
          await self.dbs["tracking"]["users"].update_one(
             {"_id": user_id},
             {"$set": {"reminder_sent": True}}
+        )
+
+    async def reset_reminder_sent(self, user_id: int):
+        await self.dbs["tracking"]["users"].update_one(
+            {"_id": user_id},
+            {"$unset": {"reminder_sent": ""}}
         )
 
     # -------------------------------
@@ -589,6 +595,7 @@ class Database:
                 runtime=metadata_info['runtime'],
                 original_language=metadata_info.get('original_language'),
                 media_type=metadata_info['media_type'],
+                status=metadata_info.get('status'),
                 certification_tr=metadata_info.get('certification_tr'),
                 certification_de=metadata_info.get('certification_de'),
                 certification_us=metadata_info.get('certification_us'),
@@ -701,7 +708,7 @@ class Database:
         existing_movie["updated_on"] = datetime.utcnow()
 
         # Yeni veriden TR/DE alanlarını mevcut kayda yaz (boşsa doldur, doluysa güncelle)
-        for field in ["title_tr", "title_de", "description_tr", "description_de", "genres_tr", "genres_de", "poster_tr", "backdrop_tr", "logo_tr", "poster_de", "backdrop_de", "logo_de", "certification_tr", "certification_de", "certification_us"]:
+        for field in ["title_tr", "title_de", "description_tr", "description_de", "genres_tr", "genres_de", "poster_tr", "backdrop_tr", "logo_tr", "poster_de", "backdrop_de", "logo_de", "certification_tr", "certification_de", "certification_us", "status"]:
             new_val = movie_dict.get(field)
             if new_val:
                 existing_movie[field] = new_val
@@ -833,7 +840,7 @@ class Database:
         existing_tv["updated_on"] = datetime.utcnow()
 
         # Yeni veriden TR/DE alanlarını mevcut kayda yaz (boşsa doldur, doluysa güncelle)
-        for field in ["title_tr", "title_de", "description_tr", "description_de", "genres_tr", "genres_de", "poster_tr", "backdrop_tr", "logo_tr", "poster_de", "backdrop_de", "logo_de", "certification_tr", "certification_de", "certification_us"]:
+        for field in ["title_tr", "title_de", "description_tr", "description_de", "genres_tr", "genres_de", "poster_tr", "backdrop_tr", "logo_tr", "poster_de", "backdrop_de", "logo_de", "certification_tr", "certification_de", "certification_us", "status"]:
             new_val = tv_show_dict.get(field)
             if new_val:
                 existing_tv[field] = new_val
@@ -2075,7 +2082,9 @@ class Database:
                     or []
                 )
 
-            # ── 2. Tüm içerikleri çek (izlenmemişler) ───────────────────────────
+            # ── 2. Aday içerikleri çek (izlenmemişler) ──────────────────────────
+            _CANDIDATE_LIMIT = max(page_size * 8, 200)
+
             watched_set = set(watched_imdb_ids)
             base_match: dict = {
                 "imdb_id": {"$nin": list(watched_set), "$ne": None, "$exists": True},
@@ -2100,7 +2109,7 @@ class Database:
                 for col_name in ("movie", "tv"):
                     docs = await db_ref[col_name].find(
                         base_match, {**PROJ}
-                    ).to_list(None)
+                    ).limit(_CANDIDATE_LIMIT).to_list(None)
                     for doc in docs:
                         iid = doc.get("imdb_id")
                         if not iid or iid in seen_imdb:
@@ -2398,8 +2407,8 @@ class Database:
         import string as _string
 
         # Rastgele kısa kullanıcı adı (okunabilir)
-        adjectives = ["hızlı","cesur","zeki","güçlü","sakin","parlak","derin","şen"]
-        nouns      = ["aslan","kartal","tilki","kurt","ayı","pars","kaplan","şahin"]
+        adjectives = ["hızlı","cesur","zeki","güçlü","sakin","kızıl","derin","şen","sessiz","gümüş","asil"]
+        nouns      = ["aslan","kartal","tilki","kurt","yıldız","pars","kaplan","şahin","güneş","fırtına","panter"]
         adj  = _secrets.choice(adjectives)
         noun = _secrets.choice(nouns)
         rand = _secrets.randbelow(9000) + 1000        # 4 haneli

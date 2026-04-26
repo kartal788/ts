@@ -1,0 +1,1422 @@
+{% extends "base.html" %}
+
+{% block title %}Yayın Yönetimi{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-8">
+
+    <!-- Header -->
+    <div class="mb-6 sm:mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+            <div class="flex items-center gap-2 mb-2">
+                <a href="/" class="text-primary hover:underline flex items-center text-sm">
+                    <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/>
+                    </svg>
+                    Kontrol Paneli
+                </a>
+            </div>
+            <h1 class="text-2xl sm:text-3xl font-bold flex items-center gap-3">
+                <span class="inline-flex items-center justify-center w-10 h-10 rounded-full bg-purple-600 text-white text-lg">📺</span>
+                Yayın Yönetimi
+            </h1>
+            <p class="theme-text-secondary text-sm mt-1">M3U8/HLS linklerini sunucu üzerinden üyelere yayınla — token kullanımı otomatik düşülür</p>
+        </div>
+        <div class="flex items-center gap-2">
+            <button onclick="openDuyuruModal()"
+                class="flex items-center gap-2 px-4 py-2.5 bg-rose-600 text-white rounded-lg hover:opacity-90 transition font-medium shadow-md text-sm">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"/>
+                </svg>
+                Duyuru Yayını
+            </button>
+            <button onclick="openAddModal()"
+                class="flex items-center gap-2 px-5 py-2.5 bg-primary text-white rounded-lg hover:opacity-90 transition font-medium shadow-md">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                </svg>
+                Yeni Yayın Ekle
+            </button>
+        </div>
+    </div>
+
+    <!-- Info Banner -->
+    <div class="mb-6 flex items-start gap-3 p-4 rounded-xl bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-700">
+        <svg class="w-5 h-5 text-purple-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+        <div class="text-sm">
+            <p class="font-semibold text-purple-700 dark:text-purple-300 mb-1">Nasıl çalışır?</p>
+            <ul class="theme-text-secondary space-y-0.5 list-disc list-inside text-xs">
+                <li>Yayın linki (M3U8/HLS) sunucuya indirilir, <strong>60 saniyelik</strong> parçalar önbelleğe alınır.</li>
+                <li>Üyeler yayını <strong>60 saniye gecikmeli</strong> olarak, sunucu üzerinden izler.</li>
+                <li>İzlenen her segment üyenin token veri kotasından düşülür.</li>
+                <li><strong>Başlat</strong> → Stremio kataloğuna eklenir. <strong>Durdur</strong> → Katalogdan gizlenir, yayın durdurulur.</li>
+            </ul>
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div id="toast" class="fixed top-4 right-4 z-50 hidden px-5 py-3 rounded-lg shadow-xl text-white text-sm font-medium transition-all"></div>
+
+    <!-- Category Filter Bar -->
+    <div class="mb-5 flex flex-wrap gap-2" id="category-filter-bar">
+        <button onclick="setFilter(null)" id="filter-btn-all"
+            class="filter-btn active px-4 py-1.5 rounded-full text-sm font-medium border transition
+                   bg-primary text-white border-primary">
+            Tümü
+        </button>
+        <button onclick="setFilter('Ulusal')" id="filter-btn-Ulusal"
+            class="filter-btn px-4 py-1.5 rounded-full text-sm font-medium border transition
+                   theme-card theme-text border-gray-300 dark:border-gray-600 hover:border-primary hover:text-primary">
+            📺 Ulusal
+        </button>
+        <button onclick="setFilter('Haber')" id="filter-btn-Haber"
+            class="filter-btn px-4 py-1.5 rounded-full text-sm font-medium border transition
+                   theme-card theme-text border-gray-300 dark:border-gray-600 hover:border-primary hover:text-primary">
+            📰 Haber
+        </button>
+        <button onclick="setFilter('Spor')" id="filter-btn-Spor"
+            class="filter-btn px-4 py-1.5 rounded-full text-sm font-medium border transition
+                   theme-card theme-text border-gray-300 dark:border-gray-600 hover:border-primary hover:text-primary">
+            ⚽ Spor
+        </button>
+        <button onclick="setFilter('Belgesel')" id="filter-btn-Belgesel"
+            class="filter-btn px-4 py-1.5 rounded-full text-sm font-medium border transition
+                   theme-card theme-text border-gray-300 dark:border-gray-600 hover:border-primary hover:text-primary">
+            🎥 Belgesel
+        </button>
+        <button onclick="setFilter('Sinema')" id="filter-btn-Sinema"
+            class="filter-btn px-4 py-1.5 rounded-full text-sm font-medium border transition
+                   theme-card theme-text border-gray-300 dark:border-gray-600 hover:border-primary hover:text-primary">
+            🎬 Sinema
+        </button>
+        <button onclick="setFilter('Çocuk')" id="filter-btn-Çocuk"
+            class="filter-btn px-4 py-1.5 rounded-full text-sm font-medium border transition
+                   theme-card theme-text border-gray-300 dark:border-gray-600 hover:border-primary hover:text-primary">
+            🧒 Çocuk
+        </button>
+        <button onclick="setFilter('Müzik')" id="filter-btn-Müzik"
+            class="filter-btn px-4 py-1.5 rounded-full text-sm font-medium border transition
+                   theme-card theme-text border-gray-300 dark:border-gray-600 hover:border-primary hover:text-primary">
+            🎵 Müzik
+        </button>
+        <button onclick="setFilter('Eğlence')" id="filter-btn-Eğlence"
+            class="filter-btn px-4 py-1.5 rounded-full text-sm font-medium border transition
+                   theme-card theme-text border-gray-300 dark:border-gray-600 hover:border-primary hover:text-primary">
+            🎭 Eğlence
+        </button>
+        <button onclick="setFilter('Yaşam')" id="filter-btn-Yaşam"
+            class="filter-btn px-4 py-1.5 rounded-full text-sm font-medium border transition
+                   theme-card theme-text border-gray-300 dark:border-gray-600 hover:border-primary hover:text-primary">
+            🌿 Yaşam
+        </button>
+        <button onclick="setFilter('Dini')" id="filter-btn-Dini"
+            class="filter-btn px-4 py-1.5 rounded-full text-sm font-medium border transition
+                   theme-card theme-text border-gray-300 dark:border-gray-600 hover:border-primary hover:text-primary">
+            🕌 Dini
+        </button>
+    </div>
+
+    <!-- Broadcasts Grid -->
+    <div id="broadcasts-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+        <div class="col-span-full flex justify-center py-12">
+            <div class="flex flex-col items-center gap-3 theme-text-secondary">
+                <svg class="w-10 h-10 animate-spin text-primary" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                </svg>
+                <span>Yayınlar yükleniyor…</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Empty State -->
+    <div id="empty-state" class="hidden flex flex-col items-center justify-center py-20 theme-text-secondary">
+        <svg class="w-16 h-16 mb-4 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                d="M15 10l4.553-2.069A1 1 0 0121 8.82v6.36a1 1 0 01-1.447.89L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+        </svg>
+        <p class="text-lg font-medium mb-1">Henüz yayın yok</p>
+        <p class="text-sm">"Yeni Yayın Ekle" butonuyla ilk yayınınızı oluşturun.</p>
+    </div>
+</div>
+
+<!-- ═══════════════════════════ ADD / EDIT MODAL ═══════════════════════════ -->
+<div id="broadcast-modal" class="fixed inset-0 z-40 hidden flex items-center justify-center p-4">
+    <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" onclick="closeModal()"></div>
+    <div class="relative theme-card rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto z-10">
+
+        <div class="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700 sticky top-0 theme-card z-10">
+            <h2 id="modal-title" class="text-xl font-bold">Yeni Yayın Ekle</h2>
+            <button onclick="closeModal()" class="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                </svg>
+            </button>
+        </div>
+
+        <div class="p-6 space-y-5">
+
+            <!-- Preview Bar -->
+            <div id="preview-bar" class="flex items-center gap-4 p-4 rounded-xl bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
+                <div class="relative w-16 h-16 rounded-lg overflow-hidden bg-gray-300 dark:bg-gray-600 flex-shrink-0">
+                    <img id="preview-logo" src="" alt="" class="w-full h-full object-cover hidden" onerror="this.classList.add('hidden'); document.getElementById('preview-placeholder').classList.remove('hidden')">
+                    <div id="preview-placeholder" class="w-full h-full flex items-center justify-center text-2xl">📺</div>
+                </div>
+                <div>
+                    <p id="preview-name" class="font-bold text-lg">Yayın Adı</p>
+                    <p id="preview-desc" class="theme-text-secondary text-xs line-clamp-2 max-w-sm">Açıklama…</p>
+                </div>
+            </div>
+
+            <!-- Name -->
+            <div>
+                <label class="block text-sm font-semibold mb-1">Yayın Adı <span class="text-red-500">*</span></label>
+                <input id="bc-name" type="text" placeholder="örn. Maç Yayını HD"
+                    class="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent focus:outline-none focus:ring-2 focus:ring-primary"
+                    oninput="document.getElementById('preview-name').textContent = this.value || 'Yayın Adı'">
+            </div>
+
+            <!-- Stream URL -->
+            <div>
+                <label class="block text-sm font-semibold mb-1">Yayın Linki <span class="text-red-500">*</span></label>
+                <input id="bc-url" type="text" placeholder="https://…/stream.m3u8  veya  http://…/live"
+                    class="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent focus:outline-none focus:ring-2 focus:ring-primary">
+                <p class="text-xs theme-text-secondary mt-1">M3U8, HLS veya HTTP stream linki. Sunucu bu linki indirir ve 60 sn önbellekleyerek üyelere iletir.</p>
+            </div>
+
+            <!-- Logo URL -->
+            <div>
+                <label class="block text-sm font-semibold mb-1">Logo URL</label>
+                <input id="bc-logo" type="url" placeholder="https://…/logo.png"
+                    class="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent focus:outline-none focus:ring-2 focus:ring-primary"
+                    oninput="updatePreviewLogo(this.value)">
+            </div>
+
+            <!-- Poster URL -->
+            <div>
+                <label class="block text-sm font-semibold mb-1">Poster URL</label>
+                <input id="bc-poster" type="url" placeholder="https://…/poster.jpg"
+                    class="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent focus:outline-none focus:ring-2 focus:ring-primary">
+                <p class="text-xs theme-text-secondary mt-1">Stremio'da görünecek poster görseli</p>
+            </div>
+
+            <!-- Description -->
+            <div>
+                <label class="block text-sm font-semibold mb-1">Açıklama</label>
+                <textarea id="bc-desc" rows="2" placeholder="Yayının kısa açıklaması…"
+                    class="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent focus:outline-none focus:ring-2 focus:ring-primary resize-none"
+                    oninput="document.getElementById('preview-desc').textContent = this.value || 'Açıklama…'"></textarea>
+            </div>
+
+            <!-- Genres -->
+            <div>
+                <label class="block text-sm font-semibold mb-1">Kategoriler</label>
+                <!-- Gizli input — mevcut JS mantığı değişmeden çalışır -->
+                <input id="bc-genres" type="hidden">
+                <div id="bc-genres-tags" class="flex flex-wrap gap-2 p-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent min-h-[42px]">
+                    <!-- Seçili kategoriler buraya eklenir -->
+                </div>
+                <div class="flex flex-wrap gap-1.5 mt-2" id="bc-genres-options">
+                    <!-- Tüm seçenekler JS ile doldurulur -->
+                </div>
+            </div>
+
+            <!-- Buffer / Delay -->
+            <div>
+                <label class="block text-sm font-semibold mb-1">Önbellek Gecikmesi (saniye)</label>
+                <input id="bc-buffer" type="number" value="60" min="5" max="120" step="5"
+                    class="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent focus:outline-none focus:ring-2 focus:ring-primary">
+                <p class="text-xs theme-text-secondary mt-1">Sunucu bu kadar saniyelik parçayı önbellekler; üyeler bu gecikme kadar geride izler.</p>
+            </div>
+
+            <!-- Order -->
+            <div>
+                <label class="block text-sm font-semibold mb-1">Sıra (küçük = önce)</label>
+                <input id="bc-order" type="number" value="0" min="0"
+                    class="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent focus:outline-none focus:ring-2 focus:ring-primary">
+            </div>
+
+
+            <!-- Scheduled Start / Stop — çoklu zaman çifti -->
+            <div class="rounded-xl border border-blue-200 dark:border-blue-700 bg-blue-50 dark:bg-blue-900/20 p-4 space-y-3">
+                <div class="flex items-center justify-between">
+                    <p class="text-xs font-semibold text-blue-700 dark:text-blue-300 flex items-center gap-1.5">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                        Otomatik Zamanlama (Türkiye Saati)
+                    </p>
+                    <button type="button" onclick="addScheduleRow()"
+                        class="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                        Zaman Ekle
+                    </button>
+                </div>
+                <p class="text-xs theme-text-secondary -mt-1">Her satır bağımsız bir başlangıç/bitiş çiftidir. Bitiş boş bırakılırsa o çift için otomatik durdurmaz.</p>
+                <div id="schedule-rows" class="space-y-2">
+                    <!-- satırlar JS ile eklenir -->
+                </div>
+            </div>
+
+        </div>
+
+        <div class="flex justify-end gap-3 px-6 py-4 border-t border-gray-200 dark:border-gray-700 sticky bottom-0 theme-card">
+            <button onclick="closeModal()" class="px-5 py-2 rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 transition text-sm font-medium">
+                İptal
+            </button>
+            <button id="modal-save-btn" onclick="saveBroadcast()"
+                class="px-6 py-2 bg-primary text-white rounded-lg hover:opacity-90 transition text-sm font-semibold shadow">
+                Kaydet
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- ═══════════════════════════ DELETE CONFIRM MODAL ═══════════════════════════ -->
+<div id="delete-modal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4">
+    <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" onclick="closeDeleteModal()"></div>
+    <div class="relative theme-card rounded-2xl shadow-2xl w-full max-w-sm z-10 p-6">
+        <div class="flex flex-col items-center text-center gap-4">
+            <div class="w-14 h-14 rounded-full bg-red-100 dark:bg-red-900/40 flex items-center justify-center">
+                <svg class="w-7 h-7 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+                </svg>
+            </div>
+            <div>
+                <h3 class="text-lg font-bold mb-1">Yayını Sil</h3>
+                <p class="theme-text-secondary text-sm"><span id="delete-bc-name" class="font-semibold text-red-500"></span> yayınını silmek istediğinizden emin misiniz? Bu işlem geri alınamaz.</p>
+            </div>
+            <div class="flex gap-3 w-full">
+                <button onclick="closeDeleteModal()" class="flex-1 py-2 rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 transition text-sm font-medium">
+                    İptal
+                </button>
+                <button id="confirm-delete-btn" class="flex-1 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition text-sm font-semibold">
+                    Evet, Sil
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ═══════════════════════════ STATUS MODAL ═══════════════════════════ -->
+<div id="status-modal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4">
+    <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" onclick="closeStatusModal()"></div>
+    <div class="relative theme-card rounded-2xl shadow-2xl w-full max-w-md z-10 p-6">
+        <div class="flex items-center justify-between mb-4">
+            <h3 class="text-lg font-bold" id="status-modal-title">Yayın Durumu</h3>
+            <button onclick="closeStatusModal()" class="p-1.5 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                </svg>
+            </button>
+        </div>
+        <div id="status-modal-body" class="space-y-3 text-sm theme-text-secondary">
+            <!-- dynamically filled -->
+        </div>
+    </div>
+</div>
+
+<style>
+    .line-clamp-2 { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+    .broadcast-card { transition: transform .15s, box-shadow .15s; }
+    .broadcast-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,.18); }
+    .status-dot-live { animation: pulse-red 1.5s infinite; }
+    @keyframes pulse-red { 0%,100%{opacity:1;} 50%{opacity:.4;} }
+    @keyframes tickerScroll { 0%{transform:translateX(100%);} 100%{transform:translateX(-150%);} }
+    @keyframes tickerBlink { 0%,100%{opacity:1;} 50%{opacity:0;} }
+    .ticker-scroll { display:inline-block; animation: tickerScroll 12s linear infinite; }
+    .ticker-blink  { animation: tickerBlink 1s step-start infinite; }
+</style>
+
+<script>
+function _fmtDuration(secs) {
+    if (!secs) return '';
+    if (secs % 604800 === 0) return `${secs/604800} hafta`;
+    if (secs % 86400 === 0)  return `${secs/86400} gün`;
+    if (secs % 3600 === 0)   return `${secs/3600} saat`;
+    return `${Math.round(secs/60)} dakika`;
+}
+
+
+
+/* ── Tarih/saat yardımcıları ── */
+function _toDatetimeLocal(s) {
+    if (!s) return '';
+    return s.trim().replace(' ', 'T').slice(0, 16);
+}
+function _fmtDT(s) {
+    if (!s) return '';
+    const clean = s.replace('T', ' ').trim();
+    const m = clean.match(/(\d{4})-(\d{2})-(\d{2})\s+(\d{2}:\d{2})/);
+    if (!m) return s;
+    return `${m[3]}.${m[2]}.${m[1]} ${m[4]}`;
+}
+
+/* ── Zamanlama satırı ekle ── */
+let _scheduleRowIdx = 0;
+function addScheduleRow(startVal = '', stopVal = '') {
+    const idx = _scheduleRowIdx++;
+    const container = document.getElementById('schedule-rows');
+    const row = document.createElement('div');
+    row.id = `sched-row-${idx}`;
+    row.className = 'flex items-center gap-2 p-3 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600';
+    row.innerHTML = `
+        <div class="flex-1 grid grid-cols-2 gap-2">
+            <div>
+                <label class="block text-xs font-semibold text-blue-600 dark:text-blue-400 mb-0.5">▶ Başlangıç</label>
+                <input type="datetime-local" class="sched-start w-full px-2 py-1.5 text-xs rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent focus:outline-none focus:ring-2 focus:ring-primary" value="${_toDatetimeLocal(startVal)}">
+            </div>
+            <div>
+                <label class="block text-xs font-semibold text-red-500 dark:text-red-400 mb-0.5">⏹ Bitiş</label>
+                <input type="datetime-local" class="sched-stop w-full px-2 py-1.5 text-xs rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent focus:outline-none focus:ring-2 focus:ring-primary" value="${_toDatetimeLocal(stopVal)}">
+            </div>
+        </div>
+        <button type="button" onclick="document.getElementById('sched-row-${idx}').remove()"
+            class="flex-shrink-0 p-1.5 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition" title="Sil">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+        </button>`;
+    container.appendChild(row);
+}
+
+/* ── Formdaki tüm zamanlama çiftlerini topla ── */
+function _collectSchedules() {
+    const rows = document.querySelectorAll('#schedule-rows > div');
+    const result = [];
+    rows.forEach(row => {
+        const s = row.querySelector('.sched-start')?.value || '';
+        const e = row.querySelector('.sched-stop')?.value  || '';
+        if (s || e) result.push({ start: s, stop: e });
+    });
+    return result;
+}
+
+
+
+/* ── Kartta zamanlama listesini göster ── */
+function _renderCardSchedules(schedules, legacyStart, legacyStop) {
+    // Geriye dönük uyumluluk
+    let list = schedules || [];
+    if (!list.length && (legacyStart || legacyStop)) {
+        list = [{ start: legacyStart || '', stop: legacyStop || '' }];
+    }
+    if (!list.length) return '';
+    const rows = list.map(p => `
+        <div class="flex items-center gap-2">
+            ${p.start ? `<span class="text-blue-600 dark:text-blue-400">▶ ${_fmtDT(p.start)}</span>` : ''}
+            ${p.start && p.stop ? '<span class="opacity-40">→</span>' : ''}
+            ${p.stop  ? `<span class="text-red-500 dark:text-red-400">⏹ ${_fmtDT(p.stop)}</span>` : ''}
+        </div>`).join('');
+    return `<div class="flex flex-col gap-0.5 text-xs mt-1 border-t border-gray-100 dark:border-gray-700 pt-1">${rows}</div>`;
+}
+
+const API = {
+    list:        ()        => fetch('/api/yayin').then(r => r.json()),
+    add:         (d)       => fetch('/api/yayin', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(d)}).then(r => r.json()),
+    update:      (id, d)   => fetch(`/api/yayin/${id}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(d)}).then(r => r.json()),
+    delete:      (id)      => fetch(`/api/yayin/${id}`, {method:'DELETE'}).then(r => r.json()),
+    start:       (id)      => fetch(`/api/yayin/${id}/start`, {method:'POST'}).then(r => r.json()),
+    stop:        (id)      => fetch(`/api/yayin/${id}/stop`, {method:'POST'}).then(r => r.json()),
+    status:      (id)      => fetch(`/api/yayin/${id}/status`).then(r => r.json()),
+};
+
+let editingId = null;
+let deleteTargetId = null;
+
+/* ── Toast ── */
+function showToast(msg, ok=true) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.className = `fixed top-4 right-4 z-50 px-5 py-3 rounded-lg shadow-xl text-white text-sm font-medium transition-all ${ok ? 'bg-green-600' : 'bg-red-600'}`;
+    t.classList.remove('hidden');
+    setTimeout(() => t.classList.add('hidden'), 3500);
+}
+
+/* ── Preview logo ── */
+function updatePreviewLogo(url) {
+    const img = document.getElementById('preview-logo');
+    const ph  = document.getElementById('preview-placeholder');
+    if (url) {
+        img.src = url;
+        img.classList.remove('hidden');
+        ph.classList.add('hidden');
+    } else {
+        img.classList.add('hidden');
+        ph.classList.remove('hidden');
+    }
+}
+
+/* ── Modal open/close ── */
+function openAddModal() {
+    editingId = null;
+    document.getElementById('modal-title').textContent = 'Yeni Yayın Ekle';
+    document.getElementById('modal-save-btn').textContent = 'Kaydet';
+    clearForm();
+    document.getElementById('broadcast-modal').classList.remove('hidden');
+}
+
+function openEditModal(bc) {
+    editingId = bc._id;
+    document.getElementById('modal-title').textContent = 'Yayını Düzenle';
+    document.getElementById('modal-save-btn').textContent = 'Güncelle';
+    clearForm();
+    document.getElementById('bc-name').value   = bc.name || '';
+    document.getElementById('bc-url').value    = bc.stream_url || '';
+    document.getElementById('bc-logo').value   = bc.logo || '';
+    document.getElementById('bc-poster').value = bc.poster || '';
+    document.getElementById('bc-desc').value   = bc.description || '';
+    setGenreSelection('bc', bc.genres || []);
+    document.getElementById('bc-buffer').value = bc.buffer_seconds ?? 60;
+    document.getElementById('bc-order').value  = bc.order ?? 0;
+    // Zamanlanmış çiftleri yükle
+    const schedules = bc.schedules || [];
+    // Geriye dönük uyumluluk: eski tek-çift alanlarını listele
+    if (!schedules.length && (bc.scheduled_start || bc.scheduled_stop)) {
+        schedules.push({ start: bc.scheduled_start || '', stop: bc.scheduled_stop || '' });
+    }
+    document.getElementById('schedule-rows').innerHTML = '';
+    schedules.forEach(pair => addScheduleRow(pair.start || '', pair.stop || ''));
+    document.getElementById('preview-name').textContent = bc.name || 'Yayın Adı';
+    document.getElementById('preview-desc').textContent = bc.description || 'Açıklama…';
+    updatePreviewLogo(bc.logo || '');
+    document.getElementById('broadcast-modal').classList.remove('hidden');
+}
+
+function closeModal() {
+    document.getElementById('broadcast-modal').classList.add('hidden');
+}
+
+function clearForm() {
+    ['bc-name','bc-url','bc-logo','bc-poster','bc-desc'].forEach(id => document.getElementById(id).value = '');
+    setGenreSelection('bc', []);
+    document.getElementById('bc-buffer').value = 60;
+    document.getElementById('bc-order').value  = 0;
+    document.getElementById('schedule-rows').innerHTML = '';
+    document.getElementById('preview-name').textContent = 'Yayın Adı';
+    document.getElementById('preview-desc').textContent = 'Açıklama…';
+    updatePreviewLogo('');
+
+}
+
+/* ── Save ── */
+async function saveBroadcast() {
+    const name = document.getElementById('bc-name').value.trim();
+    const url  = document.getElementById('bc-url').value.trim();
+    if (!name) { showToast('Yayın adı zorunludur!', false); return; }
+    if (!url)  { showToast('Yayın linki zorunludur!', false); return; }
+
+    const payload = {
+        name,
+        stream_url:     url,
+        logo:           document.getElementById('bc-logo').value.trim(),
+        poster:         document.getElementById('bc-poster').value.trim(),
+        description:    document.getElementById('bc-desc').value.trim(),
+        genres:         document.getElementById('bc-genres').value.split(',').map(s=>s.trim()).filter(Boolean),
+        buffer_seconds: parseInt(document.getElementById('bc-buffer').value) || 60,
+        order:          parseInt(document.getElementById('bc-order').value) || 0,
+        schedules:      _collectSchedules(),
+    };
+
+    const btn = document.getElementById('modal-save-btn');
+    btn.disabled = true;
+    btn.textContent = 'Kaydediliyor…';
+
+    try {
+        let res;
+        if (editingId) {
+            res = await API.update(editingId, payload);
+        } else {
+            res = await API.add(payload);
+        }
+        if (res.error) throw new Error(res.error);
+        showToast(editingId ? 'Yayın güncellendi ✓' : 'Yayın eklendi ✓');
+        closeModal();
+        loadBroadcasts();
+    } catch(e) {
+        showToast('Hata: ' + e.message, false);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = editingId ? 'Güncelle' : 'Kaydet';
+    }
+}
+
+/* ── Start / Stop ── */
+async function toggleBroadcast(id, currentlyActive) {
+    const btn = document.getElementById(`toggle-btn-${id}`);
+    if (btn) { btn.disabled = true; btn.textContent = currentlyActive ? 'Durduruluyor…' : 'Başlatılıyor…'; }
+    try {
+        const res = currentlyActive ? await API.stop(id) : await API.start(id);
+        if (res.error) throw new Error(res.error);
+        showToast(currentlyActive ? 'Yayın durduruldu — katalogdan gizlendi ✓' : 'Yayın başlatıldı — 60 sn önbellek dolunca aktif ✓');
+        await loadBroadcasts();
+    } catch(e) {
+        showToast('Hata: ' + e.message, false);
+        if (btn) { btn.disabled = false; btn.textContent = currentlyActive ? 'Durdur' : 'Başlat'; }
+    }
+}
+
+/* ── Status popup ── */
+async function openStatusModal(id, name) {
+    document.getElementById('status-modal-title').textContent = name + ' — Durum';
+    document.getElementById('status-modal-body').innerHTML = '<div class="flex justify-center py-4"><svg class="w-6 h-6 animate-spin text-primary" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg></div>';
+    document.getElementById('status-modal').classList.remove('hidden');
+    try {
+        const [s] = await Promise.all([API.status(id)]);
+        const rows = [
+            ['Durum', s.active ? '<span class="text-green-500 font-semibold">🟢 Yayında</span>' : '<span class="text-gray-400">⚫ Durduruldu</span>'],
+            ['Önbellek Gecikmesi', (s.buffer_seconds ?? 60) + ' saniye'],
+            ['Segment Boyutu', s.segment_size_kb ? s.segment_size_kb + ' KB' : '—'],
+            ['Önbellekteki Parça', s.buffered_segments ?? '—'],
+            ['Toplam İzleyici', s.viewer_count ?? '—'],
+            ['Toplam Tüketim', s.total_bytes_served ? formatBytes(s.total_bytes_served) : '—'],
+        ];
+        document.getElementById('status-modal-body').innerHTML = rows.map(([k,v]) => `
+            <div class="flex justify-between items-center border-b border-gray-100 dark:border-gray-700 pb-2">
+                <span class="font-medium">${k}</span><span>${v}</span>
+            </div>`).join('');
+    } catch(e) {
+        document.getElementById('status-modal-body').innerHTML = `<p class="text-red-500">Durum alınamadı: ${e.message}</p>`;
+    }
+}
+function closeStatusModal() {
+    document.getElementById('status-modal').classList.add('hidden');
+}
+
+function formatBytes(b) {
+    if (b < 1024) return b + ' B';
+    if (b < 1024*1024) return (b/1024).toFixed(1) + ' KB';
+    if (b < 1024*1024*1024) return (b/1024/1024).toFixed(2) + ' MB';
+    return (b/1024/1024/1024).toFixed(2) + ' GB';
+}
+
+/* ── Delete modal ── */
+function openDeleteModal(id, name) {
+    deleteTargetId = id;
+    document.getElementById('delete-bc-name').textContent = name;
+    document.getElementById('confirm-delete-btn').onclick = confirmDelete;
+    document.getElementById('delete-modal').classList.remove('hidden');
+}
+function closeDeleteModal() {
+    document.getElementById('delete-modal').classList.add('hidden');
+    deleteTargetId = null;
+}
+async function confirmDelete() {
+    if (!deleteTargetId) return;
+    const btn = document.getElementById('confirm-delete-btn');
+    btn.disabled = true; btn.textContent = 'Siliniyor…';
+    try {
+        const res = await API.delete(deleteTargetId);
+        if (res.error) throw new Error(res.error);
+        showToast('Yayın silindi ✓');
+        closeDeleteModal();
+        loadBroadcasts();
+    } catch(e) {
+        showToast('Hata: ' + e.message, false);
+        btn.disabled = false; btn.textContent = 'Evet, Sil';
+    }
+}
+
+/* ── Render ── */
+let allBroadcasts = [];
+let activeFilter = null;
+
+function setFilter(genre) {
+    activeFilter = genre;
+    document.querySelectorAll('.filter-btn').forEach(btn => {
+        btn.classList.remove('bg-primary', 'text-white', 'border-primary', 'active');
+        btn.classList.add('theme-card', 'theme-text', 'border-gray-300', 'dark:border-gray-600');
+    });
+    const activeId = genre ? `filter-btn-${genre}` : 'filter-btn-all';
+    const activeBtn = document.getElementById(activeId);
+    if (activeBtn) {
+        activeBtn.classList.add('bg-primary', 'text-white', 'border-primary', 'active');
+        activeBtn.classList.remove('theme-card', 'theme-text', 'border-gray-300', 'dark:border-gray-600');
+    }
+    const filtered = genre
+        ? allBroadcasts.filter(bc => (bc.genres || []).includes(genre))
+        : allBroadcasts;
+    renderBroadcasts(filtered);
+}
+
+function renderBroadcasts(broadcasts) {
+    const grid  = document.getElementById('broadcasts-grid');
+    const empty = document.getElementById('empty-state');
+    grid.innerHTML = '';
+    if (!broadcasts.length) {
+        empty.classList.remove('hidden');
+        return;
+    }
+    empty.classList.add('hidden');
+    broadcasts.forEach(bc => {
+        const card = document.createElement('div');
+        card.className = 'theme-card broadcast-card rounded-xl overflow-hidden shadow-md flex flex-col';
+        const posterUrl = bc.poster || bc.logo || '';
+        const isActive  = bc.active === true;
+        const buf       = bc.buffer_seconds ?? 60;
+        card.innerHTML = `
+            <div class="relative h-36 bg-gradient-to-br from-gray-800 to-gray-900 overflow-hidden flex-shrink-0">
+                ${posterUrl
+                    ? `<img src="${posterUrl}" alt="${bc.name}" class="w-full h-full object-cover opacity-80" onerror="this.style.display='none'">`
+                    : '<div class="w-full h-full flex items-center justify-center text-5xl opacity-30">📺</div>'
+                }
+                <div class="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent"></div>
+                ${bc.logo
+                    ? `<img src="${bc.logo}" alt="" class="absolute bottom-2 left-3 h-7 object-contain drop-shadow-lg" onerror="this.style.display='none'">`
+                    : ''}
+                <span class="absolute top-2 right-2 px-2 py-0.5 ${isActive ? 'bg-green-600' : 'bg-gray-600'} text-white text-xs font-bold rounded-full flex items-center gap-1">
+                    <span class="w-1.5 h-1.5 bg-white rounded-full ${isActive ? 'status-dot-live' : 'opacity-50'}"></span>
+                    ${isActive ? 'YAYINDA' : 'DURDURULDU'}
+                </span>
+                <span class="absolute top-2 left-2 px-2 py-0.5 bg-black/50 text-white text-xs rounded-full">⏱ ${buf}s</span>
+            </div>
+            <div class="p-4 flex flex-col gap-2 flex-1">
+                <h3 class="font-bold text-base truncate" title="${bc.name}">${bc.name}</h3>
+                ${bc.description ? `<p class="theme-text-secondary text-xs line-clamp-2">${bc.description}</p>` : ''}
+                ${(bc.genres||[]).length
+                    ? `<div class="flex flex-wrap gap-1">${bc.genres.slice(0,3).map(g=>`<span class="px-2 py-0.5 text-xs rounded-full bg-gray-200 dark:bg-gray-700 theme-text-secondary">${g}</span>`).join('')}</div>`
+                    : ''}
+                <div class="flex items-center gap-1 text-xs theme-text-secondary mt-auto pt-1 truncate">
+                    <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg>
+                    <span class="truncate">${bc.stream_url || '—'}</span>
+                </div>
+                ${_renderCardSchedules(bc.schedules, bc.scheduled_start, bc.scheduled_stop)}
+            </div>
+            <div class="flex border-t border-gray-200 dark:border-gray-700 divide-x divide-gray-200 dark:divide-gray-700">
+                <button id="toggle-btn-${bc._id}" onclick="toggleBroadcast('${bc._id}', ${isActive})"
+                    class="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-semibold transition
+                        ${isActive ? 'text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20' : 'text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20'}">
+                    ${isActive
+                        ? `<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0zM9 10h6v4H9z"/></svg> Durdur`
+                        : `<svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg> Başlat`
+                    }
+                </button>
+                <button onclick="openStatusModal('${bc._id}', '${bc.name.replace(/'/g,"\\'")}' )"
+                    class="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-medium text-primary hover:bg-gray-100 dark:hover:bg-gray-800 transition">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg> Durum
+                </button>
+                <button onclick='openEditModal(${JSON.stringify(bc).replace(/'/g,"&#39;")})'
+                    class="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-medium text-primary hover:bg-gray-100 dark:hover:bg-gray-800 transition">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg> Düzenle
+                </button>
+                <button onclick="openDeleteModal('${bc._id}', '${bc.name.replace(/'/g,"\\'")}' )"
+                    class="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-medium text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg> Sil
+                </button>
+            </div>`;
+        grid.appendChild(card);
+    });
+}
+
+async function loadBroadcasts() {
+    try {
+        const data = await API.list();
+        allBroadcasts = data.broadcasts || [];
+        const filtered = activeFilter
+            ? allBroadcasts.filter(bc => (bc.genres || []).includes(activeFilter))
+            : allBroadcasts;
+        renderBroadcasts(filtered);
+    } catch(e) {
+        showToast('Yayınlar yüklenemedi: ' + e.message, false);
+        document.getElementById('broadcasts-grid').innerHTML = `<div class="col-span-full text-center py-12 theme-text-secondary">Yükleme hatası</div>`;
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    loadBroadcasts();
+    initGenreSelector('bc', VOD_GENRES);
+});
+
+/* ── VOD kategorileri (stremio_routes.py GENRES / GENRES_TR) ── */
+const VOD_GENRES = [
+    "Ulusal", "Haber", "Spor", "Belgesel",
+    "Sinema", "Çocuk", "Müzik", "Eğlence",
+    "Yaşam", "Dini"
+];
+
+function initGenreSelector(prefix, list) {
+    const optionsEl = document.getElementById(`${prefix}-genres-options`);
+    if (!optionsEl) return;
+    optionsEl.innerHTML = '';
+    list.forEach(g => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.textContent = g;
+        btn.dataset.genre = g;
+        btn.className = 'genre-opt-btn px-2.5 py-1 text-xs rounded-full border border-gray-300 dark:border-gray-600 theme-text-secondary hover:border-primary hover:text-primary transition-colors';
+        btn.addEventListener('click', () => toggleGenre(prefix, g));
+        optionsEl.appendChild(btn);
+    });
+}
+
+function toggleGenre(prefix, genre) {
+    const hidden = document.getElementById(`${prefix}-genres`);
+    let selected = hidden.value ? hidden.value.split(',').map(s => s.trim()).filter(Boolean) : [];
+    if (selected.includes(genre)) {
+        selected = selected.filter(s => s !== genre);
+    } else {
+        selected.push(genre);
+    }
+    hidden.value = selected.join(', ');
+    renderGenreTags(prefix, selected);
+    syncGenreButtons(prefix, selected);
+}
+
+function renderGenreTags(prefix, selected) {
+    const tagsEl = document.getElementById(`${prefix}-genres-tags`);
+    tagsEl.innerHTML = selected.length === 0
+        ? '<span class="text-xs theme-text-secondary self-center ml-1">Kategori seçin…</span>'
+        : selected.map(g => `
+            <span class="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-full bg-primary/10 text-primary border border-primary/30">
+                ${g}
+                <button type="button" onclick="toggleGenre('${prefix}','${g}')" class="hover:text-red-500 leading-none font-bold">&times;</button>
+            </span>`).join('');
+}
+
+function syncGenreButtons(prefix, selected) {
+    const optionsEl = document.getElementById(`${prefix}-genres-options`);
+    if (!optionsEl) return;
+    optionsEl.querySelectorAll('.genre-opt-btn').forEach(btn => {
+        if (selected.includes(btn.dataset.genre)) {
+            btn.classList.add('bg-primary', 'text-white', 'border-primary');
+            btn.classList.remove('border-gray-300', 'dark:border-gray-600', 'theme-text-secondary');
+        } else {
+            btn.classList.remove('bg-primary', 'text-white', 'border-primary');
+            btn.classList.add('border-gray-300', 'dark:border-gray-600', 'theme-text-secondary');
+        }
+    });
+}
+
+function setGenreSelection(prefix, genres) {
+    const hidden = document.getElementById(`${prefix}-genres`);
+    hidden.value = genres.join(', ');
+    renderGenreTags(prefix, genres);
+    syncGenreButtons(prefix, genres);
+}
+/* ══════════════════════════════════════════════════════
+   DUYURU YAYINI
+══════════════════════════════════════════════════════ */
+
+let _duyuruSession = null;
+// ─── Çoklu Medya / Müzik Listeleri ─────────────────────────────────────────
+// Her öğe: { type:'file'|'url'|'server', file?:File, url?:string, name:string, isVideo:bool }
+let _duyuruMediaItems = [];   // resim/video öğeleri
+let _duyuruMusicItems = [];   // müzik öğeleri
+
+const _VIDEO_EXTS = new Set(['.mp4','.mkv','.avi','.mov','.webm','.ts','.m4v']);
+const _AUDIO_EXTS = new Set(['.mp3','.aac','.flac','.ogg','.wav','.m4a','.opus']);
+
+function _isVideoFile(name) {
+    const ext = '.' + (name.split('.').pop() || '').toLowerCase();
+    return _VIDEO_EXTS.has(ext);
+}
+
+function _duyuruRenderMediaList() {
+    const list = document.getElementById('duyuru-media-list');
+    if (!list) return;
+
+    // Mod belirle
+    const hasVideo  = _duyuruMediaItems.some(i => i.isVideo);
+    const hasImage  = _duyuruMediaItems.some(i => !i.isVideo);
+    const modeInfo  = document.getElementById('duyuru-media-mode-info');
+    const slideWrap = document.getElementById('duyuru-slide-interval-wrap');
+
+    if (_duyuruMediaItems.length === 0) {
+        if (modeInfo)  { modeInfo.classList.add('hidden'); }
+        if (slideWrap) { slideWrap.classList.add('hidden'); }
+    } else if (hasVideo) {
+        _duyuruIsVideoMode = true;
+        if (modeInfo)  { modeInfo.classList.remove('hidden'); modeInfo.textContent = '🎬 Video modu — sırayla oynatılır, hepsi bitince tekrar başlar.'; }
+        if (slideWrap) { slideWrap.classList.add('hidden'); }
+    } else {
+        _duyuruIsVideoMode = false;
+        if (modeInfo)  { modeInfo.classList.remove('hidden'); modeInfo.textContent = '🖼️ Slayt modu — resimler arasında otomatik geçiş.'; }
+        if (slideWrap) { slideWrap.classList.remove('hidden'); }
+    }
+
+    list.innerHTML = '';
+    _duyuruMediaItems.forEach((item, idx) => {
+        const row = document.createElement('div');
+        row.className = 'flex items-center gap-2 px-2 py-1.5 rounded-lg bg-white/5 border border-white/10 text-xs';
+        row.innerHTML = `
+            <span class="text-base">${item.isVideo ? '🎬' : '🖼️'}</span>
+            <span class="flex-1 truncate theme-text" title="${item.name}">${item.name}</span>
+            <button type="button" onclick="_duyuruRemoveMedia(${idx})"
+                class="flex-shrink-0 p-1 rounded hover:bg-red-500/20 text-red-400 hover:text-red-300 transition">✕</button>`;
+        list.appendChild(row);
+    });
+}
+
+function _duyuruRenderMusicList() {
+    const list = document.getElementById('duyuru-music-list');
+    if (!list) return;
+    list.innerHTML = '';
+    _duyuruMusicItems.forEach((item, idx) => {
+        const row = document.createElement('div');
+        row.className = 'flex items-center gap-2 px-2 py-1.5 rounded-lg bg-white/5 border border-white/10 text-xs';
+        row.innerHTML = `
+            <span class="text-base">🎵</span>
+            <span class="flex-1 truncate theme-text" title="${item.name}">${item.name}</span>
+            <button type="button" onclick="_duyuruRemoveMusic(${idx})"
+                class="flex-shrink-0 p-1 rounded hover:bg-red-500/20 text-red-400 hover:text-red-300 transition">✕</button>`;
+        list.appendChild(row);
+    });
+}
+
+function _duyuruRemoveMedia(idx) {
+    _duyuruMediaItems.splice(idx, 1);
+    _duyuruRenderMediaList();
+}
+
+function _duyuruRemoveMusic(idx) {
+    _duyuruMusicItems.splice(idx, 1);
+    _duyuruRenderMusicList();
+}
+
+// Dosya inputundan resim/video ekleme
+function _duyuruAddFilesFromInput(input) {
+    Array.from(input.files || []).forEach(f => {
+        const isVideo = f.type.startsWith('video/') || _isVideoFile(f.name);
+        _duyuruMediaItems.push({ type: 'file', file: f, name: f.name, isVideo });
+    });
+    input.value = ''; // sıfırla
+    _duyuruRenderMediaList();
+}
+
+// URL'den resim/video ekleme
+function _duyuruAddUrl() {
+    const inp = document.getElementById('duyuru-image-url');
+    const url = inp?.value?.trim();
+    if (!url) return;
+    const name = url.split('/').pop() || url;
+    const isVideo = _isVideoFile(name) || url.includes('video');
+    _duyuruMediaItems.push({ type: 'url', url, name, isVideo });
+    if (inp) inp.value = '';
+    _duyuruRenderMediaList();
+}
+
+// Sunucu seçiminden resim/video ekleme
+function _duyuruAddServerFile() {
+    const sel = document.getElementById('duyuru-image-server');
+    const path = sel?.value?.trim();
+    if (!path) return;
+    const name = path.split('/').pop() || path;
+    const isVideo = _isVideoFile(name);
+    _duyuruMediaItems.push({ type: 'server', url: path, name, isVideo });
+    _duyuruRenderMediaList();
+}
+
+// Dosya inputundan müzik ekleme
+function _duyuruAddMusicFromInput(input) {
+    Array.from(input.files || []).forEach(f => {
+        _duyuruMusicItems.push({ type: 'file', file: f, name: f.name });
+    });
+    input.value = '';
+    _duyuruRenderMusicList();
+}
+
+// URL'den müzik ekleme
+function _duyuruAddMusicUrl() {
+    const inp = document.getElementById('duyuru-music-url');
+    const url = inp?.value?.trim();
+    if (!url) return;
+    const name = url.split('/').pop() || url;
+    _duyuruMusicItems.push({ type: 'url', url, name });
+    if (inp) inp.value = '';
+    _duyuruRenderMusicList();
+}
+
+// Sunucu seçiminden müzik ekleme
+function _duyuruAddMusicServer() {
+    const sel = document.getElementById('duyuru-music-server');
+    const path = sel?.value?.trim();
+    if (!path) return;
+    const name = path.split('/').pop() || path;
+    _duyuruMusicItems.push({ type: 'server', url: path, name });
+    _duyuruRenderMusicList();
+}
+
+// Eski uyumluluk — sunucu image server change (artık yalnızca bilgi)
+function _duyuruImageServerChange(sel) {}
+
+let _duyuruState   = 'idle'; // idle | building | ready | live
+
+function openDuyuruModal() {
+    _duyuruState = 'idle';
+    _duyuruSession = null;
+    _duyuruMediaItems = [];
+    _duyuruMusicItems = [];
+    _duyuruIsVideoMode = false;
+    // Alanları sıfırla
+    const adi = document.getElementById('duyuru-kanal-adi');
+    if (adi) adi.value = '';
+    const ord = document.getElementById('duyuru-order');
+    if (ord) ord.value = '0';
+    // Tab'ları sıfırla
+    ['image', 'poster', 'logo', 'music'].forEach(alan => duyuruTab(alan, 'upload'));
+    _duyuruServerFiles = null;
+    _duyuruRenderState();
+    _duyuruRenderMediaList();
+    _duyuruRenderMusicList();
+    document.getElementById('duyuru-modal').classList.remove('hidden');
+}
+function closeDuyuruModal() {
+    document.getElementById('duyuru-modal').classList.add('hidden');
+}
+
+function _duyuruRenderState() {
+    const btnBuild  = document.getElementById('duyuru-btn-build');
+    const btnStart  = document.getElementById('duyuru-btn-start');
+    const btnStop   = document.getElementById('duyuru-btn-stop');
+    const statusEl  = document.getElementById('duyuru-status');
+    const playerWrap= document.getElementById('duyuru-player-wrap');
+
+    btnBuild.classList.add('hidden');
+    btnStart.classList.add('hidden');
+    btnStop.classList.add('hidden');
+    statusEl.textContent = '';
+    playerWrap.classList.add('hidden');
+
+    if (_duyuruState === 'idle') {
+        btnBuild.classList.remove('hidden');
+    } else if (_duyuruState === 'building') {
+        statusEl.textContent = '⏳ Video oluşturuluyor…';
+    } else if (_duyuruState === 'ready') {
+        btnStart.classList.remove('hidden');
+        statusEl.textContent = _duyuruIsVideoMode
+            ? '✅ Video hazır. Başlatmak için "Başlat"a tıklayın. (Döngü yayını)'
+            : '✅ Video hazır. Başlatmak için "Başlat"a tıklayın.';
+    } else if (_duyuruState === 'live') {
+        btnStop.classList.remove('hidden');
+        statusEl.innerHTML = '🔴 <strong>Yayın Aktif</strong>';
+        playerWrap.classList.remove('hidden');
+    }
+}
+
+// ─── Duyuru Tab Yöneticisi ───────────────────────────────────────────────────
+// _duyuruTabs[alan] = 'upload' | 'url' | 'server'
+const _duyuruTabs = { image: 'upload', poster: 'upload', logo: 'upload', music: 'upload' };
+
+function duyuruTab(alan, kaynak) {
+    _duyuruTabs[alan] = kaynak;
+    ['upload', 'url', 'server'].forEach(k => {
+        const wrap = document.getElementById(`duyuru-${alan}-${k}-wrap`);
+        if (wrap) wrap.classList.toggle('hidden', k !== kaynak);
+    });
+    // Tab butonlarını güncelle
+    document.querySelectorAll(`[data-tab^="${alan}-"]`).forEach(btn => {
+        const active = btn.dataset.tab === `${alan}-${kaynak}`;
+        btn.classList.toggle('bg-primary/20', active);
+        btn.classList.toggle('text-primary', active);
+        btn.classList.toggle('border-primary/40', active);
+        btn.classList.toggle('bg-white/5', !active);
+        btn.classList.toggle('border-white/10', !active);
+    });
+    // Sunucu listesi ilk açılışta yükle
+    if (kaynak === 'server') _duyuruLoadServerFiles(alan);
+}
+
+let _duyuruServerFiles = null; // önbellek
+let _duyuruIsVideoMode = false; // video modu mu?
+
+async function _duyuruLoadServerFiles(alan) {
+    if (_duyuruServerFiles === null) {
+        try {
+            const res = await fetch('/api/duyuru/sunucu-dosyalar');
+            const data = await res.json();
+            _duyuruServerFiles = data.ok ? data.files : [];
+        } catch { _duyuruServerFiles = []; }
+    }
+    ['image', 'poster', 'logo', 'music'].forEach(a => {
+        const sel = document.getElementById(`duyuru-${a}-server`);
+        if (!sel || sel.options.length > 1) return;
+        _duyuruServerFiles.forEach(f => {
+            if (a !== 'image' && f.type === 'video') return;
+            if (a === 'music' && f.type !== 'audio') return;
+            const opt = document.createElement('option');
+            opt.value = f.path;
+            opt.textContent = `[${f.type === 'video' ? '🎬' : f.type === 'audio' ? '🎵' : '🖼️'}] ${f.name}`;
+            sel.appendChild(opt);
+        });
+    });
+}
+
+// ─── Yardımcı: poster/logo için FormData alanını doldur (tekli alanlar) ─────
+function _duyuruAppendField(fd, alan, formKey) {
+    const kaynak = _duyuruTabs[alan] || 'upload';
+    if (kaynak === 'upload') {
+        const f = document.getElementById(`duyuru-${alan}`)?.files[0];
+        if (f) fd.append(formKey, f);
+    } else if (kaynak === 'url') {
+        const url = document.getElementById(`duyuru-${alan}-url`)?.value?.trim();
+        if (url) fd.append(`${formKey}_url`, url);
+    } else if (kaynak === 'server') {
+        const path = document.getElementById(`duyuru-${alan}-server`)?.value?.trim();
+        if (path) fd.append(`${formKey}_server`, path);
+    }
+}
+
+async function duyuruBuild() {
+    // Medya listesi kontrolü
+    if (_duyuruMediaItems.length === 0) {
+        showToast('En az bir yayın resmi veya video ekleyin.', false);
+        return;
+    }
+
+    _duyuruIsVideoMode = _duyuruMediaItems.some(i => i.isVideo);
+
+    _duyuruState = 'building';
+    _duyuruRenderState();
+    document.getElementById('duyuru-status').textContent =
+        _duyuruIsVideoMode ? '⏳ Yayın hazırlanıyor…' : '⏳ Video oluşturuluyor…';
+
+    const fd = new FormData();
+
+    // Çoklu medya öğelerini ekle
+    _duyuruMediaItems.forEach((item, idx) => {
+        if (item.type === 'file' && item.file) {
+            fd.append(`image_${idx}`, item.file);
+        } else if (item.type === 'url' || item.type === 'server') {
+            fd.append(`image_url_${idx}`, item.url);
+        }
+        fd.append(`image_is_video_${idx}`, item.isVideo ? '1' : '0');
+    });
+    fd.append('image_count', String(_duyuruMediaItems.length));
+
+    // Geçiş süresi (slayt modunda)
+    if (!_duyuruIsVideoMode) {
+        const interval = document.getElementById('duyuru-slide-interval')?.value || '5';
+        fd.append('slide_interval', interval);
+    }
+
+    // Çoklu müzik öğelerini ekle
+    _duyuruMusicItems.forEach((item, idx) => {
+        if (item.type === 'file' && item.file) {
+            fd.append(`music_${idx}`, item.file);
+        } else if (item.type === 'url' || item.type === 'server') {
+            fd.append(`music_url_${idx}`, item.url);
+        }
+    });
+    fd.append('music_count', String(_duyuruMusicItems.length));
+
+    // Poster ve logo (tekli)
+    _duyuruAppendField(fd, 'poster', 'poster');
+    _duyuruAppendField(fd, 'logo',   'logo');
+
+    fd.append('aciklama', document.getElementById('duyuru-aciklama')?.value || '');
+    if (_duyuruIsVideoMode) fd.append('image_is_video', '1');
+
+    try {
+        const res  = await fetch('/api/duyuru/hazirla', { method: 'POST', body: fd });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || 'Bilinmeyen hata');
+        _duyuruSession = data.session_id;
+        _duyuruState   = 'ready';
+    } catch (e) {
+        _duyuruState = 'idle';
+        showToast('Hazırlama hatası: ' + e.message, false);
+    }
+    _duyuruRenderState();
+}
+
+async function duyuruStart() {
+    if (!_duyuruSession) return;
+
+    const kanalAdi = (document.getElementById('duyuru-kanal-adi')?.value?.trim()) || 'Duyuru Yayını';
+    const order    = parseInt(document.getElementById('duyuru-order')?.value) || 0;
+    // Aktif sekmeye göre logo/poster değerini oku
+    // (dosya yükle veya sunucu seçiliyse backend session'dan alır, URL girdiyse onu kullan)
+    const logoTab   = _duyuruTabs['logo']   || 'upload';
+    const posterTab = _duyuruTabs['poster'] || 'upload';
+    const logoVal   = logoTab   === 'url' ? (document.getElementById('duyuru-logo-url')?.value?.trim()   || '') : '';
+    const posterVal = posterTab === 'url' ? (document.getElementById('duyuru-poster-url')?.value?.trim() || '') : '';
+
+    if (!kanalAdi) { showToast('Yayın adı zorunludur!', false); return; }
+
+    _duyuruState = 'building';
+    _duyuruRenderState();
+    document.getElementById('duyuru-status').textContent = '⏳ Yayın başlatılıyor…';
+
+    try {
+        const res = await fetch(`/api/duyuru/baslat/${_duyuruSession}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ kanal_adi: kanalAdi, order, logo: logoVal, poster: posterVal }),
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || 'Bilinmeyen hata');
+
+        _duyuruState = 'live';
+        // HLS player
+        const video = document.getElementById('duyuru-video');
+        const src   = data.stream_url;
+        if (typeof Hls !== 'undefined' && Hls.isSupported()) {
+            const hls = new Hls({ maxBufferLength: 10 });
+            hls.loadSource(src);
+            hls.attachMedia(video);
+        } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+            video.src = src;
+        }
+        video.play().catch(()=>{});
+
+        // Yayın listesini yenile — katalogda görünsün
+        if (typeof loadBroadcasts === 'function') loadBroadcasts();
+
+    } catch (e) {
+        _duyuruState = 'ready';
+        showToast('Yayın başlatma hatası: ' + e.message, false);
+    }
+    _duyuruRenderState();
+}
+
+async function duyuruStop() {
+    if (!_duyuruSession) return;
+    const sid = _duyuruSession;
+    _duyuruSession = null;
+    _duyuruState   = 'idle';
+    const video = document.getElementById('duyuru-video');
+    video.pause();
+    video.src = '';
+    _duyuruRenderState();
+    try {
+        await fetch(`/api/duyuru/durdur/${sid}`, { method: 'POST' });
+        showToast('Duyuru yayını durduruldu ve dosyalar silindi.', true);
+        // Yayın listesini yenile — katalogdan çıksın
+        if (typeof loadBroadcasts === 'function') loadBroadcasts();
+    } catch(e) {
+        showToast('Durdurma hatası: ' + e.message, false);
+    }
+}
+
+</script>
+
+<!-- ── DUYURU YAYINI MODAL ─────────────────────────────────────── -->
+<div id="duyuru-modal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+    <div class="theme-card w-full max-w-lg rounded-2xl shadow-2xl border border-white/10 flex flex-col max-h-[90vh] overflow-y-auto">
+        <!-- Header -->
+        <div class="flex items-center justify-between px-6 py-4 border-b border-white/10 flex-shrink-0">
+            <h2 class="text-lg font-bold flex items-center gap-2">
+                <span class="inline-flex items-center justify-center w-8 h-8 rounded-full bg-rose-600 text-white text-sm">📢</span>
+                Duyuru Yayını
+            </h2>
+            <button onclick="closeDuyuruModal()" class="p-1.5 rounded-lg hover:bg-white/10 transition">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+        </div>
+
+        <!-- Body -->
+        <div class="px-6 py-5 space-y-4">
+
+            <!-- Yayın Adı -->
+            <div>
+                <label class="block text-sm font-medium mb-1">Yayın Adı <span class="text-red-400">*</span></label>
+                <input id="duyuru-kanal-adi" type="text" placeholder="Örn: Maç Öncesi Duyuru"
+                    class="w-full px-3 py-2 rounded-lg border border-white/20 bg-white/5 text-sm focus:outline-none focus:border-primary">
+            </div>
+
+            <!-- Sıra -->
+            <div>
+                <label class="block text-sm font-medium mb-1">Sıra <span class="text-xs theme-text-secondary">(küçük = önce)</span></label>
+                <input id="duyuru-order" type="number" value="0" min="0"
+                    class="w-full px-3 py-2 rounded-lg border border-white/20 bg-white/5 text-sm focus:outline-none focus:border-primary">
+            </div>
+
+            <!-- Yayın Resmi / Video — çoklu -->
+            <div>
+                <label class="block text-sm font-medium mb-1">Yayın Resmi / Video <span class="text-red-400">*</span>
+                    <span class="text-xs font-normal theme-text-secondary ml-1">(birden fazla ekleyebilirsiniz)</span>
+                </label>
+
+                <!-- Mod: resim mi video mu? (ilk eklenen belirler) -->
+                <div id="duyuru-media-mode-info" class="hidden mb-2 text-xs px-2 py-1 rounded bg-white/10 theme-text-secondary"></div>
+
+                <!-- Resim geçiş süresi (sadece resim modunda görünür) -->
+                <div id="duyuru-slide-interval-wrap" class="hidden flex items-center gap-2 mb-2">
+                    <label class="text-xs theme-text-secondary whitespace-nowrap">🕐 Resimler arası geçiş:</label>
+                    <input id="duyuru-slide-interval" type="number" value="5" min="1" max="60"
+                        class="w-20 px-2 py-1 rounded-lg border border-white/20 bg-white/5 text-sm focus:outline-none focus:border-primary text-center">
+                    <span class="text-xs theme-text-secondary">saniye</span>
+                </div>
+
+                <!-- Eklenmiş medya listesi -->
+                <div id="duyuru-media-list" class="space-y-1 mb-2"></div>
+
+                <!-- Yeni öğe ekle -->
+                <div class="rounded-lg border border-dashed border-white/20 p-3 space-y-2">
+                    <div class="flex gap-1" id="duyuru-image-tabs">
+                        <button type="button" onclick="duyuruTab('image','upload')" data-tab="image-upload"
+                            class="duyuru-tab-btn active px-2 py-1 rounded text-xs font-medium bg-primary/20 text-primary border border-primary/40">📁 Yükle</button>
+                        <button type="button" onclick="duyuruTab('image','url')" data-tab="image-url"
+                            class="duyuru-tab-btn px-2 py-1 rounded text-xs font-medium bg-white/5 border border-white/10 hover:bg-white/10">🔗 URL</button>
+                        <button type="button" onclick="duyuruTab('image','server')" data-tab="image-server"
+                            class="duyuru-tab-btn px-2 py-1 rounded text-xs font-medium bg-white/5 border border-white/10 hover:bg-white/10">🖥️ Sunucu</button>
+                    </div>
+                    <div id="duyuru-image-upload-wrap">
+                        <input id="duyuru-image" type="file" accept="image/*,video/*" multiple
+                            class="w-full text-sm theme-text-secondary file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-primary/10 file:text-primary hover:file:bg-primary/20 cursor-pointer"
+                            onchange="_duyuruAddFilesFromInput(this)">
+                    </div>
+                    <div id="duyuru-image-url-wrap" class="hidden flex gap-2">
+                        <input id="duyuru-image-url" type="url" placeholder="https://example.com/image.jpg veya video.mp4"
+                            class="flex-1 px-3 py-1.5 rounded-lg border border-white/20 bg-white/5 text-sm focus:outline-none focus:border-primary">
+                        <button type="button" onclick="_duyuruAddUrl()"
+                            class="px-3 py-1.5 rounded-lg bg-primary/20 text-primary text-xs font-medium border border-primary/30 hover:bg-primary/30">Ekle</button>
+                    </div>
+                    <div id="duyuru-image-server-wrap" class="hidden flex gap-2">
+                        <select id="duyuru-image-server"
+                            class="flex-1 px-3 py-1.5 rounded-lg border border-white/20 bg-white/5 text-sm focus:outline-none focus:border-primary">
+                            <option value="">-- Dosya seçin --</option>
+                        </select>
+                        <button type="button" onclick="_duyuruAddServerFile()"
+                            class="px-3 py-1.5 rounded-lg bg-primary/20 text-primary text-xs font-medium border border-primary/30 hover:bg-primary/30">Ekle</button>
+                        <p id="duyuru-image-server-hint" class="hidden"></p>
+                        <span id="duyuru-server-status-image" class="hidden"></span>
+                    </div>
+                </div>
+                <p id="duyuru-image-hint" class="text-xs theme-text-secondary mt-1">Resim (JPG/PNG/WebP) eklerseniz → slayt gösterisi (geçiş süresi ayarlayın). Video (MP4/MKV…) eklerseniz → sırayla oynatılır. Tümü bitince en başa döner.</p>
+            </div>
+
+            <!-- Kanal Posteri -->
+            <div>
+                <label class="block text-sm font-medium mb-1">Kanal Posteri</label>
+                <div class="flex gap-1 mb-2">
+                    <button type="button" onclick="duyuruTab('poster','upload')" data-tab="poster-upload"
+                        class="duyuru-tab-btn active px-2 py-1 rounded text-xs font-medium bg-primary/20 text-primary border border-primary/40">📁 Yükle</button>
+                    <button type="button" onclick="duyuruTab('poster','url')" data-tab="poster-url"
+                        class="duyuru-tab-btn px-2 py-1 rounded text-xs font-medium bg-white/5 border border-white/10 hover:bg-white/10">🔗 URL</button>
+                    <button type="button" onclick="duyuruTab('poster','server')" data-tab="poster-server"
+                        class="duyuru-tab-btn px-2 py-1 rounded text-xs font-medium bg-white/5 border border-white/10 hover:bg-white/10">🖥️ Sunucu</button>
+                </div>
+                <div id="duyuru-poster-upload-wrap">
+                    <input id="duyuru-poster" type="file" accept="image/*"
+                        class="w-full text-sm theme-text-secondary file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-white/5 file:text-current hover:file:bg-white/10 cursor-pointer">
+                </div>
+                <div id="duyuru-poster-url-wrap" class="hidden">
+                    <input id="duyuru-poster-url" type="url" placeholder="https://example.com/poster.jpg"
+                        class="w-full px-3 py-2 rounded-lg border border-white/20 bg-white/5 text-sm focus:outline-none focus:border-primary">
+                </div>
+                <div id="duyuru-poster-server-wrap" class="hidden">
+                    <select id="duyuru-poster-server" class="w-full px-3 py-2 rounded-lg border border-white/20 bg-white/5 text-sm focus:outline-none focus:border-primary">
+                        <option value="">-- Dosya seçin --</option>
+                    </select>
+                </div>
+                <p class="text-xs theme-text-secondary mt-1">Katalogda gösterilecek kanal posteri.</p>
+            </div>
+
+            <!-- Kanal Logosu -->
+            <div>
+                <label class="block text-sm font-medium mb-1">Kanal Logosu</label>
+                <div class="flex gap-1 mb-2">
+                    <button type="button" onclick="duyuruTab('logo','upload')" data-tab="logo-upload"
+                        class="duyuru-tab-btn active px-2 py-1 rounded text-xs font-medium bg-primary/20 text-primary border border-primary/40">📁 Yükle</button>
+                    <button type="button" onclick="duyuruTab('logo','url')" data-tab="logo-url"
+                        class="duyuru-tab-btn px-2 py-1 rounded text-xs font-medium bg-white/5 border border-white/10 hover:bg-white/10">🔗 URL</button>
+                    <button type="button" onclick="duyuruTab('logo','server')" data-tab="logo-server"
+                        class="duyuru-tab-btn px-2 py-1 rounded text-xs font-medium bg-white/5 border border-white/10 hover:bg-white/10">🖥️ Sunucu</button>
+                </div>
+                <div id="duyuru-logo-upload-wrap">
+                    <input id="duyuru-logo" type="file" accept="image/*"
+                        class="w-full text-sm theme-text-secondary file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-white/5 file:text-current hover:file:bg-white/10 cursor-pointer">
+                </div>
+                <div id="duyuru-logo-url-wrap" class="hidden">
+                    <input id="duyuru-logo-url" type="url" placeholder="https://example.com/logo.png"
+                        class="w-full px-3 py-2 rounded-lg border border-white/20 bg-white/5 text-sm focus:outline-none focus:border-primary">
+                </div>
+                <div id="duyuru-logo-server-wrap" class="hidden">
+                    <select id="duyuru-logo-server" class="w-full px-3 py-2 rounded-lg border border-white/20 bg-white/5 text-sm focus:outline-none focus:border-primary">
+                        <option value="">-- Dosya seçin --</option>
+                    </select>
+                </div>
+                <p class="text-xs theme-text-secondary mt-1">Katalogda gösterilecek kanal logosu.</p>
+            </div>
+
+            <!-- Müzik (opsiyonel) — çoklu -->
+            <div>
+                <label class="block text-sm font-medium mb-1">Müzik <span class="text-xs theme-text-secondary">(opsiyonel — yayın boyunca döngü çalar)</span>
+                    <span class="text-xs font-normal theme-text-secondary ml-1">(birden fazla ekleyebilirsiniz)</span>
+                </label>
+
+                <!-- Eklenmiş müzik listesi -->
+                <div id="duyuru-music-list" class="space-y-1 mb-2"></div>
+
+                <!-- Yeni müzik ekle -->
+                <div class="rounded-lg border border-dashed border-white/20 p-3 space-y-2">
+                    <div class="flex gap-1">
+                        <button type="button" onclick="duyuruTab('music','upload')" data-tab="music-upload"
+                            class="duyuru-tab-btn active px-2 py-1 rounded text-xs font-medium bg-primary/20 text-primary border border-primary/40">📁 Yükle</button>
+                        <button type="button" onclick="duyuruTab('music','url')" data-tab="music-url"
+                            class="duyuru-tab-btn px-2 py-1 rounded text-xs font-medium bg-white/5 border border-white/10 hover:bg-white/10">🔗 URL</button>
+                        <button type="button" onclick="duyuruTab('music','server')" data-tab="music-server"
+                            class="duyuru-tab-btn px-2 py-1 rounded text-xs font-medium bg-white/5 border border-white/10 hover:bg-white/10">🖥️ Sunucu</button>
+                    </div>
+                    <div id="duyuru-music-upload-wrap">
+                        <input id="duyuru-music" type="file" accept="audio/*" multiple
+                            class="w-full text-sm theme-text-secondary file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-white/5 file:text-current hover:file:bg-white/10 cursor-pointer"
+                            onchange="_duyuruAddMusicFromInput(this)">
+                    </div>
+                    <div id="duyuru-music-url-wrap" class="hidden" style="display:none">
+                        <div class="flex gap-2">
+                            <input id="duyuru-music-url" type="url" placeholder="https://example.com/muzik.mp3"
+                                class="flex-1 px-3 py-1.5 rounded-lg border border-white/20 bg-white/5 text-sm focus:outline-none focus:border-primary">
+                            <button type="button" onclick="_duyuruAddMusicUrl()"
+                                class="px-3 py-1.5 rounded-lg bg-primary/20 text-primary text-xs font-medium border border-primary/30 hover:bg-primary/30">Ekle</button>
+                        </div>
+                    </div>
+                    <div id="duyuru-music-server-wrap" class="hidden" style="display:none">
+                        <div class="flex gap-2">
+                            <select id="duyuru-music-server"
+                                class="flex-1 px-3 py-1.5 rounded-lg border border-white/20 bg-white/5 text-sm focus:outline-none focus:border-primary">
+                                <option value="">-- Ses dosyası seçin --</option>
+                            </select>
+                            <button type="button" onclick="_duyuruAddMusicServer()"
+                                class="px-3 py-1.5 rounded-lg bg-primary/20 text-primary text-xs font-medium border border-primary/30 hover:bg-primary/30">Ekle</button>
+                        </div>
+                    </div>
+                </div>
+                <p class="text-xs theme-text-secondary mt-1">MP3/AAC/FLAC/OGG/WAV desteklenir. Müzikler sırayla çalar; hepsi bitince en başa döner.</p>
+            </div>
+
+            <!-- Kanal Açıklaması -->
+            <div>
+                <label class="block text-sm font-medium mb-1">Kanal Açıklaması</label>
+                <input id="duyuru-aciklama" type="text" placeholder="Katalogda posterın altında görünecek açıklama…"
+                    class="w-full px-3 py-2 rounded-lg border border-white/20 bg-white/5 text-sm focus:outline-none focus:border-primary">
+            </div>
+
+            <!-- Durum -->
+            <div id="duyuru-status" class="text-sm font-medium min-h-[1.5rem]"></div>
+
+            <!-- Video Player (yayın aktifken görünür) -->
+            <div id="duyuru-player-wrap" class="hidden rounded-xl overflow-hidden border border-white/10 bg-black">
+                <video id="duyuru-video" class="w-full" controls muted playsinline style="max-height:220px"></video>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="px-6 pb-5 flex items-center gap-3 flex-shrink-0">
+            <!-- Video Oluştur -->
+            <button id="duyuru-btn-build" onclick="duyuruBuild()"
+                class="flex-1 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-medium text-sm transition">
+                <span id="duyuru-btn-build-label">🎬 Video Oluştur</span>
+            </button>
+            <!-- Başlat -->
+            <button id="duyuru-btn-start" onclick="duyuruStart()"
+                class="hidden flex-1 py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium text-sm transition">
+                ▶ Başlat
+            </button>
+            <!-- Durdur + Sil -->
+            <button id="duyuru-btn-stop" onclick="duyuruStop()"
+                class="hidden flex-1 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium text-sm transition">
+                ⏹ Durdur &amp; Sil
+            </button>
+            <button onclick="closeDuyuruModal()"
+                class="px-4 py-2.5 rounded-lg border border-white/20 hover:bg-white/5 text-sm transition">
+                Kapat
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- HLS.js (player için) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.4.12/hls.min.js"></script>
+
+{% endblock %}

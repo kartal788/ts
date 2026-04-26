@@ -17,6 +17,8 @@ Güvenlik özeti:
 from __future__ import annotations
 
 import asyncio
+import logging
+_logger = logging.getLogger(__name__)
 import hashlib
 import pathlib
 import re as _re
@@ -34,6 +36,7 @@ from Backend.fastapi.themes import get_theme, get_all_themes
 from Backend.fastapi.security.brute_force import (
     is_banned, is_banned_async, ban_remaining, record_failure, record_failure_async, record_success, get_client_ip
 )
+from Backend.fastapi.security.csrf import ensure_csrf_secret
 from Backend.fastapi.security.captcha import set_captcha, verify_captcha, CaptchaData
 
 templates = Jinja2Templates(directory="Backend/fastapi/templates")
@@ -281,6 +284,8 @@ async def member_login_post(
         "is_admin":         False,
         "session_id":       session_doc.get("session_id", ""),  # /start'ta yenilenir → eski cookie geçersiz
     }
+    # Login başarılı → CSRF secret üret/yenile
+    ensure_csrf_secret(request)
     return RedirectResponse(url=f"/uye/katalog?lang={lang}", status_code=302)
 
 
@@ -291,8 +296,17 @@ async def member_logout(request: Request):
             await db.invalidate_member_session(member["user_id"])
         except Exception:
             pass
-    request.session.pop("member", None)
-    return RedirectResponse(url="/uye/giris", status_code=302)
+    # Session'daki tum veriyi temizle (pop yerine clear kullanilmali)
+    request.session.clear()
+    response = RedirectResponse(url="/uye/giris", status_code=302)
+    # Session cookie'yi tarayicida da sil (max_age=0 -> aninda sona erdir)
+    response.delete_cookie(
+        key="session",
+        path="/",
+        httponly=True,
+        samesite="lax",
+    )
+    return response
 
 
 # ── Sayfa: Katalog ───────────────────────────────────────────────────────────
@@ -363,6 +377,24 @@ async def member_catalog_page(request: Request):
                 )
             else:
                 usage_info["monthly_remaining"] = None
+
+            # Hız limiti: kişisel > global config
+            from Backend.config import Telegram as _Cfg
+            _personal_speed = float(limits.get("speed_limit_mbps") or 0)
+            _global_speed = 0.0
+            try:
+                _global_speed = float((_Cfg.HIZ_LIMITI or "").strip()) if (_Cfg.HIZ_LIMITI or "").strip() else 0.0
+            except (ValueError, AttributeError):
+                pass
+            _effective_speed = _personal_speed if _personal_speed > 0 else _global_speed
+            usage_info["speed_limit_mbps"]  = _effective_speed
+            usage_info["speed_is_personal"] = _personal_speed > 0
+
+            # Eşzamanlı izleme limiti
+            # Token'ın kendi limiti yoksa (0) config'deki DEFAULT_DEVICE_LIMIT'e düşülür.
+            _cfg_device_limit = int(getattr(_Cfg, "DEFAULT_DEVICE_LIMIT", 0) or 0)
+            usage_info["device_limit"]       = int(limits.get("device_limit") or 0) or _cfg_device_limit
+            usage_info["active_device_count"] = await db.get_active_device_count(token_doc["token"])
     except Exception:
         pass
 
@@ -421,6 +453,10 @@ async def member_media_api(
     cast_name:         str = Query("",         max_length=100),
     platform:          str = Query("",         max_length=32),
 ):
+    # cast_name: boşlukları temizle, MongoDB $regex'e gitmeden önce
+    # özel regex karakterlerini kaçır → ReDoS ve NoSQL injection önlemi
+    cast_name = _re.escape(cast_name.strip())
+
     member = _get_member(request)
     if not member:
         raise HTTPException(status_code=401, detail="Oturum açılmamış")
@@ -439,7 +475,7 @@ async def member_media_api(
             if not platform_catalog.is_loaded():
                 import asyncio
                 loop = asyncio.get_event_loop()
-                loop.run_in_executor(None, platform_catalog.refresh)
+                platform_catalog.schedule_refresh()
             else:
                 items_meta = platform_catalog.get(platform)
                 platform_imdb_ids = {m["imdb_id"] for m in items_meta if m.get("imdb_id")}
@@ -550,7 +586,9 @@ async def member_media_api(
                 raw["tv_shows"] = _strip_admin_fields(raw.get("tv_shows", []))
             return raw
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _logger.error("Internal error", exc_info=True)
+
+        raise HTTPException(status_code=500, detail="Sunucu hatası")
 
 
 def _strip_admin_fields(items: list) -> list:
@@ -589,6 +627,10 @@ def _strip_admin_fields(items: list) -> list:
             "qualities":         _safe_qualities(item.get("telegram", [])) or item.get("qualities", []),
             # TV için sezon/bölüm özeti (detaylar ayrı endpoint'te)
             "season_count":      len(item.get("seasons", [])),
+            # Film süresi (dakika)
+            "runtime":           item.get("runtime"),
+            # Dizi yayın durumu (devam ediyor / bitti / iptal vs.)
+            "status":            item.get("status", ""),
         }
         safe.append(keep)
     return safe
@@ -598,11 +640,26 @@ def _safe_qualities(telegram: list) -> list:
     """QualityDetail'den sadece güvenli alanları döndür."""
     result = []
     for q in (telegram or []):
+        qid = q.get("id", "")
+        # Kaynak tespiti: encoded_string'i senkron olarak kontrol et
+        source = "telegram"
+        try:
+            import json as _json, base64 as _b64
+            raw = _b64.urlsafe_b64decode(qid + "==")
+            decoded = _json.loads(raw)
+            if isinstance(decoded, dict):
+                if decoded.get("gdrive_file_id"):
+                    source = "gdrive"
+                elif decoded.get("rclone_remote"):
+                    source = f"rclone:{decoded.get('rclone_remote', '')}"
+        except Exception:
+            pass
         result.append({
             "quality": q.get("quality"),
             "name":    q.get("name"),
             "size":    q.get("size"),
-            "id":      q.get("id"),   # stream URL üretmek için gerekli
+            "id":      qid,
+            "source":  source,
         })
     return result
 
@@ -720,7 +777,39 @@ async def member_stream_url_api(
 
     # Yerel sunucu dosyaları (sunucu panelinden eklenen) — local_path olarak encode et
     if file_id.startswith("/") or (len(file_id) > 1 and file_id[1] == ":"):
+        import os as _os
+        from pathlib import Path as _Path
         from urllib.parse import quote as _quote
+
+        # ── Path Traversal Koruması ──────────────────────────────────────────
+        # file_id'yi encode etmeden önce izin verilen dizin içinde olduğunu doğrula.
+        # Bu kontrol yapılmazsa üye, /etc/passwd gibi keyfi yolları encode edip
+        # stream endpoint'ine iletebilir; local_file_streamer'daki kontrol son savunma
+        # hattıdır, birincil kontrol burada olmalıdır.
+        _default_sunucu = _os.path.join(
+            _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.dirname(__file__)))),
+            "uploads",
+        )
+        _SUNUCU_DIR = _Path(_os.getenv("SUNUCU_DIR", _default_sunucu)).resolve()
+        try:
+            _resolved = _Path(file_id).resolve()
+        except Exception:
+            raise HTTPException(status_code=400, detail="Geçersiz dosya yolu.")
+
+        if not (
+            str(_resolved).startswith(str(_SUNUCU_DIR) + _os.sep)
+            or _resolved == _SUNUCU_DIR
+        ):
+            from Backend.logger import LOGGER as _LOGGER
+            _LOGGER.warning(
+                "[member_stream_url] Path traversal girişimi engellendi — "
+                "file_id=%r token=%s...",
+                file_id,
+                token[:8],
+            )
+            raise HTTPException(status_code=403, detail="Erişim reddedildi.")
+        # ── Path Traversal Koruması sonu ─────────────────────────────────────
+
         safe_filename = _quote(filename, safe=".-_")
         encoded_id = await encode_string({"local_path": file_id})
         indir_token = media_token_manager.create(token, encoded_id, kind="indir")
@@ -751,26 +840,30 @@ async def member_stream_url_api(
     indir_token = media_token_manager.create(token, file_id, kind="indir")
     url = f"{base}/dl/{token}/{file_id}/{indir_token}/{safe_filename}?dl=1"
 
-    # Drive dosyası tespiti — encoded_string'de gdrive_file_id varsa işaretle
-    is_gdrive = False
+    # Kaynak tespiti — encoded_string'i çöz
+    is_gdrive  = False
+    is_rclone  = False
+    source_label = ""
     try:
         from Backend.helper.encrypt import decode_string as _dec
         decoded = await _dec(file_id)
-        if isinstance(decoded, dict) and decoded.get("gdrive_file_id"):
-            is_gdrive = True
+        if isinstance(decoded, dict):
+            if decoded.get("gdrive_file_id"):
+                is_gdrive    = True
+                source_label = "gdrive"
+            elif decoded.get("rclone_remote") and decoded.get("rclone_path"):
+                is_rclone    = True
+                source_label = f"rclone:{decoded['rclone_remote']}"
     except Exception:
         pass
 
     # ── Proxy moduna göre son URL'i belirle ──────────────────────────────────
-    # PROXY_MODE=1 veya proxy kapalı → sadece direct URL
-    # PROXY_MODE=2 → önce proxy (url), direct de url_direct olarak döner
-    # PROXY_MODE=3 → sadece proxy URL
     proxy_url = _apply_proxy(url)
     if proxy_url and Telegram.PROXY_MODE == 3:
-        return {"url": proxy_url, "is_gdrive": is_gdrive}
+        return {"url": proxy_url, "is_gdrive": is_gdrive, "is_rclone": is_rclone, "source": source_label}
     if proxy_url and Telegram.PROXY_MODE == 2:
-        return {"url": proxy_url, "url_direct": url, "is_gdrive": is_gdrive}
-    return {"url": url, "is_gdrive": is_gdrive}
+        return {"url": proxy_url, "url_direct": url, "is_gdrive": is_gdrive, "is_rclone": is_rclone, "source": source_label}
+    return {"url": url, "is_gdrive": is_gdrive, "is_rclone": is_rclone, "source": source_label}
 
 
 # ── API: Kullanım bilgisi ────────────────────────────────────────────────────
@@ -807,6 +900,16 @@ async def member_usage_api(request: Request):
     dl     = limits.get("daily_limit_gb",   0) or 0
     ml     = limits.get("monthly_limit_gb", 0) or 0
 
+    # Hız limiti: kişisel > global config
+    from Backend.config import Telegram as _Cfg
+    _personal_speed = float(limits.get("speed_limit_mbps") or 0)
+    _global_speed = 0.0
+    try:
+        _global_speed = float((_Cfg.HIZ_LIMITI or "").strip()) if (_Cfg.HIZ_LIMITI or "").strip() else 0.0
+    except (ValueError, AttributeError):
+        pass
+    _effective_speed = _personal_speed if _personal_speed > 0 else _global_speed
+
     return {
         "daily_gb":          d_gb,
         "monthly_gb":        m_gb,
@@ -815,6 +918,10 @@ async def member_usage_api(request: Request):
         "monthly_limit":     ml,
         "daily_remaining":   max(0, round(dl - d_gb, 3)) if dl > 0 else None,
         "monthly_remaining": max(0, round(ml - m_gb, 3)) if ml > 0 else None,
+        "speed_limit_mbps":  _effective_speed,
+        "speed_is_personal": _personal_speed > 0,
+        "device_limit":       int(limits.get("device_limit") or 0) or int(getattr(_Cfg, "DEFAULT_DEVICE_LIMIT", 0) or 0),
+        "active_device_count": await db.get_active_device_count(token_doc["token"]),
     }
 
 
@@ -831,7 +938,9 @@ async def member_db_size_api(request: Request):
         sizes = await db.get_content_sizes()
         return sizes
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _logger.error("Internal error", exc_info=True)
+
+        raise HTTPException(status_code=500, detail="Sunucu hatası")
 
 
 # ── API: Üye profil & istatistik ─────────────────────────────────────────────
@@ -996,3 +1105,81 @@ async def member_profile_api(request: Request):
         # Son 30 gün
         "daily_30":         daily_30,
     }
+
+
+# ── Sayfa: Hatırlatmalar ──────────────────────────────────────────────────────
+
+async def member_hatirlatmalar_page(request: Request):
+    member = _get_member(request)
+    if not member:
+        return RedirectResponse(url="/uye/giris", status_code=302)
+
+    if member.get("is_admin"):
+        request.session.pop("member", None)
+        return RedirectResponse(url="/uye/giris", status_code=302)
+
+    if not await _check_subscription(member["user_id"]):
+        request.session.pop("member", None)
+        return RedirectResponse(url="/uye/giris?expired=1", status_code=302)
+
+    theme_name = request.session.get("theme", "purple_gradient")
+    theme = get_theme(theme_name)
+    lang  = request.query_params.get("lang", member.get("lang", "tr"))
+
+    # Kullanım bilgisi
+    usage_info = {"daily_gb": 0, "monthly_gb": 0, "total_gb": 0,
+                  "daily_limit": 0, "monthly_limit": 0,
+                  "daily_remaining": None, "monthly_remaining": None}
+    try:
+        all_tokens = await db.get_all_api_tokens()
+        token_doc  = next(
+            (t for t in all_tokens if t.get("user_id") == member["user_id"]), None
+        )
+        if token_doc:
+            usage  = token_doc.get("usage", {})
+            limits = token_doc.get("limits", {})
+            d_gb = _bytes_to_gb(usage.get("daily",   {}).get("bytes", 0))
+            m_gb = _bytes_to_gb(usage.get("monthly", {}).get("bytes", 0))
+            dl   = limits.get("daily_limit_gb",   0) or 0
+            ml   = limits.get("monthly_limit_gb", 0) or 0
+            usage_info = {
+                "daily_gb":         d_gb,
+                "monthly_gb":       m_gb,
+                "total_gb":         _bytes_to_gb(usage.get("total_bytes", 0)),
+                "daily_limit":      dl,
+                "monthly_limit":    ml,
+                "daily_remaining":  max(0, round(dl - d_gb, 3)) if dl > 0 else None,
+                "monthly_remaining":max(0, round(ml - m_gb, 3)) if ml > 0 else None,
+            }
+    except Exception:
+        pass
+
+    # Abonelik bitiş
+    subscription_end_str = member.get("subscription_end")
+    try:
+        live_user = await db.get_user(int(member["user_id"]))
+        if live_user:
+            _exp = live_user.get("subscription_expiry")
+            if _exp is not None:
+                if isinstance(_exp, datetime):
+                    subscription_end_str = _exp.strftime("%d.%m.%Y")
+                elif isinstance(_exp, str):
+                    from datetime import timezone
+                    _exp_dt = datetime.fromisoformat(_exp.replace("Z", "+00:00"))
+                    subscription_end_str = _exp_dt.strftime("%d.%m.%Y")
+                else:
+                    subscription_end_str = str(_exp)
+    except Exception:
+        pass
+
+    return templates.TemplateResponse("hatırlatmalar.html", {
+        "request":          request,
+        "theme":            theme,
+        "current_theme":    theme_name,
+        "app_name":         Telegram.ISIM,
+        "member":           member,
+        "member_name":      member.get("name", ""),
+        "usage":            usage_info,
+        "lang":             lang,
+        "subscription_end": subscription_end_str,
+    })

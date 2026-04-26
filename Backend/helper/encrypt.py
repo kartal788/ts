@@ -7,7 +7,8 @@ Versiyon 2: HMAC-SHA256 imzası eklendi.
   - Eski format (imzasız base62): geriye dönük uyumluluk için decode edilebilir,
     ancak local_path içeriyorsa reddedilir.
   - Yeni format: <imza_16hex>.<base62_payload>
-    İmza SESSION_SECRET_KEY veya TOKEN_HMAC_SECRET env değişkeninden türetilir.
+    İmza TOKEN_HMAC_SECRET (yoksa SESSION_SECRET_KEY) env değişkeninden türetilir.
+    Her iki değişken de tanımlı değilse uygulama başlangıcında RuntimeError fırlatılır.
 
 Kullanım:
   from Backend.helper.encrypt import encode_string, decode_string
@@ -24,20 +25,25 @@ from concurrent.futures import ThreadPoolExecutor
 executor = ThreadPoolExecutor()
 
 # ── HMAC anahtarı ─────────────────────────────────────────────────────────────
-# Önce TOKEN_HMAC_SECRET, yoksa SESSION_SECRET_KEY, yoksa sabit fallback (geliştirme)
+# TOKEN_HMAC_SECRET zorunludur; yoksa uygulama başlangıcında RuntimeError fırlatılır
+# (main.py'deki SESSION_SECRET_KEY kontrolüyle aynı desen).
 def _get_hmac_key() -> bytes:
     key = (
         os.getenv("TOKEN_HMAC_SECRET", "")
         or os.getenv("SESSION_SECRET_KEY", "")
     )
     if not key:
-        # Üretimde bu dalın çalışmaması gerekir; log uyarısı
-        import logging
-        logging.getLogger("encrypt").warning(
-            "[encrypt] TOKEN_HMAC_SECRET veya SESSION_SECRET_KEY tanımlı değil! "
-            "Token güvenliği düşük. Lütfen config.env'e TOKEN_HMAC_SECRET ekleyin."
+        raise RuntimeError(
+            "\n\n"
+            "KRİTİK GÜVENLİK HATASI — BOT DURDU\n"
+            "TOKEN_HMAC_SECRET config.env'de tanımlı değil!\n\n"
+            "Bu key olmadan stream token'ları imzasız (güvensiz) çalışır;\n"
+            "token manipülasyonu tespit edilemez.\n\n"
+            "Çözüm — config.env dosyasına şu satırı ekle:\n"
+            "  TOKEN_HMAC_SECRET=\"<güçlü-rastgele-değer>\"\n\n"
+            "Güvenli bir key üretmek için terminalde şunu çalıştır:\n"
+            "  python3 -c \"import secrets; print(secrets.token_hex(32))\"\n"
         )
-        key = "INSECURE_FALLBACK_KEY_SET_TOKEN_HMAC_SECRET"
     return key.encode()
 
 _SEPARATOR = "."   # imza.payload ayracı — base62 alfabesinde yok

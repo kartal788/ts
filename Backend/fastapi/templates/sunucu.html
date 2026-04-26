@@ -436,6 +436,69 @@
         </div>
     </div>
 
+    <!-- Bilgisayardan Yükle Modal -->
+    <div id="local-upload-modal" class="fixed inset-0 z-40 hidden flex items-center justify-center bg-black/60 backdrop-blur-sm">
+        <div class="theme-card rounded-2xl shadow-2xl w-full max-w-lg mx-4 p-6 border border-white/10">
+            <div class="flex items-center justify-between mb-5">
+                <h2 class="text-lg font-bold flex items-center gap-2">
+                    <i class="fas fa-upload text-orange-400"></i>
+                    Bilgisayardan Dosya Yükle
+                </h2>
+                <button onclick="closeLocalUploadModal()" class="text-gray-400 hover:text-white transition-colors">
+                    <i class="fas fa-times text-lg"></i>
+                </button>
+            </div>
+
+            <!-- Drag & Drop Alan -->
+            <div id="local-drop-zone"
+                class="border-2 border-dashed border-white/20 rounded-xl p-8 text-center cursor-pointer hover:border-orange-400/60 hover:bg-orange-400/5 transition-all"
+                onclick="document.getElementById('local-file-input').click()"
+                ondragover="localDragOver(event)"
+                ondragleave="localDragLeave(event)"
+                ondrop="localDrop(event)">
+                <i class="fas fa-cloud-upload-alt text-4xl text-orange-400/60 mb-3"></i>
+                <p class="text-sm font-medium mb-1">Dosyaları buraya sürükleyin veya tıklayın</p>
+                <p class="text-xs theme-text-secondary">Resim, video, ses, döküman ve diğer dosyalar</p>
+                <input id="local-file-input" type="file" multiple class="hidden" onchange="localFilesSelected(this.files)">
+            </div>
+
+            <!-- Seçili Dosyalar Listesi -->
+            <div id="local-file-list" class="hidden mt-4 space-y-2 max-h-40 overflow-y-auto"></div>
+
+            <!-- Hedef Klasör -->
+            <div class="mt-4">
+                <label class="block text-xs font-semibold theme-text-secondary mb-1.5 uppercase tracking-wide">Hedef Klasör</label>
+                <input id="local-upload-dest" type="text" placeholder="Filmler/Aksiyon"
+                    class="w-full rounded-xl border px-3 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary transition" readonly/>
+                <p class="text-xs theme-text-secondary mt-1">Şu an açık olan klasöre yüklenir.</p>
+            </div>
+
+            <!-- İlerleme -->
+            <div id="local-upload-progress" class="hidden mt-4 space-y-2">
+                <div class="flex items-center justify-between text-xs theme-text-secondary">
+                    <span id="local-upload-status">Yükleniyor...</span>
+                    <span id="local-upload-pct">0%</span>
+                </div>
+                <div class="w-full bg-white/10 rounded-full h-2 overflow-hidden">
+                    <div id="local-upload-bar" class="h-2 rounded-full transition-all duration-200"
+                         style="width:0%; background: linear-gradient(90deg, #f97316, #fb923c)"></div>
+                </div>
+                <div id="local-upload-log" class="text-xs font-mono bg-black/30 rounded-lg px-3 py-2 max-h-24 overflow-y-auto space-y-1"></div>
+            </div>
+
+            <div class="flex gap-3 mt-6">
+                <button onclick="closeLocalUploadModal()" class="flex-1 px-4 py-2.5 rounded-xl border border-white/20 hover:bg-white/5 text-sm transition">
+                    İptal
+                </button>
+                <button id="local-upload-btn" onclick="startLocalUpload()"
+                    class="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-white font-medium text-sm shadow-md transition hover:opacity-90"
+                    style="background: linear-gradient(135deg, #f97316, #ea580c)" disabled>
+                    <i class="fas fa-upload"></i> Yükle
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Yeni Klasör Modal -->
     <div id="folder-modal" class="fixed inset-0 z-40 hidden flex items-center justify-center bg-black/60 backdrop-blur-sm">
         <div class="theme-card rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6 border border-white/10">
@@ -475,10 +538,22 @@
                 <i class="fas fa-cloud-download-alt"></i>
                 <span class="hidden sm:inline">Dosya İndir</span>
             </button>
-            <button onclick="openGdriveModal()" title="Google Drive'dan Ekle"
+            <button onclick="openLocalUploadModal()" title="Bilgisayardan Yükle"
+                class="flex items-center gap-2 px-4 py-2 rounded-lg border border-white/20 hover:bg-white/5 text-sm transition font-medium">
+                <i class="fas fa-upload text-orange-400"></i>
+                <span class="hidden sm:inline">Bilgisayardan Yükle</span>
+            </button>
+            <button id="gdrive-btn" onclick="openGdriveModal()" title="Google Drive'dan Ekle"
                 class="flex items-center gap-2 px-4 py-2 rounded-lg border border-white/20 hover:bg-white/5 text-sm transition font-medium">
                 <i class="fab fa-google-drive text-green-400"></i>
                 <span class="hidden sm:inline">Drive'dan Ekle</span>
+                <span id="gdrive-btn-badge" class="hidden text-xs px-1.5 py-0.5 rounded-full bg-red-500/20 text-red-400 border border-red-500/30">!</span>
+            </button>
+            <button id="rclone-btn" onclick="openRcloneModal()" title="Rclone Sürücüsünden Ekle"
+                class="flex items-center gap-2 px-4 py-2 rounded-lg border border-white/20 hover:bg-white/5 text-sm transition font-medium">
+                <i class="fas fa-cloud text-blue-400"></i>
+                <span class="hidden sm:inline">Rclone'dan Ekle</span>
+                <span id="rclone-btn-badge" class="hidden text-xs px-1.5 py-0.5 rounded-full bg-red-500/20 text-red-400 border border-red-500/30">!</span>
             </button>
         </div>
     </div>
@@ -596,7 +671,128 @@
     </div>
 </div>
 
+<!-- ═══════════════════════════════════════════════════════════
+     Rclone Kataloğu (DB'ye eklenmiş Rclone içerikleri)
+══════════════════════════════════════════════════════════════ -->
+<div class="mx-16 sm:mx-18 mt-6">
+    <div class="theme-card rounded-2xl shadow-lg overflow-hidden border border-white/10">
+        <div class="flex items-center justify-between px-5 py-4 border-b border-white/10">
+            <h2 class="text-sm font-bold flex items-center gap-2 theme-text-secondary uppercase tracking-wide">
+                <i class="fas fa-cloud text-blue-400"></i> Rclone Kataloğu
+                <span id="rclone-db-count" class="text-xs font-normal normal-case"></span>
+            </h2>
+            <div class="flex items-center gap-3">
+                <button onclick="runRcloneMigration()" id="rclone-migrate-btn" title="Mevcut DB kayıtlarını kataloğa aktar"
+                    class="text-xs text-yellow-400 hover:underline flex items-center gap-1">
+                    <i class="fas fa-database text-xs"></i> Mevcut Kayıtları Aktar
+                </button>
+                <button onclick="loadRcloneDbList()" title="Yenile"
+                    class="text-xs text-primary hover:underline flex items-center gap-1">
+                    <i id="rclone-db-refresh-icon" class="fas fa-sync-alt text-xs"></i> Yenile
+                </button>
+            </div>
+        </div>
+
+        <div id="rclone-db-list" class="divide-y divide-white/5">
+            <div class="px-5 py-8 text-center theme-text-secondary text-sm">
+                <i class="fas fa-spinner fa-spin text-primary text-xl mb-2 block"></i>
+                Rclone içerikleri yükleniyor...
+            </div>
+        </div>
+
+        <div id="rclone-db-empty" class="hidden px-5 py-10 text-center">
+            <i class="fas fa-cloud text-3xl theme-text-secondary mb-3 block"></i>
+            <p class="theme-text-secondary text-sm">Henüz Rclone'dan eklenmiş içerik yok</p>
+        </div>
+    </div>
+</div>
+
+<!-- Rclone Tarayıcı Butonu (URL yükleme alanı yanına) -->
+
+<!-- Rclone Modal -->
+<div id="rclone-modal" class="fixed inset-0 z-40 hidden flex items-center justify-center bg-black/60 backdrop-blur-sm">
+    <div class="theme-card rounded-2xl shadow-2xl border border-white/10 w-full max-w-lg mx-4 flex flex-col" style="max-height:85vh">
+        <div class="flex items-center justify-between px-5 py-4 border-b border-white/10 flex-shrink-0">
+            <h3 class="font-bold flex items-center gap-2">
+                <i class="fas fa-cloud text-blue-400"></i>
+                <span id="rclone-modal-title">Rclone Sürücüleri</span>
+            </h3>
+            <button onclick="closeRcloneModal()" class="text-gray-400 hover:text-white transition">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+
+        <div id="rclone-breadcrumb" class="flex items-center gap-1 text-xs theme-text-secondary px-4 pt-3 flex-shrink-0 overflow-x-auto flex-wrap"></div>
+
+        <div id="rclone-status" class="hidden px-4 pt-2 flex-shrink-0">
+            <div class="flex items-center gap-2 text-sm theme-text-secondary">
+                <i class="fas fa-spinner fa-spin text-primary"></i>
+                <span id="rclone-status-text">Yükleniyor...</span>
+            </div>
+        </div>
+        <div id="rclone-error" class="hidden mx-4 mt-2 p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-sm text-red-400 flex-shrink-0">
+            <i class="fas fa-exclamation-circle mr-2"></i><span id="rclone-error-text"></span>
+        </div>
+
+        <!-- Sürücü seçici -->
+        <div id="rclone-remote-select" class="hidden px-4 pt-3 flex-shrink-0">
+            <label class="text-xs theme-text-secondary mb-1 block">Sürücü Seç</label>
+            <select id="rclone-remote-dropdown" onchange="rcloneSelectRemote(this.value)"
+                class="w-full rounded-xl border border-white/20 bg-white/5 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary">
+                <option value="">— Sürücü seçin —</option>
+            </select>
+        </div>
+
+        <div id="rclone-list" class="flex-1 overflow-y-auto space-y-1 min-h-0 px-4 py-3 pr-5"></div>
+
+        <div class="px-4 pb-4 flex gap-2 flex-shrink-0 border-t border-white/10 pt-3">
+            <button id="rclone-back-btn" onclick="rcloneGoBack()" class="hidden px-4 py-2.5 rounded-xl border border-white/20 hover:bg-white/5 text-sm transition flex items-center gap-2">
+                <i class="fas fa-arrow-left text-xs"></i> Geri
+            </button>
+            <button onclick="closeRcloneModal()" class="ml-auto px-4 py-2.5 rounded-xl border border-white/20 hover:bg-white/5 text-sm transition">
+                Kapat
+            </button>
+        </div>
+    </div>
+</div>
 <script>
+
+// ── Dosya Durumu (token.pickle & rclone.conf) ──────────────────────────────
+async function checkDosyaDurumu() {
+    try {
+        const res  = await fetch('/api/sunucu/dosya-durumu');
+        if (!res.ok) return;
+        const data = await res.json();
+
+        // Google Drive butonu
+        const gBadge = document.getElementById('gdrive-btn-badge');
+        const gBtn   = document.getElementById('gdrive-btn');
+        if (!data.gdrive_token) {
+            gBadge.classList.remove('hidden');
+            gBtn.title = 'token.pickle eksik — /ayarlar → 📁 Dosya Ekle ile yükleyin';
+        } else {
+            gBadge.classList.add('hidden');
+            gBtn.title = 'Google Drive\'dan Ekle';
+        }
+
+        // Rclone butonu
+        const rBadge = document.getElementById('rclone-btn-badge');
+        const rBtn   = document.getElementById('rclone-btn');
+        if (!data.rclone_conf) {
+            rBadge.classList.remove('hidden');
+            rBtn.title = 'rclone.conf eksik — /ayarlar → 📁 Dosya Ekle ile yükleyin';
+        } else {
+            rBadge.classList.add('hidden');
+            const remotes = data.rclone_remotes || [];
+            rBtn.title = remotes.length
+                ? 'Rclone sürücüleri: ' + remotes.join(', ')
+                : 'Rclone — sürücü bulunamadı';
+        }
+    } catch (_) { /* sessiz hata */ }
+}
+
+document.addEventListener('DOMContentLoaded', checkDosyaDurumu);
+
 // ── State ──────────────────────────────────────────────────────────────────
 let currentPath = '';
 
@@ -648,7 +844,12 @@ async function loadFiles(path = '') {
             return;
         }
 
-        list.innerHTML = data.entries.map(e => renderEntry(e)).join('');
+        // Dosyaları global haritaya kaydet, onclick'te index kullan
+        window._entryMap = {};
+        list.innerHTML = data.entries.map((e, i) => {
+            window._entryMap[i] = e;
+            return renderEntry(e, i);
+        }).join('');
     } catch (err) {
         list.innerHTML = `<div class="px-5 py-8 text-center text-red-400"><i class="fas fa-exclamation-triangle mr-2"></i>Yükleme hatası</div>`;
         console.error(err);
@@ -658,27 +859,29 @@ async function loadFiles(path = '') {
 function renderBreadcrumb(crumbs) {
     const nav = document.getElementById('breadcrumb');
     let html = `<button onclick="navigate('')" class="text-primary hover:underline flex-shrink-0 flex items-center gap-1 text-sm"><i class="fas fa-hdd text-xs"></i> Kök</button>`;
-    crumbs.forEach(c => {
+    window._crumbMap = {};
+    crumbs.forEach((c, ci) => {
+        window._crumbMap[ci] = c;
         html += `<i class="fas fa-chevron-right text-xs theme-text-secondary mx-1 flex-shrink-0"></i>
-                 <button onclick="navigate('${escHtml(c.path)}')" class="text-primary hover:underline flex-shrink-0 text-sm truncate max-w-[140px]" title="${escHtml(c.name)}">${escHtml(c.name)}</button>`;
+                 <button onclick="navigate(_crumbMap[${ci}].path)" class="text-primary hover:underline flex-shrink-0 text-sm truncate max-w-[140px]" title="${escHtml(c.name)}">${escHtml(c.name)}</button>`;
     });
     nav.innerHTML = html;
 }
 
-function renderEntry(e) {
+function renderEntry(e, i) {
     const icon = e.is_dir
         ? `<i class="fas fa-folder text-yellow-400 text-lg flex-shrink-0"></i>`
         : `<i class="fas fa-file-video text-blue-400 text-lg flex-shrink-0"></i>`;
 
     const nameCell = e.is_dir
-        ? `<button onclick="navigate('${escHtml(e.path)}')" class="font-medium text-text hover:text-primary transition-colors truncate text-left">${escHtml(e.name)}</button>`
+        ? `<button onclick="navigateByIndex(${i})" class="font-medium text-text hover:text-primary transition-colors truncate text-left">${escHtml(e.name)}</button>`
         : `<span class="font-medium text-text truncate">${escHtml(e.name)}</span>`;
 
     const sizeCell = e.is_dir ? '<span class="theme-text-secondary text-xs">—</span>' : `<span class="text-xs theme-text-secondary">${escHtml(e.size || '—')}</span>`;
     const dateCell = `<span class="text-xs theme-text-secondary">${e.modified ? new Date(e.modified * 1000).toLocaleDateString('tr-TR', {day:'2-digit',month:'2-digit',year:'numeric'}) : '—'}</span>`;
 
     const metaBtn = !e.is_dir
-        ? `<button onclick="openMetaModal('${escHtml(e.path)}', '${escHtml(e.name)}')"
+        ? `<button onclick="openMetaModalByIndex(${i})"
                 title="Metadata Sorgula"
                 class="p-1.5 rounded-lg text-blue-400 hover:bg-blue-400/10 transition-colors" >
                 <i class="fas fa-database text-sm"></i>
@@ -691,7 +894,7 @@ function renderEntry(e) {
                class="p-1.5 rounded-lg text-green-400 hover:bg-green-400/10 transition-colors inline-flex items-center">
                <i class="fas fa-download text-sm"></i>
            </a>`
-        : `<button onclick="startFolderZip('${escHtml(e.path)}', '${escHtml(e.name)}')"
+        : `<button onclick="startFolderZipByIndex(${i})"
                title="Klasörü ZIP olarak indir"
                class="p-1.5 rounded-lg text-cyan-400 hover:bg-cyan-400/10 transition-colors">
                <i class="fas fa-file-archive text-sm"></i>
@@ -708,12 +911,12 @@ function renderEntry(e) {
             <div class="col-span-4 sm:col-span-2 flex items-center justify-end gap-1">
                 ${downloadBtn}
                 ${metaBtn}
-                <button onclick="openRenameModal('${escHtml(e.path)}', '${escHtml(e.name)}', ${!e.is_dir})"
+                <button onclick="openRenameModalByIndex(${i})"
                     title="Yeniden Adlandır"
                     class="p-1.5 rounded-lg text-yellow-400 hover:bg-yellow-400/10 transition-colors">
                     <i class="fas fa-pencil-alt text-sm"></i>
                 </button>
-                <button onclick="deleteEntry('${escHtml(e.path)}', '${escHtml(e.name)}', ${e.is_dir})"
+                <button onclick="deleteEntryByIndex(${i})"
                     title="Sil"
                     class="p-1.5 rounded-lg text-red-400 hover:bg-red-400/10 transition-colors">
                     <i class="fas fa-trash text-sm"></i>
@@ -723,6 +926,163 @@ function renderEntry(e) {
 }
 
 // ── Upload Modal ───────────────────────────────────────────────────────────
+
+// ── Bilgisayardan Yükle Modal ─────────────────────────────────────────────────
+let _localFiles = [];
+
+function openLocalUploadModal() {
+    _localFiles = [];
+    document.getElementById('local-upload-dest').value = currentPath;
+    document.getElementById('local-file-list').innerHTML = '';
+    document.getElementById('local-file-list').classList.add('hidden');
+    document.getElementById('local-upload-progress').classList.add('hidden');
+    document.getElementById('local-upload-btn').disabled = true;
+    document.getElementById('local-upload-bar').style.width = '0%';
+    document.getElementById('local-upload-status').textContent = 'Yükleniyor...';
+    document.getElementById('local-upload-pct').textContent = '0%';
+    document.getElementById('local-upload-log').innerHTML = '';
+    document.getElementById('local-upload-modal').classList.remove('hidden');
+}
+
+function closeLocalUploadModal() {
+    document.getElementById('local-upload-modal').classList.add('hidden');
+    _localFiles = [];
+}
+
+function localDragOver(e) {
+    e.preventDefault();
+    document.getElementById('local-drop-zone').classList.add('border-orange-400', 'bg-orange-400/10');
+}
+
+function localDragLeave(e) {
+    document.getElementById('local-drop-zone').classList.remove('border-orange-400', 'bg-orange-400/10');
+}
+
+function localDrop(e) {
+    e.preventDefault();
+    localDragLeave(e);
+    localFilesSelected(e.dataTransfer.files);
+}
+
+function localFilesSelected(files) {
+    _localFiles = Array.from(files);
+    const list = document.getElementById('local-file-list');
+    list.innerHTML = '';
+    if (_localFiles.length === 0) {
+        list.classList.add('hidden');
+        document.getElementById('local-upload-btn').disabled = true;
+        return;
+    }
+    list.classList.remove('hidden');
+    _localFiles.forEach((f, i) => {
+        const size = _humanSize(f.size);
+        const icon = f.type.startsWith('video/') ? 'fa-file-video text-blue-400'
+                   : f.type.startsWith('image/') ? 'fa-file-image text-green-400'
+                   : f.type.startsWith('audio/') ? 'fa-file-audio text-purple-400'
+                   : 'fa-file text-gray-400';
+        const div = document.createElement('div');
+        div.className = 'flex items-center gap-2 px-3 py-2 bg-white/5 rounded-lg text-sm';
+        div.innerHTML = `<i class="fas ${icon} flex-shrink-0"></i>
+            <span class="flex-1 truncate">${f.name}</span>
+            <span class="text-xs theme-text-secondary flex-shrink-0">${size}</span>
+            <button onclick="_removeLocalFile(${i})" class="text-gray-500 hover:text-red-400 transition flex-shrink-0"><i class="fas fa-times"></i></button>`;
+        list.appendChild(div);
+    });
+    document.getElementById('local-upload-btn').disabled = false;
+}
+
+function _removeLocalFile(idx) {
+    _localFiles.splice(idx, 1);
+    localFilesSelected(_localFiles);
+}
+
+function _humanSize(bytes) {
+    const units = ['B','KB','MB','GB','TB'];
+    let i = 0;
+    while (bytes >= 1024 && i < units.length - 1) { bytes /= 1024; i++; }
+    return bytes.toFixed(1) + ' ' + units[i];
+}
+
+async function startLocalUpload() {
+    if (_localFiles.length === 0) { showToast('Dosya seçin', 'error'); return; }
+    const dest = document.getElementById('local-upload-dest').value.trim();
+    const btn  = document.getElementById('local-upload-btn');
+    const prog = document.getElementById('local-upload-progress');
+    const log  = document.getElementById('local-upload-log');
+    const bar  = document.getElementById('local-upload-bar');
+    const status = document.getElementById('local-upload-status');
+    const pct    = document.getElementById('local-upload-pct');
+
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Yükleniyor...';
+    prog.classList.remove('hidden');
+    log.innerHTML = '';
+
+    let totalBytes = _localFiles.reduce((s, f) => s + f.size, 0);
+    let uploadedBytes = 0;
+    let successCount = 0;
+    let errorCount = 0;
+
+    for (const file of _localFiles) {
+        const logLine = document.createElement('div');
+        logLine.className = 'text-yellow-400';
+        logLine.textContent = `› Yükleniyor: ${file.name}`;
+        log.appendChild(logLine);
+        log.scrollTop = log.scrollHeight;
+        status.textContent = `Yükleniyor: ${file.name}`;
+
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('dest_path', dest);
+
+        try {
+            const xhr = new XMLHttpRequest();
+            await new Promise((resolve, reject) => {
+                xhr.upload.addEventListener('progress', e => {
+                    if (e.lengthComputable) {
+                        const fileProgress = e.loaded / e.total;
+                        const overall = ((uploadedBytes + e.loaded) / totalBytes) * 100;
+                        bar.style.width = overall.toFixed(1) + '%';
+                        pct.textContent = overall.toFixed(1) + '%';
+                    }
+                });
+                xhr.addEventListener('load', () => {
+                    if (xhr.status >= 200 && xhr.status < 300) resolve(xhr.responseText);
+                    else reject(new Error(`HTTP ${xhr.status}: ${xhr.responseText}`));
+                });
+                xhr.addEventListener('error', () => reject(new Error('Ağ hatası')));
+                xhr.open('POST', '/api/sunucu/bilgisayardan-yukle');
+                xhr.send(formData);
+            });
+
+            uploadedBytes += file.size;
+            logLine.className = 'text-green-400';
+            logLine.textContent = `✅ Tamamlandı: ${file.name}`;
+            successCount++;
+        } catch (err) {
+            logLine.className = 'text-red-400';
+            logLine.textContent = `❌ Hata: ${file.name} — ${err.message}`;
+            uploadedBytes += file.size;
+            errorCount++;
+        }
+        log.scrollTop = log.scrollHeight;
+    }
+
+    bar.style.width = '100%';
+    pct.textContent = '100%';
+    status.textContent = `✅ ${successCount} dosya yüklendi${errorCount > 0 ? `, ${errorCount} hata` : ''}`;
+    btn.innerHTML = '<i class="fas fa-upload"></i> Yükle';
+    btn.disabled = false;
+
+    await loadFiles(currentPath);
+    if (errorCount === 0) {
+        setTimeout(() => closeLocalUploadModal(), 1500);
+        showToast(`${successCount} dosya başarıyla yüklendi`, 'success');
+    } else {
+        showToast(`${errorCount} dosyada hata oluştu`, 'error');
+    }
+}
+
 function openUploadModal() {
     document.getElementById('upload-url').value = '';
     document.getElementById('upload-filename').value = '';
@@ -912,6 +1272,15 @@ function _resetBtn() {
     btn.onclick = startUpload;
 }
 
+// ── Index tabanlı sarmalayıcılar (onclick'te string encoding sorunu yaşamamak için) ──
+function _getEntry(i) { return window._entryMap && window._entryMap[i]; }
+
+function navigateByIndex(i)          { const e = _getEntry(i); if (e) navigate(e.path); }
+function openMetaModalByIndex(i)     { const e = _getEntry(i); if (e) openMetaModal(e.path, e.name); }
+function startFolderZipByIndex(i)    { const e = _getEntry(i); if (e) startFolderZip(e.path, e.name); }
+function openRenameModalByIndex(i)   { const e = _getEntry(i); if (e) openRenameModal(e.path, e.name, !e.is_dir); }
+function deleteEntryByIndex(i)       { const e = _getEntry(i); if (e) deleteEntry(e.path, e.name, e.is_dir); }
+
 // ── Sil ───────────────────────────────────────────────────────────────────
 async function deleteEntry(path, name, isDir) {
     const tip = isDir ? 'klasörü ve içindeki tüm dosyaları' : 'dosyayı';
@@ -924,8 +1293,11 @@ async function deleteEntry(path, name, isDir) {
             body: JSON.stringify({ path })
         });
         const data = await res.json();
-        if (data.error) { showToast(data.error, 'error'); return; }
-        showToast(data.message, 'success');
+        if (!res.ok || data.error) {
+            showToast(data.error || data.detail || `Silme başarısız (HTTP ${res.status})`, 'error');
+            return;
+        }
+        showToast(data.message || 'Silindi', 'success');
 
         // Silinen klasör, içinde bulunduğumuz yol veya üst yolu ise yukarı çık
         if (isDir && (currentPath === path || currentPath.startsWith(path + '/') || currentPath.startsWith(path + '\\'))) {
@@ -1134,6 +1506,16 @@ function openMetaReview(data) {
     const _hfid = document.getElementById('mr-gdrive-file-id');
     if (_hfid) _hfid.value = '';
     _pendingGdriveFile = null;
+    // Rclone hidden input'larını temizle
+    const _rcRemote = document.getElementById('mr-rclone-remote');
+    const _rcPath   = document.getElementById('mr-rclone-path');
+    if (_rcRemote) _rcRemote.value = '';
+    if (_rcPath)   _rcPath.value   = '';
+    // mr-error stil overridelerini sıfırla (rclone no-meta sarı uyarıdan kalabilir)
+    const _errEl = document.getElementById('mr-error');
+    _errEl.style.background   = '';
+    _errEl.style.borderColor  = '';
+    _errEl.style.color        = '';
 
     document.getElementById('meta-review-overlay').classList.remove('hidden');
     document.documentElement.style.overflow = 'hidden';
@@ -1351,6 +1733,7 @@ async function openGdriveModal() {
 
 function closeGdriveModal() {
     document.getElementById('gdrive-modal').classList.add('hidden');
+    checkDosyaDurumu();
 }
 
 async function _gdriveLoad(folderId, append = false) {
@@ -1633,7 +2016,7 @@ function escHtml(str) {
 }
 
 // Modal dışına tıklama ile kapat
-['upload-modal','rename-modal','meta-modal','folder-modal'].forEach(id => {
+['upload-modal','rename-modal','meta-modal','folder-modal','local-upload-modal'].forEach(id => {
     document.getElementById(id).addEventListener('click', function(e) {
         if (e.target === this) this.classList.add('hidden');
     });
@@ -1893,7 +2276,484 @@ function closeZipModal() {
 navigate('');
 loadSistemDurumu();
 loadGdriveDbList();
+loadRcloneDbList();
 // Her 30 saniyede sistem durumunu güncelle
 setInterval(loadSistemDurumu, 30000);
+
+// ── Rclone ───────────────────────────────────────────────────────────────────
+let _rcloneStack   = [];   // [{remote, path, label}] — geri tuşu için
+let _rcloneCurrent = { remote: '', path: '' };
+let _rcloneMetaReviewData = null; // onay bekleyen dosya
+
+async function openRcloneModal() {
+    _rcloneStack   = [];
+    _rcloneCurrent = { remote: '', path: '' };
+    document.getElementById('rclone-modal').classList.remove('hidden');
+    document.getElementById('rclone-back-btn').classList.add('hidden');
+    document.getElementById('rclone-breadcrumb').innerHTML = '';
+    document.getElementById('rclone-list').innerHTML = '';
+    _rcloneSetStatus('Sürücüler yükleniyor...', true);
+    document.getElementById('rclone-remote-select').classList.add('hidden');
+    document.getElementById('rclone-error').classList.add('hidden');
+
+    try {
+        const res  = await fetch('/api/sunucu/rclone-remotes');
+        const data = await res.json();
+        _rcloneSetStatus('', false);
+        if (data.error) { _rcloneShowError(data.error); return; }
+        const remotes = data.remotes || [];
+        if (!remotes.length) {
+            _rcloneShowError('rclone.conf\'ta sürücü bulunamadı. /ayarlar → Dosya Ekle ile yükleyin.');
+            return;
+        }
+        // Sürücü seçici doldur
+        const sel = document.getElementById('rclone-remote-dropdown');
+        sel.innerHTML = '<option value="">— Sürücü seçin —</option>' +
+            remotes.map(r => `<option value="${escHtml(r)}">${escHtml(r)}</option>`).join('');
+        document.getElementById('rclone-remote-select').classList.remove('hidden');
+        document.getElementById('rclone-modal-title').textContent = 'Rclone Sürücüleri';
+        _rcUpdateBreadcrumb();
+    } catch (e) {
+        _rcloneSetStatus('', false);
+        _rcloneShowError('Bağlantı hatası: ' + e.message);
+    }
+}
+
+function closeRcloneModal() {
+    document.getElementById('rclone-modal').classList.add('hidden');
+}
+
+async function rcloneSelectRemote(remote) {
+    if (!remote) return;
+    _rcloneStack   = [];
+    _rcloneCurrent = { remote, path: '' };
+    document.getElementById('rclone-back-btn').classList.add('hidden');
+    document.getElementById('rclone-remote-select').classList.add('hidden');
+    await _rcloneLoad(remote, '');
+}
+
+async function _rcloneLoad(remote, path) {
+    _rcloneSetStatus(`${remote}:${path || '/'} yükleniyor...`, true);
+    document.getElementById('rclone-error').classList.add('hidden');
+    document.getElementById('rclone-list').innerHTML = '';
+
+    try {
+        const url = `/api/sunucu/rclone-listele?remote=${encodeURIComponent(remote)}&path=${encodeURIComponent(path)}`;
+        const res  = await fetch(url);
+        const data = await res.json();
+        _rcloneSetStatus('', false);
+        if (data.error) { _rcloneShowError(data.error); return; }
+
+        const items = data.items || [];
+        const listEl = document.getElementById('rclone-list');
+        document.getElementById('rclone-modal-title').textContent = data.folder_name || `${remote}:${path || '/'}`;
+        _rcUpdateBreadcrumb(remote, path);
+
+        if (!items.length) {
+            listEl.innerHTML = '<div class="py-8 text-center theme-text-secondary text-sm">Bu klasör boş.</div>';
+            return;
+        }
+
+        listEl.innerHTML = items.map(it => {
+            if (it.is_dir) {
+                return `<button onclick="_rcloneEnterDir('${escHtml(remote)}','${escHtml(it.path)}')"
+                    class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/5 text-left transition-colors">
+                    <i class="fas fa-folder text-yellow-400 text-sm w-5 flex-shrink-0"></i>
+                    <span class="text-sm truncate flex-1">${escHtml(it.name)}</span>
+                    <i class="fas fa-chevron-right text-xs theme-text-secondary"></i>
+                </button>`;
+            } else {
+                const sz = _fmtSize(it.size);
+                return `<button onclick="_rcloneSelectFile('${escHtml(remote)}','${escHtml(it.path)}')"
+                    class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/5 text-left transition-colors">
+                    <i class="fas fa-film text-blue-400 text-sm w-5 flex-shrink-0"></i>
+                    <span class="text-sm truncate flex-1">${escHtml(it.name)}</span>
+                    <span class="text-xs theme-text-secondary flex-shrink-0">${sz}</span>
+                </button>`;
+            }
+        }).join('');
+
+        // Geri butonu göster
+        if (_rcloneStack.length > 0) {
+            document.getElementById('rclone-back-btn').classList.remove('hidden');
+        }
+    } catch (e) {
+        _rcloneSetStatus('', false);
+        _rcloneShowError('Yükleme hatası: ' + e.message);
+    }
+}
+
+async function _rcloneEnterDir(remote, path) {
+    _rcloneStack.push({ ..._rcloneCurrent });
+    _rcloneCurrent = { remote, path };
+    document.getElementById('rclone-back-btn').classList.remove('hidden');
+    await _rcloneLoad(remote, path);
+}
+
+async function rcloneGoBack() {
+    if (!_rcloneStack.length) {
+        // Sürücü seçiciye dön
+        _rcloneCurrent = { remote: '', path: '' };
+        document.getElementById('rclone-remote-select').classList.remove('hidden');
+        document.getElementById('rclone-list').innerHTML = '';
+        document.getElementById('rclone-back-btn').classList.add('hidden');
+        document.getElementById('rclone-modal-title').textContent = 'Rclone Sürücüleri';
+        document.getElementById('rclone-breadcrumb').innerHTML = '';
+        return;
+    }
+    const prev = _rcloneStack.pop();
+    _rcloneCurrent = prev;
+    if (!_rcloneStack.length) {
+        document.getElementById('rclone-back-btn').classList.add('hidden');
+    }
+    if (prev.remote && prev.path !== undefined) {
+        await _rcloneLoad(prev.remote, prev.path);
+    } else {
+        document.getElementById('rclone-remote-select').classList.remove('hidden');
+        document.getElementById('rclone-list').innerHTML = '';
+        document.getElementById('rclone-modal-title').textContent = 'Rclone Sürücüleri';
+        document.getElementById('rclone-breadcrumb').innerHTML = '';
+    }
+}
+
+async function _rcloneSelectFile(remote, path) {
+    _rcloneSetStatus('Metadata aranıyor...', true);
+    document.getElementById('rclone-error').classList.add('hidden');
+    document.getElementById('rclone-list').innerHTML = '';
+
+    try {
+        const res  = await fetch('/api/sunucu/rclone-meta-sorgu', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ remote, path })
+        });
+        const data = await res.json();
+        _rcloneSetStatus('', false);
+
+        if (data.error && res.status === 404) {
+            // Metadata bulunamadı — yine de ekleme onayı sor
+            _rcloneMetaReviewData = { remote, path, meta: null, file_name: data.file_name || path.split('/').pop() };
+            _showRcloneNoMetaPrompt(data.file_name || path.split('/').pop());
+            return;
+        }
+        if (data.error) { _rcloneShowError(data.error); return; }
+
+        _rcloneMetaReviewData = { remote, path, meta: data.meta, file_name: data.file_name, size: data.size };
+        _showRcloneMetaReview(data);
+    } catch (e) {
+        _rcloneSetStatus('', false);
+        _rcloneShowError('Metadata hatası: ' + e.message);
+    }
+}
+
+function _showRcloneMetaReview(data) {
+    const meta = data.meta || {};
+    closeRcloneModal();
+    openMetaReview({
+        path:        '__rclone__',
+        filename:    data.file_name || '',
+        size:        _fmtSize(data.size || 0),
+        title:       meta.title       || '',
+        title_tr:    meta.title_tr    || '',
+        media_type:  meta.media_type  || 'movie',
+        year:        meta.year        || '',
+        quality:     meta.quality     || '',
+        tmdb_id:     meta.tmdb_id     || '',
+        rating:      meta.rating      || '',
+        description: meta.description || '',
+        poster:      meta.poster_url  || meta.poster || '',
+        backdrop:    meta.backdrop    || '',
+        genres:      meta.genres      || [],
+        metadata:    meta,
+    });
+
+    _rcloneEnsureHiddenInputs();
+    document.getElementById('mr-rclone-remote').value = _rcloneMetaReviewData?.remote || '';
+    document.getElementById('mr-rclone-path').value   = _rcloneMetaReviewData?.path   || '';
+
+    const saveBtn = document.getElementById('mr-save-btn');
+    saveBtn.onclick = _confirmAndSaveRcloneMeta;
+    saveBtn.innerHTML = `<i class="fas fa-cloud"></i> Rclone İçeriğini Kataloğa Ekle`;
+}
+
+function _showRcloneNoMetaPrompt(fileName) {
+    closeRcloneModal();
+    openMetaReview({
+        path:     '__rclone__',
+        filename: fileName,
+        title:    '',
+        metadata: {},
+    });
+
+    _rcloneEnsureHiddenInputs();
+    document.getElementById('mr-rclone-remote').value = _rcloneMetaReviewData?.remote || '';
+    document.getElementById('mr-rclone-path').value   = _rcloneMetaReviewData?.path   || '';
+
+    const errEl = document.getElementById('mr-error');
+    document.getElementById('mr-error-msg').textContent = "TMDb'de metadata bulunamadı. Bilgileri manuel girerek ekleyebilirsiniz.";
+    errEl.classList.remove('hidden');
+    errEl.style.background = 'rgba(234,179,8,0.1)';
+    errEl.style.borderColor = 'rgba(234,179,8,0.3)';
+    errEl.style.color = '#facc15';
+
+    const saveBtn = document.getElementById('mr-save-btn');
+    saveBtn.onclick = _confirmAndSaveRcloneMeta;
+    saveBtn.innerHTML = `<i class="fas fa-cloud"></i> Rclone İçeriğini Kataloğa Ekle`;
+}
+
+function _rcloneEnsureHiddenInputs() {
+    ['mr-rclone-remote', 'mr-rclone-path'].forEach(id => {
+        if (!document.getElementById(id)) {
+            const inp = document.createElement('input');
+            inp.type = 'hidden';
+            inp.id   = id;
+            document.getElementById('meta-review-overlay').appendChild(inp);
+        }
+    });
+}
+
+async function _confirmAndSaveRcloneMeta() {
+    const btn = document.getElementById('mr-save-btn');
+    btn.disabled = true;
+    btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Ekleniyor...`;
+    document.getElementById('mr-success').classList.add('hidden');
+    document.getElementById('mr-error').classList.add('hidden');
+
+    let meta = {};
+    try { meta = JSON.parse(document.getElementById('mr-raw-metadata').value); } catch {}
+    meta.title       = document.getElementById('mr-title').value.trim();
+    meta.title_tr    = document.getElementById('mr-title-tr').value.trim();
+    meta.media_type  = document.getElementById('mr-media-type').value;
+    meta.year        = document.getElementById('mr-year').value;
+    meta.quality     = document.getElementById('mr-quality').value.trim();
+    meta.tmdb_id     = document.getElementById('mr-tmdb-id').value;
+    meta.rating      = document.getElementById('mr-rating').value;
+    meta.description = document.getElementById('mr-description').value.trim();
+    meta.poster      = document.getElementById('mr-poster-url').value.trim();
+
+    const rd = _rcloneMetaReviewData || {
+        remote: document.getElementById('mr-rclone-remote')?.value || '',
+        path:   document.getElementById('mr-rclone-path')?.value   || '',
+    };
+    if (!rd.remote || !rd.path) {
+        document.getElementById('mr-error-msg').textContent = 'Rclone bilgisi kayboldu. Lütfen tekrar deneyin.';
+        document.getElementById('mr-error').classList.remove('hidden');
+        btn.disabled = false;
+        btn.innerHTML = `<i class="fas fa-cloud"></i> Rclone İçeriğini Kataloğa Ekle`;
+        return;
+    }
+
+    try {
+        const res  = await fetch('/api/sunucu/rclone-ekle-onay', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ remote: rd.remote, path: rd.path, meta })
+        });
+        const data = await res.json();
+        if (data.error) {
+            document.getElementById('mr-error-msg').textContent = data.error;
+            document.getElementById('mr-error').classList.remove('hidden');
+            btn.disabled = false;
+            btn.innerHTML = `<i class="fas fa-cloud"></i> Rclone İçeriğini Kataloğa Ekle`;
+            return;
+        }
+        const title = meta.title_tr || meta.title || rd.path.split('/').pop();
+        document.getElementById('mr-success-msg').textContent = `✓ "${title}" kataloga eklendi!`;
+        document.getElementById('mr-success').classList.remove('hidden');
+        btn.innerHTML = `<i class="fas fa-check"></i> Eklendi`;
+        showToast(`Rclone içeriği eklendi: ${title}`, 'success');
+        _rcloneMetaReviewData = null;
+        setTimeout(() => { closeMetaReview(); loadRcloneDbList(); }, 2000);
+    } catch (e) {
+        document.getElementById('mr-error-msg').textContent = 'Sunucu hatası: ' + e.message;
+        document.getElementById('mr-error').classList.remove('hidden');
+        btn.disabled = false;
+        btn.innerHTML = `<i class="fas fa-cloud"></i> Rclone İçeriğini Kataloğa Ekle`;
+    }
+}
+
+function _rcloneSetStatus(msg, show) {
+    const el   = document.getElementById('rclone-status');
+    const txt  = document.getElementById('rclone-status-text');
+    if (show) { txt.textContent = msg; el.classList.remove('hidden'); }
+    else       { el.classList.add('hidden'); }
+}
+function _rcloneShowError(msg) {
+    const el  = document.getElementById('rclone-error');
+    const txt = document.getElementById('rclone-error-text');
+    txt.textContent = msg;
+    el.classList.remove('hidden');
+}
+function _rcUpdateBreadcrumb(remote, path) {
+    const bc = document.getElementById('rclone-breadcrumb');
+    if (!remote) { bc.innerHTML = ''; return; }
+    const parts = (path || '').split('/').filter(Boolean);
+    let html = `<span class="cursor-pointer hover:text-primary" onclick="_rcloneLoad('${escHtml(remote)}','')">
+        <i class="fas fa-cloud text-blue-400 mr-1"></i>${escHtml(remote)}
+    </span>`;
+    let acc = '';
+    for (const p of parts) {
+        acc = acc ? acc + '/' + p : p;
+        const _acc = acc;
+        html += `<i class="fas fa-chevron-right text-xs mx-1 opacity-40"></i>
+            <span class="cursor-pointer hover:text-primary" onclick="_rcloneLoad('${escHtml(remote)}','${escHtml(_acc)}')">${escHtml(p)}</span>`;
+    }
+    bc.innerHTML = html;
+}
+function _fmtSize(bytes) {
+    if (!bytes) return '—';
+    const units = ['B','KB','MB','GB','TB'];
+    let n = bytes;
+    for (const u of units) {
+        if (n < 1024) return n.toFixed(1) + ' ' + u;
+        n /= 1024;
+    }
+    return n.toFixed(1) + ' PB';
+}
+
+// ── Rclone DB Katalog ─────────────────────────────────────────────────────────
+async function loadRcloneDbList(page = 0) {
+    const listEl  = document.getElementById('rclone-db-list');
+    const emptyEl = document.getElementById('rclone-db-empty');
+    const icon    = document.getElementById('rclone-db-refresh-icon');
+    if (!listEl) return;
+    if (icon) icon.classList.add('fa-spin');
+
+    listEl.innerHTML = `<div class="px-5 py-8 text-center theme-text-secondary text-sm">
+        <i class="fas fa-spinner fa-spin text-primary text-xl mb-2 block"></i>Yükleniyor...</div>`;
+    emptyEl.classList.add('hidden');
+
+    try {
+        const res  = await fetch(`/api/sunucu/rclone-db-listele?page=${page}`);
+        if (!res.ok) {
+            listEl.innerHTML = `<div class="px-5 py-6 text-center text-red-400 text-sm"><i class="fas fa-exclamation-triangle mr-2"></i>Sunucu hatası (HTTP ${res.status})</div>`;
+            return;
+        }
+        const data = await res.json();
+        if (data.error) {
+            listEl.innerHTML = `<div class="px-5 py-6 text-center text-red-400 text-sm">
+                <i class="fas fa-exclamation-triangle mr-2"></i>${escHtml(data.error)}</div>`;
+            return;
+        }
+        const countEl = document.getElementById('rclone-db-count');
+        if (countEl) countEl.textContent = data.total ? `(${data.total} içerik)` : '';
+
+        const items = data.items || [];
+        if (!items.length) {
+            listEl.innerHTML = '';
+            emptyEl.classList.remove('hidden');
+            return;
+        }
+
+        const header = `<div class="hidden sm:grid grid-cols-12 px-5 py-2 border-b border-white/10 text-xs font-semibold uppercase tracking-wide theme-text-secondary">
+            <div class="col-span-5">Dosya Adı / Başlık</div>
+            <div class="col-span-3 text-center">Eklenme</div>
+            <div class="col-span-2 text-center">Boyut</div>
+            <div class="col-span-2 text-right">İşlem</div>
+        </div>`;
+
+        listEl.innerHTML = header + items.map(it => _renderRcloneDbEntry(it)).join('');
+
+        // Sayfalama
+        const total     = data.total || 0;
+        const pageSize  = data.page_size || 20;
+        const totalPages = Math.ceil(total / pageSize);
+        if (totalPages > 1) {
+            let nav = `<div class="flex items-center justify-center gap-2 px-5 py-3 border-t border-white/10">`;
+            if (page > 0) nav += `<button onclick="loadRcloneDbList(${page-1})" class="px-3 py-1.5 rounded-lg border border-white/20 hover:bg-white/5 text-sm transition">◀ Önceki</button>`;
+            nav += `<span class="text-xs theme-text-secondary">${page+1} / ${totalPages}</span>`;
+            if (page + 1 < totalPages) nav += `<button onclick="loadRcloneDbList(${page+1})" class="px-3 py-1.5 rounded-lg border border-white/20 hover:bg-white/5 text-sm transition">Sonraki ▶</button>`;
+            nav += `</div>`;
+            listEl.innerHTML += nav;
+        }
+    } catch (e) {
+        listEl.innerHTML = `<div class="px-5 py-6 text-center text-red-400 text-sm">
+            <i class="fas fa-exclamation-triangle mr-2"></i>Yükleme hatası: ${escHtml(e.message)}</div>`;
+    } finally {
+        if (icon) icon.classList.remove('fa-spin');
+    }
+}
+
+function _renderRcloneDbEntry(it) {
+    const addedDate = it.added_at
+        ? new Date(it.added_at * 1000).toLocaleString('tr-TR',
+            { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' })
+        : '—';
+    const displayName = it.file_name || it.title || '—';
+    const titleLine   = it.title && it.title !== it.file_name
+        ? `<div class="text-xs theme-text-secondary truncate">${escHtml(it.title)}</div>` : '';
+    const remoteLine  = it.remote
+        ? `<div class="flex items-center gap-1 mt-0.5">
+               <i class="fas fa-cloud text-blue-400 text-xs"></i>
+               <span class="text-xs theme-text-secondary truncate max-w-[160px]" title="${escHtml(it.rclone_path || '')}">${escHtml(it.remote)}:${escHtml((it.rclone_path||'').split('/').slice(-1)[0]||'')}</span>
+           </div>` : '';
+    const docId = it.doc_id || it._id || it.id || '';
+    return `<div class="grid grid-cols-12 items-center px-5 py-3 hover:bg-white/5 transition-colors">
+        <div class="col-span-8 sm:col-span-5 flex items-center gap-3 min-w-0">
+            <div class="w-8 h-8 rounded bg-blue-500/10 border border-blue-500/20 flex items-center justify-center flex-shrink-0">
+                <i class="fas fa-cloud text-blue-400 text-sm"></i>
+            </div>
+            <div class="min-w-0">
+                <div class="text-sm font-medium truncate" title="${escHtml(displayName)}">${escHtml(displayName)}</div>
+                ${titleLine}${remoteLine}
+            </div>
+        </div>
+        <div class="hidden sm:flex col-span-3 justify-center">
+            <span class="text-xs theme-text-secondary">${addedDate}</span>
+        </div>
+        <div class="hidden sm:flex col-span-2 justify-center">
+            <span class="text-xs theme-text-secondary">${escHtml(it.size || '—')}</span>
+        </div>
+        <div class="col-span-4 sm:col-span-2 flex items-center justify-end gap-1">
+            <button onclick="deleteRcloneDbEntry('${escHtml(docId)}','${escHtml(displayName)}')"
+                title="Katalogdan Kaldır"
+                class="p-1.5 rounded-lg text-red-400 hover:bg-red-400/10 transition-colors">
+                <i class="fas fa-trash text-sm"></i>
+            </button>
+        </div>
+    </div>`;
+}
+
+async function deleteRcloneDbEntry(docId, title) {
+    if (!docId) { showToast('Kayıt ID bulunamadı.', 'error'); return; }
+    if (!confirm(`"${title}" içeriğini katalogdan kaldırmak istediğinizden emin misiniz?\n\nBu işlem Rclone dosyasını silmez, yalnızca Stremio kataloğundan kaldırır.`)) return;
+    try {
+        const res = await fetch('/api/sunucu/rclone-db-sil', {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ doc_id: docId })
+        });
+        let data;
+        try { data = await res.json(); } catch {
+            showToast(`Silme hatası: Sunucu geçersiz yanıt (HTTP ${res.status})`, 'error'); return;
+        }
+        if (!res.ok || data.error) { showToast(data.error || 'Silme işlemi başarısız.', 'error'); return; }
+        showToast(`"${title}" katalogdan kaldırıldı.`, 'success');
+        await loadRcloneDbList();
+    } catch (e) {
+        showToast('Silme hatası: ' + e.message, 'error');
+    }
+}
+
+async function runRcloneMigration() {
+    const btn = document.getElementById('rclone-migrate-btn');
+    if (!confirm(`Stremio DB'deki mevcut Rclone içerikleri kataloğa aktarılacak.\nBu işlem bir kez çalıştırılması yeterlidir. Devam edilsin mi?`)) return;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin text-xs"></i> Aktarılıyor...';
+    btn.disabled  = true;
+    try {
+        const res  = await fetch('/api/sunucu/rclone-migrate', { method: 'POST' });
+        const data = await res.json();
+        if (data.error) { showToast('Hata: ' + data.error, 'error'); }
+        else {
+            showToast(`${data.migrated} içerik aktarıldı.`, 'success');
+            await loadRcloneDbList();
+        }
+    } catch (e) {
+        showToast('Migration hatası: ' + e.message, 'error');
+    } finally {
+        btn.innerHTML = '<i class="fas fa-database text-xs"></i> Mevcut Kayıtları Aktar';
+        btn.disabled  = false;
+    }
+}
 </script>
 {% endblock %}

@@ -12,8 +12,12 @@ RUN apt-get update && \
         git \
         curl \
         ca-certificates \
-        locales && \
+        locales \
+        unzip \
+        ffmpeg && \
     locale-gen en_US.UTF-8 && \
+    # rclone kur
+    curl -fsSL https://rclone.org/install.sh | bash && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

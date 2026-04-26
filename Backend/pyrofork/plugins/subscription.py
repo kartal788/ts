@@ -159,6 +159,11 @@ async def admin_review(client: Client, callback_query: CallbackQuery):
     if action == "approve":
         user_data = await db.approve_payment(target_user_id)
         if user_data:
+            # Hatırlatma flag'ini sıfırla — yeni abonelik döneminde tekrar mesaj gitsin
+            try:
+                await db.reset_reminder_sent(target_user_id)
+            except Exception:
+                pass
             try:
                 user_obj = await db.get_user(target_user_id)
                 user_name = (user_obj.get("first_name") or user_obj.get("username") or str(target_user_id)) if user_obj else str(target_user_id)
@@ -384,8 +389,11 @@ async def check_status(client: Client, message: Message):
     days = remaining.days
     hours = remaining.seconds // 3600
 
+    expiry_tr = expiry + timedelta(hours=3)
+
     await message.reply_text(
-        f"<b>Abonelik Durumu:</b> Aktif ✅\n"
-        f"<b>Son Kullanma Tarihi:</b> {expiry.strftime('%d.%m.%Y %H:%M UTC')}\n"
-        f"<b>Kalan Süre:</b> {days} gün {hours} saat"
+        f"<b>Üyelik:</b> Aktif ✅\n"
+        f"<b>Bitiş:</b> {expiry_tr.strftime('%d.%m.%Y %H:%M')}\n"
+        f"<b>Kalan:</b> {days} gün {hours} saat",
+        parse_mode=enums.ParseMode.HTML
     )

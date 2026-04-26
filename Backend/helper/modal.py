@@ -68,6 +68,7 @@ class TVShowSchema(BaseModel):
     runtime: Optional[str] = None
     original_language: Optional[str] = None  # TMDB original_language (ISO 639-1, örn: "en", "tr")
     media_type: str
+    status: Optional[str] = None  # Dizi yayın durumu (Returning Series, Ended, Canceled, In Production, …)
     certification_tr: Optional[str] = None  # Türkiye sertifikası
     certification_de: Optional[str] = None  # Almanya sertifikası (FSK)
     certification_us: Optional[str] = None  # ABD sertifikası

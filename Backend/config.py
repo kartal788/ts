@@ -12,8 +12,8 @@ class Telegram:
     BASE_URL = getenv("BASE_URL", "").rstrip('/')
     PORT = int(getenv("PORT", "8001"))
 
-    PARALLEL = int(getenv("PARALLEL", "1"))
-    PRE_FETCH = int(getenv("PRE_FETCH", "1"))
+    PARALLEL = int(getenv("PARALLEL", "4"))
+    PRE_FETCH = int(getenv("PRE_FETCH", "3"))
 
     AUTH_CHANNEL = [channel.strip() for channel in (getenv("AUTH_CHANNEL") or "").split(",") if channel.strip()]
     DATABASE = [db.strip() for db in (getenv("DATABASE") or "").split(",") if db.strip()]
@@ -64,10 +64,18 @@ class Telegram:
     HTTP_PROXY_URL = getenv("HTTP_Proxy_URL", "")
     PROXY_MODE = int(getenv("PROXY_MODE", "1"))  # 1=normal, 2=proxy+normal, 3=sadece proxy
 
+    # ── Token başına Cihaz Limiti ───────────────────────────────────
+    #                       0 veya boş → sınırsız.
+    #                       Örn: 2 → aynı token'la en fazla 2 farklı IP erişebilir.
+    # DEFAULT_DEVICE_LIMIT: Her token için varsayılan maksimum eşzamanlı cihaz sayısı.
+    #                       0 veya boş → sınırsız.
+    #                       Örn: 3 → aynı anda en fazla 3 aktif stream açılabilir.
+    DEFAULT_DEVICE_LIMIT = int(v) if (v := str(getenv("DEFAULT_DEVICE_LIMIT", "0") or "0").strip()).lstrip("-").isdigit() else 0
+
     # ── Brute-force (kaba kuvvet) koruması ───────────────────────────────────
     # BRUTE_WINDOW  : Kaç saniye içindeki başarısız girişler sayılsın?    (varsayılan: 60 sn)
     # BRUTE_MAX     : Pencere içinde kaç hata sonrası IP banlansın?       (varsayılan: 5)
     # BRUTE_BAN     : IP kaç saniye boyunca engellensin?                  (varsayılan: 600 sn = 10 dk)
     BRUTE_WINDOW  = int(getenv("BRUTE_WINDOW", "60"))
     BRUTE_MAX     = int(getenv("BRUTE_MAX",    "5"))
-    BRUTE_BAN     = int(getenv("BRUTE_BAN",    "600"))
+    BRUTE_BAN     = int(getenv("BRUTE_BAN",    "1800"))

@@ -26,11 +26,13 @@ from pyrogram.enums import ParseMode
 
 from Backend.helper.custom_filter import CustomFilters
 from Backend.logger import LOGGER
+from Backend import db
 
 # ── Sabitler ──────────────────────────────────────────────────────────────────
 
 CONFIG_PATH        = pathlib.Path("config.env")
 GDRIVE_TOKEN_PATH  = pathlib.Path(__file__).parent.parent.parent.parent / "gdrive_token.pickle"
+RCLONE_CONF_PATH   = pathlib.Path(__file__).parent.parent.parent.parent / "rclone.conf"
 
 TOGGLE_KEYS = ["REPLACE_MODE", "HIDE_CATALOG", "SUBSCRIPTION", "WEBSITESI", "Proxy"]
 
@@ -42,6 +44,7 @@ PAGE_TEXT_KEYS = {
     "kuyruk":   ["MAX_CONCURRENT_DOWNLOADS", "MAX_CONCURRENT_UPLOADS"],
     "guvenlik": ["BRUTE_WINDOW", "BRUTE_MAX", "BRUTE_BAN"],
     "proxy":    ["ProxyType", "HTTP_Proxy_URL", "PROXY_MODE"],
+    "token_limitleri": ["DEFAULT_DEVICE_LIMIT"],
 }
 
 KEY_DESCRIPTIONS = {
@@ -68,6 +71,7 @@ KEY_DESCRIPTIONS = {
     "BRUTE_WINDOW":             "Kaç saniye içindeki başarısız girişler sayılsın? (varsayılan: 60 sn)",
     "BRUTE_MAX":                "Pencere içinde kaç hata sonrası IP banlansın? (varsayılan: 10)",
     "BRUTE_BAN":                "IP kaç saniye boyunca engellensin? (varsayılan: 300 sn = 5 dk)",
+    "DEFAULT_DEVICE_LIMIT":     "Her token için varsayılan maks. eşzamanlı stream (cihaz) sayısı. 0 = sınırsız. Örn: 3 → aynı anda 3 cihaz izleyebilir.",
 }
 
 # {user_id: (key, orig_message_id)}
@@ -157,7 +161,7 @@ def _make_page(user_id: int, page: str, vals: dict):
             ],
             [
                 InlineKeyboardButton("🛡️ Güvenlik",       callback_data=f"cfg {user_id} guvenlik"),
-                InlineKeyboardButton("🌐 Proxy",           callback_data=f"cfg {user_id} proxy"),
+                InlineKeyboardButton("🔒 Token Limitleri", callback_data=f"cfg {user_id} token_limitleri"),
             ],
             [
                 InlineKeyboardButton("🔄 Yenile",         callback_data=f"cfg {user_id} home"),
@@ -191,7 +195,24 @@ def _make_page(user_id: int, page: str, vals: dict):
         return msg, InlineKeyboardMarkup(rows)
 
     if page == "dosya_ekle":
-        token_status = "✅ Yüklü" if GDRIVE_TOKEN_PATH.exists() else "❌ Yok"
+        token_status  = "✅ Yüklü" if GDRIVE_TOKEN_PATH.exists() else "❌ Yok"
+        rclone_status = "✅ Yüklü" if RCLONE_CONF_PATH.exists() else "❌ Yok"
+
+        # rclone.conf varsa sürücüleri listele
+        rclone_remotes = ""
+        if RCLONE_CONF_PATH.exists():
+            try:
+                import configparser
+                rcp = configparser.ConfigParser()
+                rcp.read(str(RCLONE_CONF_PATH))
+                remotes = rcp.sections()
+                if remotes:
+                    rclone_remotes = "\n┃   Sürücüler: " + ", ".join(f"<code>{r}</code>" for r in remotes[:5])
+                    if len(remotes) > 5:
+                        rclone_remotes += f" (+{len(remotes)-5} daha)"
+            except Exception:
+                pass
+
         msg = (
             "⌬ <b><i>Dosya Ekle</i></b>\n"
             "│\n"
@@ -199,12 +220,18 @@ def _make_page(user_id: int, page: str, vals: dict):
             f"┃   ↳ <code>gdrive_token.pickle</code> — <i>{token_status}</i>\n"
             "┠ Token'ı yüklemek için aşağıdaki butona bas,\n"
             "┃ ardından <code>.pickle</code> dosyasını gönder.\n"
-            "┖ Token yüklendikten sonra Drive linkleri\n"
-            "   <code>/sunucuyayukle https://drive.google.com/…</code>\n"
-            "   komutuyla çalışır."
+            "┠ ─────────────────────────────\n"
+            "┠ <b>Rclone Yapılandırması</b>\n"
+            f"┃   ↳ <code>rclone.conf</code> — <i>{rclone_status}</i>"
+            f"{rclone_remotes}\n"
+            "┠ Rclone sürücülerinden (Drive, OneDrive vb.) içerik\n"
+            "┃ eklemek için <code>rclone.conf</code> dosyanı gönder.\n"
+            "┖ Yükledikten sonra <code>/ekle</code> komutuyla\n"
+            "   Rclone sürücülerine erişebilirsin."
         )
         kbd = InlineKeyboardMarkup([
             [InlineKeyboardButton("📤 token.pickle Yükle", callback_data=f"cfg {user_id} _upload_pickle")],
+            [InlineKeyboardButton("🔧 rclone.conf Yükle",  callback_data=f"cfg {user_id} _upload_rclone")],
             _back_close(user_id),
         ])
         return msg, kbd
@@ -218,6 +245,7 @@ def _make_page(user_id: int, page: str, vals: dict):
             "kuyruk":   "Kuyruk & Eşzamanlılık Ayarları",
             "guvenlik": "Güvenlik — Brute-Force Koruması",
             "proxy":    "Proxy Ayarları",
+            "token_limitleri": "Token IP & Cihaz Limitleri",
         }
         lines = [f"⌬ <b><i>{titles[page]}</i></b>\n│"]
 
@@ -239,6 +267,21 @@ def _make_page(user_id: int, page: str, vals: dict):
             lines.append("┃   → BRUTE_WINDOW = 60")
             lines.append("┃   → BRUTE_MAX    = 5")
             lines.append("┃   → BRUTE_BAN    = 600")
+            lines.append("┖ Düzenlemek için ilgili butona bas.")
+
+        elif page == "token_limitleri":
+            dev_val = vals.get("DEFAULT_DEVICE_LIMIT", "").strip() or "0"
+            dev_disp = dev_val if dev_val != "0" else "Sınırsız"
+            lines.append("┠ <b>DEFAULT_DEVICE_LIMIT</b>")
+            lines.append(f"┃   ↳ <i>{KEY_DESCRIPTIONS['DEFAULT_DEVICE_LIMIT']}</i>")
+            lines.append(f"┃   Şu an: <code>{dev_disp}</code>")
+            lines.append("┠ ─────────────────────────────")
+            lines.append("┠ <i>Tokenın kendi limiti yoksa (0 / tanımsız) bu değer</i>")
+            lines.append("┃ <i>anlık olarak tüm tokenlar için geçerli olur.</i>")
+            lines.append("┠ <i>Tokenın özel limiti varsa bu ayar o tokena uygulanmaz.</i>")
+            lines.append("┠ ─────────────────────────────")
+            lines.append("┠ <i>Örnek: 3 cihaz limiti</i>")
+            lines.append("┃   → DEFAULT_DEVICE_LIMIT = 3")
             lines.append("┖ Düzenlemek için ilgili butona bas.")
 
         elif page == "kuyruk":
@@ -303,6 +346,13 @@ def _make_page(user_id: int, page: str, vals: dict):
                     f"✏️ {k}",
                     callback_data=f"cfg {user_id} _text {k}",
                 )])
+        elif page == "token_limitleri":
+            for k in ["DEFAULT_DEVICE_LIMIT"]:
+                label = "📱 Cihaz Limiti"
+                rows.append([InlineKeyboardButton(
+                    f"✏️ {label}",
+                    callback_data=f"cfg {user_id} _text {k}",
+                )])
         else:
             for k in PAGE_TEXT_KEYS[page]:
                 rows.append([InlineKeyboardButton(
@@ -365,14 +415,29 @@ async def cfg_callback(client: Client, query: CallbackQuery):
 
     # Google Drive token.pickle yükleme
     if action == "_upload_pickle":
-        _WAITING_FILE[user_id] = ("gdrive_pickle", query.message)
         await query.answer()
-        await query.message.reply_text(
+        prompt = await query.message.reply_text(
             "📤 <b>token.pickle yükle</b>\n\n"
             "Google Drive <code>token.pickle</code> dosyasını şimdi gönder.\n"
             "<i>İptal için /iptal yaz.</i>",
             parse_mode=ParseMode.HTML,
         )
+        _WAITING_FILE[user_id] = ("gdrive_pickle", prompt)
+        LOGGER.info(f"[ayarlar] _WAITING_FILE güncellendi — uid={user_id}, tür=gdrive_pickle")
+        return
+
+    # Rclone conf yükleme
+    if action == "_upload_rclone":
+        await query.answer()
+        prompt = await query.message.reply_text(
+            "🔧 <b>rclone.conf yükle</b>\n\n"
+            "Rclone yapılandırma dosyasını (<code>rclone.conf</code>) şimdi gönder.\n"
+            "Sürücü adlarını kontrol etmek için: <code>rclone listremotes</code>\n"
+            "<i>İptal için /iptal yaz.</i>",
+            parse_mode=ParseMode.HTML,
+        )
+        _WAITING_FILE[user_id] = ("rclone_conf", prompt)
+        LOGGER.info(f"[ayarlar] _WAITING_FILE güncellendi — uid={user_id}, tür=rclone_conf")
         return
 
     # Metin düzenleme
@@ -463,62 +528,182 @@ async def catch_text_input(client: Client, message: Message):
 
 @Client.on_message(
     filters.private & CustomFilters.owner & filters.document,
-    group=2,
+    group=1,
 )
 async def catch_file_upload(client: Client, message: Message):
-    uid = message.from_user.id
-    if uid not in _WAITING_FILE:
+    uid = message.from_user.id if message.from_user else None
+    LOGGER.info(f"[ayarlar] catch_file_upload tetiklendi — uid={uid}, _WAITING_FILE keys={list(_WAITING_FILE.keys())}")
+
+    if uid is None or uid not in _WAITING_FILE:
+        LOGGER.info(f"[ayarlar] catch_file_upload — uid={uid} bekleme listesinde değil, atlanıyor.")
         return
 
     waiting_val = _WAITING_FILE.pop(uid)
-    # Geriye uyumluluk: eski kod sadece string saklayabilirdi
     if isinstance(waiting_val, tuple):
         file_type, prompt_msg = waiting_val
     else:
         file_type, prompt_msg = waiting_val, None
 
+    chat_id = message.chat.id
+
+    # ── Debug: gelen mesaj tipini logla ──────────────────────────────────────
+    doc_name = message.document.file_name if message.document else None
+    doc_mime = message.document.mime_type if message.document else None
+    LOGGER.info(
+        f"[ayarlar] dosya detay — file_type={file_type}, "
+        f"document={message.document is not None}, "
+        f"file_name='{doc_name}', mime='{doc_mime}'"
+    )
+
+    # ── Prompt mesajını sil (kullanıcıya "şimdi dosya gönder" diyen mesaj) ──
+    if prompt_msg:
+        try:
+            await prompt_msg.delete()
+        except Exception:
+            pass
+
+    # ── token.pickle ────────────────────────────────────────────────────────
     if file_type == "gdrive_pickle":
         doc = message.document
-        if not doc.file_name.endswith(".pickle"):
-            await message.reply_text(
-                "❌ Yalnızca <code>.pickle</code> uzantılı dosya kabul edilir.",
+        if doc is None:
+            LOGGER.error("[ayarlar] token.pickle — message.document None geldi!")
+            await client.send_message(chat_id, "❌ Dosya alınamadı (document=None). Lütfen dosyayı doğrudan dosya olarak gönderin.", parse_mode=ParseMode.HTML)
+            return
+        fname = (doc.file_name or "").lower()
+        # Telegram bazen uzantıyı düşürür veya farklı isim verir; "pickle" geçiyorsa kabul et
+        if ".pickle" not in fname:
+            LOGGER.warning(f"[ayarlar] token.pickle red — gelen dosya adı: '{doc.file_name}'")
+            try:
+                await message.delete()
+            except Exception:
+                pass
+            await client.send_message(
+                chat_id,
+                "❌ Yalnızca <code>.pickle</code> uzantılı dosya kabul edilir.\n"
+                f"<i>Gelen dosya adı: <code>{doc.file_name}</code></i>",
                 parse_mode=ParseMode.HTML,
-                quote=True,
             )
             return
 
-        prog_msg = await message.reply_text("⏳ İndiriliyor…", quote=True, parse_mode=ParseMode.HTML)
+        prog_msg = await client.send_message(chat_id, "⏳ İndiriliyor…", parse_mode=ParseMode.HTML)
         try:
+            LOGGER.info(f"[ayarlar] token.pickle indiriliyor → {GDRIVE_TOKEN_PATH}")
             await client.download_media(message, file_name=str(GDRIVE_TOKEN_PATH))
+            LOGGER.info(f"[ayarlar] token.pickle indirildi ✅")
         except Exception as e:
+            LOGGER.error(f"[ayarlar] token.pickle indirme hatası: {e}")
             await prog_msg.edit_text(f"❌ İndirme hatası: <code>{e}</code>", parse_mode=ParseMode.HTML)
             return
 
-        # Yükleme prompt mesajını sil
-        if prompt_msg:
-            try:
-                await prompt_msg.delete()
-            except Exception:
-                pass
-        # "İndiriliyor" mesajını da sil
-        try:
-            await prog_msg.delete()
-        except Exception:
-            pass
-        # Telegram'daki token.pickle dosya mesajını da sil
+        # İndirme başarılı — dosya ve progress mesajını sil
         try:
             await message.delete()
         except Exception:
             pass
+        try:
+            await prog_msg.delete()
+        except Exception:
+            pass
+
+        # MongoDB'ye kaydet (yeniden başlatmada kaybolmasın)
+        try:
+            pickle_bytes = GDRIVE_TOKEN_PATH.read_bytes()
+            await db.dbs["tracking"]["bot_files"].update_one(
+                {"_id": "gdrive_pickle"},
+                {"$set": {"data": pickle_bytes, "file_name": "gdrive_token.pickle"}},
+                upsert=True,
+            )
+            LOGGER.info("[ayarlar] gdrive_token.pickle MongoDB'ye kaydedildi.")
+        except Exception as _e:
+            LOGGER.warning(f"[ayarlar] gdrive_token.pickle MongoDB kaydı başarısız: {_e}")
 
         vals = _read_env()
         page_msg, kbd = _make_page(uid, "dosya_ekle", vals)
-        await message.reply_text(
+        await client.send_message(
+            chat_id,
             f"✅ <b>token.pickle</b> kaydedildi.\n\n"
             f"Artık <code>/sunucuyayukle https://drive.google.com/…</code> "
             f"komutuyla Google Drive içerikleri indirilebilir.\n\n"
             f"{page_msg}",
             reply_markup=kbd,
             parse_mode=ParseMode.HTML,
-            quote=True,
         )
+
+    # ── rclone.conf ─────────────────────────────────────────────────────────
+    elif file_type == "rclone_conf":
+        doc = message.document
+        if doc is None:
+            LOGGER.error("[ayarlar] rclone.conf — message.document None geldi!")
+            await client.send_message(chat_id, "❌ Dosya alınamadı (document=None). Lütfen dosyayı doğrudan dosya olarak gönderin.", parse_mode=ParseMode.HTML)
+            return
+        fname = (doc.file_name or "").lower()
+        # "rclone.conf", ".conf" uzantısı veya adında "rclone" geçiyorsa kabul et
+        if not (fname == "rclone.conf" or fname.endswith(".conf") or "rclone" in fname):
+            LOGGER.warning(f"[ayarlar] rclone.conf red — gelen dosya adı: '{doc.file_name}'")
+            try:
+                await message.delete()
+            except Exception:
+                pass
+            await client.send_message(
+                chat_id,
+                "❌ Yalnızca <code>rclone.conf</code> dosyası kabul edilir.\n"
+                f"<i>Gelen dosya adı: <code>{doc.file_name}</code></i>",
+                parse_mode=ParseMode.HTML,
+            )
+            return
+
+        prog_msg = await client.send_message(chat_id, "⏳ İndiriliyor…", parse_mode=ParseMode.HTML)
+        try:
+            LOGGER.info(f"[ayarlar] rclone.conf indiriliyor → {RCLONE_CONF_PATH}")
+            await client.download_media(message, file_name=str(RCLONE_CONF_PATH))
+            LOGGER.info(f"[ayarlar] rclone.conf indirildi ✅")
+        except Exception as e:
+            LOGGER.error(f"[ayarlar] rclone.conf indirme hatası: {e}")
+            await prog_msg.edit_text(f"❌ İndirme hatası: <code>{e}</code>", parse_mode=ParseMode.HTML)
+            return
+
+        # MongoDB'ye kaydet (kalıcılık için)
+        try:
+            conf_bytes = RCLONE_CONF_PATH.read_bytes()
+            await db.dbs["tracking"]["bot_files"].update_one(
+                {"_id": "rclone_conf"},
+                {"$set": {"data": conf_bytes, "file_name": "rclone.conf"}},
+                upsert=True,
+            )
+            LOGGER.info("[ayarlar] rclone.conf MongoDB'ye kaydedildi.")
+        except Exception as _e:
+            LOGGER.warning(f"[ayarlar] rclone.conf MongoDB kaydı başarısız: {_e}")
+
+        # Sürücü listesini oku
+        remotes_text = ""
+        try:
+            import configparser
+            rcp = configparser.ConfigParser()
+            rcp.read(str(RCLONE_CONF_PATH))
+            remotes = rcp.sections()
+            if remotes:
+                remotes_text = "\n\nBulunan sürücüler:\n" + "\n".join(f"• <code>{r}</code>" for r in remotes)
+        except Exception:
+            pass
+
+        # Dosya ve progress mesajını sil
+        try:
+            await message.delete()
+        except Exception:
+            pass
+        try:
+            await prog_msg.delete()
+        except Exception:
+            pass
+
+        vals = _read_env()
+        page_msg, kbd = _make_page(uid, "dosya_ekle", vals)
+        await client.send_message(
+            chat_id,
+            f"✅ <b>rclone.conf</b> kaydedildi.{remotes_text}\n\n"
+            f"Artık <code>/ekle</code> komutuyla Rclone sürücülerine erişebilirsin.\n\n"
+            f"{page_msg}",
+            reply_markup=kbd,
+            parse_mode=ParseMode.HTML,
+        )
+

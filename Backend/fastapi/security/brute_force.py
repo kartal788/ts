@@ -28,8 +28,8 @@ from pathlib import Path
 
 # ── Ayarlar (config.env'den okunur, yoksa varsayılan) ────────────────────────
 _LOGIN_WINDOW: int = int(getenv("BRUTE_WINDOW", "60"))
-_LOGIN_MAX:    int = int(getenv("BRUTE_MAX",    "10"))
-_BAN_DURATION: int = int(getenv("BRUTE_BAN",   "600"))
+_LOGIN_MAX:    int = int(getenv("BRUTE_MAX",    "5"))
+_BAN_DURATION: int = int(getenv("BRUTE_BAN",   "1800"))
 
 # ── Log dosyası ───────────────────────────────────────────────────────────────
 _LOG_PATH = Path("logs/brute_force.log")
@@ -184,11 +184,32 @@ def record_success(ip: str) -> None:
 
 
 async def cleanup_expired_bans() -> None:
-    """Periyodik görev: süresi dolmuş DB ban kayıtlarını temizle."""
+    """Periyodik görev: süresi dolmuş DB ban kayıtlarını ve bellek cache'ini temizle."""
+    # ── Bellek: süresi dolmuş _bans kayıtlarını temizle ──────────────────────
+    now_wall = time.time()
+    expired_bans = [ip for ip, until in _bans.items() if now_wall >= until]
+    for ip in expired_bans:
+        del _bans[ip]
+        _attempts.pop(ip, None)
+    if expired_bans:
+        _logger.info("Bellek cache: %d süresi dolmuş ban kaydı temizlendi.", len(expired_bans))
+
+    # ── Bellek: pencere dışına çıkmış _attempts kayıtlarını temizle ──────────
+    now_mono = time.monotonic()
+    stale_attempts = [
+        ip for ip, ts_list in _attempts.items()
+        if not ts_list or (now_mono - ts_list[-1]) > _LOGIN_WINDOW * 3
+    ]
+    for ip in stale_attempts:
+        _attempts.pop(ip, None)
+    if stale_attempts:
+        _logger.info("Bellek cache: %d atıl attempt kaydı temizlendi.", len(stale_attempts))
+
+    # ── DB: süresi dolmuş ban kayıtlarını temizle ─────────────────────────────
     try:
         count = await _db().cleanup_expired_ip_bans()
         if count:
-            _logger.info("Süresi dolmuş %d IP ban kaydı temizlendi.", count)
+            _logger.info("DB: süresi dolmuş %d IP ban kaydı temizlendi.", count)
     except Exception as e:
         _logger.warning("IP ban cleanup başarısız: %s", e)
 
