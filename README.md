@@ -85,6 +85,8 @@ Bu proje, **Telegram'daki dosyaları doğrudan Stremio üzerinden yayınlamanı*
 - 🎞️ **Media Edit'ten Altyazı Ekleme** — `media_edit.html` sayfası üzerinden film ve dizilere doğrudan altyazı dosyası yüklenip yönetilebilir.
 - 🔔 **Dizi ve Film Bildirimleri** — Yeni bölüm veya film eklendiğinde ilgili abonelere otomatik Telegram bildirimi gönderilir.
 - 📡 **Otomatik Dizi Durum Takibi** — Her dizinin yayın durumu (devam ediyor, sona erdi, iptal edildi vb.) her gün UTC+3 05:00'da TMDB'den çekilerek otomatik güncellenir.
+- ✅ **M3U Link Kontrol Sistemi** — `/m3ukontrol` komutu ile birden fazla M3U linki aynı anda kontrol edilir; gerçek `.m3u` dosyası döndüren çalışan linkler filtrelenerek `.txt` dosyası olarak Telegram'a gönderilir. HTTP 200 durumu, `Content-Disposition`, `Content-Type` ve `#EXTM3U` başlığı üç ayrı koşulla doğrulanır.
+- 📡 **Kanal Tarama Sistemi** — `/tara` komutu ile `AUTH_CHANNEL` kanalları baştan sona taranır; video ve arşiv dosyaları otomatik olarak veritabanına eklenir. `/tara db` ile mevcut kayıtlar korunarak yalnızca yeni içerikler eklenir. Tarama sırasında `/tara_durum` ile anlık istatistikler, `/tara_iptal` ile durdurma imkânı sunulur. Tarama sonunda atlanan ve hata veren kayıtlar `.txt` raporu olarak Telegram'a iletilir.
 ---
 
 # ⚙️ Nasıl Çalışır?
@@ -199,6 +201,10 @@ Telegram ➜ MongoDB ➜ FastAPI ➜ Stremio ➜ Kullanıcı
 | `/depolama` | TS yazılımı, sistem ve Docker disk/RAM kullanımını detaylı olarak gösterir (RAM durumu, genel disk, TS'nin yazdığı konumlar, Docker depolama, silinmiş-ama-açık dosyalar ve 100MB+ büyük dosyalar) |
 | `/temizle` | Sistem temizliği yapar: MongoDB eski stream kayıtları, uygulama RAM cache'leri, /tmp dizini, pip/uv cache, log dosyası, Docker dangling objeleri ve journald logları temizlenir |
 | `/ramraporu` | Sistem ve process bazlı RAM kullanımını gösterir; en çok RAM kullanan 15 process ve botun kendi RSS/VMS değerleri raporlanır |
+| `/m3ukontrol` | Verilen M3U linklerini eş zamanlı olarak kontrol eder; gerçek `.m3u` dosyası döndüren çalışan linkleri filtreler ve sonuçları `.txt` dosyası olarak gönderir |
+| `/tara` | Tüm DB'yi silerek `AUTH_CHANNEL` kanallarını baştan tarar; video ve arşiv dosyalarını veritabanına ekler. `/tara db` ile mevcut kayıtlar korunarak yalnızca yeni içerikler eklenir |
+| `/tara_durum` | Devam eden taramanın anlık istatistiklerini gösterir (işlenen, eklenen, atlanan, hata sayısı) |
+| `/tara_iptal` | Devam eden taramayı durdurur |
 
 ### `/set` Komutu Kullanımı
 
