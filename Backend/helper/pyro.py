@@ -18,26 +18,53 @@ def is_media(message):
 
 
 async def get_file_ids(client: Client, chat_id: int, message_id: int) -> Optional[FileId]:
-    try:
-        message = await client.get_messages(chat_id, message_id)
-        if message.empty:
-            raise FIleNotFound("Message not found or empty")
-        
-        if media := is_media(message):
-            file_id_obj = FileId.decode(media.file_id)
-            file_unique_id = media.file_unique_id
-            
-            setattr(file_id_obj, 'file_name', getattr(media, 'file_name', ''))
-            setattr(file_id_obj, 'file_size', getattr(media, 'file_size', 0))
-            setattr(file_id_obj, 'mime_type', getattr(media, 'mime_type', ''))
-            setattr(file_id_obj, 'unique_id', file_unique_id)
-            
-            return file_id_obj
-        else:
-            raise FIleNotFound("No supported media found in message")
-    except Exception as e:
-        LOGGER.error(f"Error getting file IDs: {e}")
-        raise
+    import asyncio as _asyncio
+
+    _RETRYABLE = ("Connection lost", "Connection reset", "ConnectionResetError",
+                  "ConnectionAbortedError", "OSError", "TimeoutError",
+                  "FloodWait", "ServerError", "BadMsgNotification")
+    max_retries = 3
+    delay = 1.5  # seconds, doubles each attempt
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            message = await client.get_messages(chat_id, message_id)
+            if message.empty:
+                raise FIleNotFound("Message not found or empty")
+
+            if media := is_media(message):
+                file_id_obj = FileId.decode(media.file_id)
+                file_unique_id = media.file_unique_id
+
+                setattr(file_id_obj, 'file_name', getattr(media, 'file_name', ''))
+                setattr(file_id_obj, 'file_size', getattr(media, 'file_size', 0))
+                setattr(file_id_obj, 'mime_type', getattr(media, 'mime_type', ''))
+                setattr(file_id_obj, 'unique_id', file_unique_id)
+
+                return file_id_obj
+            else:
+                raise FIleNotFound("No supported media found in message")
+
+        except FIleNotFound:
+            raise  # Kalıcı hata — yeniden deneme anlamsız
+
+        except Exception as e:
+            err_str = str(e)
+            is_retryable = any(tag in err_str for tag in _RETRYABLE) or isinstance(
+                e, (OSError, ConnectionResetError, ConnectionAbortedError, TimeoutError)
+            )
+
+            if is_retryable and attempt < max_retries:
+                LOGGER.warning(
+                    f"Error getting file IDs: {e} "
+                    f"(attempt {attempt}/{max_retries}, {delay:.1f}s sonra yeniden deneniyor)"
+                )
+                await _asyncio.sleep(delay)
+                delay *= 2
+                continue
+
+            LOGGER.error(f"Error getting file IDs: {e}")
+            raise
         
 
 
