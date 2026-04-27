@@ -173,6 +173,7 @@ BotCommand("vindir", "💾 Veritabanı (DB) yedeğini alır."),
 BotCommand("log", "📜 Sistem günlüklerini raporlar."),
 BotCommand("depolama", "🔑 depolama bilgilerini görüntüler."),
 BotCommand("tara", "🔍 İçerikleri tarar ve indeksler."),
+BotCommand("m3ukontrol", "📋 M3U linklerinin durumunu kontrol eder."),
 BotCommand("temizle", "🧹 RAM ve SSD üzerindeki gereksiz verileri temizler."),
 BotCommand("restart", "🔃 Sistemi yeniden başlatır.")
 ]

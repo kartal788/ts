@@ -643,7 +643,20 @@ class Database:
         self, metadata_info: dict,
         channel: int, msg_id: int, size: str, name: str
     ) -> Optional[ObjectId]:
-        
+        result = await self._insert_media_internal(metadata_info, channel, msg_id, size, name)
+        if result is not None:
+            try:
+                from Backend.helper.tmdb_catalog import notify_new_content
+                notify_new_content()
+            except Exception:
+                pass
+        return result
+
+    async def _insert_media_internal(
+        self, metadata_info: dict,
+        channel: int, msg_id: int, size: str, name: str
+    ) -> Optional[ObjectId]:
+
         if metadata_info['media_type'] == "movie":
             media = MovieSchema(
                 tmdb_id=metadata_info['tmdb_id'],

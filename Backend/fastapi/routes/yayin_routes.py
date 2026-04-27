@@ -334,7 +334,9 @@ async def _hls_fetcher(session: BroadcastSession):
     stream_mode    = None                  # 'hls' | 'ts' — ilk istekten belirlenir
 
     # MPEG-TS mod parametreleri
-    TS_CHUNK_SECONDS = max(2, min(session.buffer_seconds // 5, 6))
+    # TS chunk süresi: buffer'ın 1/4'ü, min 2s, max 6s
+    # Örn: buffer=10→2s, buffer=20→5s, buffer=30→6s (max)
+    TS_CHUNK_SECONDS = max(2, min(session.buffer_seconds // 4, 6))
     ts_bitrate_bps   = 2_000_000   # 2 Mbit/s başlangıç tahmini
 
     async with httpx.AsyncClient(
@@ -525,12 +527,18 @@ async def _hls_fetcher(session: BroadcastSession):
                         session.segments = deque(segs_list)
                         session.buffered_segments = len(session.segments)
 
-                    # seen_uris'i önbellekteki segmentlerle hizala.
-                    # Temizlenmezse canlı yayın segmentleri sürekli "zaten görüldü"
-                    # sayılır ve yeni segment indirilmez → ekran donar.
-                    if session.segments:
-                        active_uris = {s.uri for s in session.segments}
-                        seen_uris &= active_uris
+                    # seen_uris'i temizle: yalnızca kaynak playlistte artık hiç olmayan
+                    # (ve önbellekten de düşmüş) URI'leri at.
+                    # ESKİ KOD: seen_uris &= active_uris → kaynak hızlı ilerlerse
+                    # seen_uris boşalıyor, eski segmentler tekrar indiriliyor,
+                    # duplicate seq → player 404 alıp donuyordu.
+                    # DÜZELTME: sadece son manifest'teki URI'lerin dışında kalanları tut,
+                    # böylece hiçbir zaman geriye gidilmez.
+                    current_manifest_uris = {uri for uri, _ in all_segs}
+                    # seen_uris'e yeni manifest'tekileri ekle (zaten ekli olanları korur)
+                    # Ve çok eskimiş (hem manifest'te yok hem önbellekte yok) olanları sil
+                    stale = seen_uris - current_manifest_uris - {s.uri for s in session.segments}
+                    seen_uris -= stale
 
                 except asyncio.CancelledError:
                     break
@@ -539,7 +547,13 @@ async def _hls_fetcher(session: BroadcastSession):
                     poll_interval = 3.0
 
                 # Yeni segment bulunamadıysa hızlı tekrar dene; aksi hâlde normal bekle
-                if not new_segs:
+                # Önbellek dolmamışsa agresif polling yap
+                async with session.segment_lock:
+                    buf_total = sum(s.duration for s in session.segments)
+                if buf_total < session.buffer_seconds * 0.5:
+                    # Buffer yarıdan azsa hızlı polling — oynatıcı açılıyor olabilir
+                    await asyncio.sleep(min(poll_interval, 1.0))
+                elif not new_segs:
                     await asyncio.sleep(min(poll_interval, 2.0))
                 else:
                     await asyncio.sleep(poll_interval)
@@ -710,10 +724,12 @@ async def yayin_delete(broadcast_id: str, _: bool = Depends(require_auth)):
 # ─── Admin: Start / Stop ──────────────────────────────────────────────────────
 
 async def _start_session(broadcast_id: str, bc: dict):
+    # buffer_seconds çok küçükse (< 10) oynatıcı segmentlere yetişemez → minimum 10 zorla
+    buffer_secs = max(10, int(bc.get("buffer_seconds", 30)))
     session = BroadcastSession(
         broadcast_id   = broadcast_id,
         stream_url     = bc["stream_url"],
-        buffer_seconds = int(bc.get("buffer_seconds", 30)),
+        buffer_seconds = buffer_secs,
     )
     session.active = True
     task = asyncio.create_task(_hls_fetcher(session))
@@ -749,7 +765,8 @@ async def yayin_start(broadcast_id: str, _: bool = Depends(require_auth)):
 
     await _start_session(broadcast_id, bc)
     await db.update_broadcast(broadcast_id, {"active": True})
-    return {"ok": True, "message": "Yayın başlatıldı"}
+    actual_buf = max(10, int(bc.get("buffer_seconds", 30)))
+    return {"ok": True, "message": "Yayın başlatıldı", "buffer_seconds": actual_buf}
 
 
 @router.post("/api/yayin/{broadcast_id}/stop")
@@ -878,6 +895,7 @@ async def yayin_member_playlist(broadcast_id: str, request: Request, token: str 
     lines = [
         "#EXTM3U",
         "#EXT-X-VERSION:3",
+        "#EXT-X-ALLOW-CACHE:NO",
         f"#EXT-X-TARGETDURATION:{target_dur_int}",
         f"#EXT-X-MEDIA-SEQUENCE:{first_seq}",
     ]
@@ -940,10 +958,22 @@ async def yayin_member_segment(broadcast_id: str, seg_seq: int, token: str = Non
     session.total_bytes_served += byte_count
     session.viewer_count = max(session.viewer_count, 1)
 
+    # Segment formatını magic bytes'tan otomatik tespit et
+    # fMP4 (fragmented MP4): 0x66747970 'ftyp' veya 0x6D6F6F66 'moof' başlangıcı
+    # MPEG-TS: 0x47 sync byte ile başlar
+    seg_mime = "video/MP2T"  # varsayılan
+    if len(seg.data) >= 8:
+        hdr = seg.data[:8]
+        if hdr[4:8] in (b"ftyp", b"moof", b"styp"):
+            seg_mime = "video/mp4"
+        elif hdr[0] != 0x47:
+            # TS sync byte değil, yine de MP2T dene ama fMP4 değil
+            seg_mime = "video/MP2T"
+
     return Response(
         content=seg.data,
-        media_type="video/MP2T",
-        headers={"Cache-Control": "no-cache"},
+        media_type=seg_mime,
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
     )
 
 

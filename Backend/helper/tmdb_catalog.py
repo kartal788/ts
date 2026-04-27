@@ -10,7 +10,9 @@ sadece veritabanında bulunanları katalog olarak sunar.
   - new_releases : Yeni çıkanlar (film + dizi, global + TR birleşik, tekrarsız)
 
 - Bot yeniden başlayınca ilk yükleme yapılır.
-- Her 30 dakikada bir otomatik güncellenir (TMDB_REFRESH_MIN env ile değiştirilebilir).
+- Yeni içerik eklendiğinde notify_new_content() çağrılır.
+- Son yeni içerik eklenmesinden 30 dakika (TMDB_REFRESH_MIN) sonra güncellenir.
+- Yeni içerik gelmezse güncelleme yapılmaz.
 """
 
 from __future__ import annotations
@@ -358,33 +360,73 @@ tmdb_catalog = TmdbCatalog()
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Zamanlayıcı
+# Zamanlayıcı  (içerik-tetiklemeli)
+#
+# Çalışma mantığı:
+#   • notify_new_content() her yeni içerik eklendiğinde çağrılır.
+#   • Bu çağrı, "_last_content_added_at" zaman damgasını günceller ve
+#     mevcut zamanlayıcıyı iptal edip INTERVAL_SECONDS sonraya yeni bir
+#     zamanlayıcı kurar ("debounce" etkisi).
+#   • Zamanlayıcı tetiklendiğinde refresh() çalışır.
+#   • Hiç yeni içerik gelmemişse zamanlayıcı kurulmaz → güncelleme olmaz.
 # ──────────────────────────────────────────────────────────────────────────────
 
-_tmdb_timer:   threading.Timer | None = None
-_tmdb_running: bool = False
+_tmdb_timer:             threading.Timer | None = None
+_tmdb_running:           bool = False
+_last_content_added_at:  float = 0.0   # son notify_new_content() çağrısının zamanı
+_tmdb_lock:              threading.Lock = threading.Lock()
 
 
-def _tmdb_cycle() -> None:
+def _tmdb_fire() -> None:
+    """Zamanlayıcı süresi dolunca çalışır; refresh yapar."""
     if not _tmdb_running:
         return
     try:
         tmdb_catalog.refresh()
     except Exception as e:
         logger.exception("TMDB yenileme hatası: %s", e)
-    _schedule_next()
 
 
-def _schedule_next() -> None:
+def _arm_timer() -> None:
+    """
+    Mevcut zamanlayıcıyı iptal edip INTERVAL_SECONDS sonraya yeni birini kurar.
+    _tmdb_lock altında çağrılmalıdır.
+    """
     global _tmdb_timer
-    if not _tmdb_running:
-        return
-    _tmdb_timer = threading.Timer(_INTERVAL_SECONDS, _tmdb_cycle)
+    if _tmdb_timer is not None:
+        _tmdb_timer.cancel()
+    _tmdb_timer = threading.Timer(_INTERVAL_SECONDS, _tmdb_fire)
     _tmdb_timer.daemon = True
     _tmdb_timer.start()
 
 
+def notify_new_content() -> None:
+    """
+    Yeni bir içerik eklendiğinde çağrılır.
+
+    Her çağrı zamanlayıcıyı sıfırlar (debounce):
+    son çağrıdan INTERVAL_SECONDS sonra katalog güncellenir.
+    Aynı süre içinde birden fazla içerik eklenirse zamanlayıcı
+    yalnızca bir kez ateşlenir.
+    """
+    global _last_content_added_at
+    if not _tmdb_running:
+        return
+    with _tmdb_lock:
+        _last_content_added_at = time.time()
+        _arm_timer()
+    logger.debug(
+        "TMDB: yeni içerik bildirimi alındı, %d dk sonra güncellenecek.",
+        _INTERVAL_SECONDS // 60,
+    )
+
+
 def start_tmdb_scheduler() -> None:
+    """
+    Zamanlayıcıyı başlatır ve ilk yüklemeyi arka planda yapar.
+    İlk yükleme her zaman çalışır (bot yeni başlamış, katalog boş).
+    Sonraki güncellemeler yalnızca notify_new_content() ile tetiklenir.
+    """
     global _tmdb_running
     _tmdb_running = True
 
@@ -394,17 +436,20 @@ def start_tmdb_scheduler() -> None:
             tmdb_catalog.refresh()
         except Exception as e:
             logger.exception("TMDB ilk yükleme hatası: %s", e)
-        _schedule_next()
 
     t = threading.Thread(target=_first_run, daemon=True, name="tmdb-catalog-init")
     t.start()
-    logger.info("TMDB zamanlayıcısı başlatıldı (%d dk).", _INTERVAL_SECONDS // 60)
+    logger.info(
+        "TMDB zamanlayıcısı başlatıldı — yeni içerik eklenince %d dk sonra güncellenir.",
+        _INTERVAL_SECONDS // 60,
+    )
 
 
 def stop_tmdb_scheduler() -> None:
     global _tmdb_running, _tmdb_timer
     _tmdb_running = False
-    if _tmdb_timer:
-        _tmdb_timer.cancel()
-        _tmdb_timer = None
+    with _tmdb_lock:
+        if _tmdb_timer:
+            _tmdb_timer.cancel()
+            _tmdb_timer = None
     logger.info("TMDB zamanlayıcısı durduruldu.")
