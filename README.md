@@ -363,8 +363,8 @@ Tüm ayarlar `config.env` dosyasında tanımlanır.
 
 | Değişken | Açıklama |
 |:---|:---|
-| `SESSION_SECRET_KEY` | Web arayüzü oturum şifreleme anahtarı (uzun ve rastgele bir string önerilir) |
-| `TOKEN_HMAC_SECRET` | Stream token imzalama anahtarı. Boş bırakılırsa `SESSION_SECRET_KEY` kullanılır |
+| `SESSION_SECRET_KEY` | Web arayüzü oturum şifreleme anahtarı (uzun ve rastgele bir string önerilir). **Zorunludur** — boş bırakılırsa bot başlamaz. |
+| `TOKEN_HMAC_SECRET` | Stream token imzalama anahtarı. **Zorunludur** — boş bırakılırsa bot başlamaz. |
 | `TRUSTED_PROXY_CIDRS` | X-Forwarded-For başlığına güvenilecek proxy IP aralıkları. Boş = başlığa güvenilmez (aşağıya bak) |
 
 ### 🌐 `TRUSTED_PROXY_CIDRS` Nasıl Doldurulur?
