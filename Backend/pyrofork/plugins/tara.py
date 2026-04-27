@@ -29,7 +29,7 @@ from pyrogram.errors import FloodWait, ChannelPrivate, ChatAdminRequired
 
 from Backend.config import Telegram
 from Backend.helper.custom_filter import CustomFilters
-from Backend.helper.metadata import metadata
+from Backend.helper.metadata import metadata, extract_default_id
 from Backend.helper.pyro import clean_filename, get_readable_file_size, remove_urls
 from Backend.helper.encrypt import encode_string, decode_string
 from Backend.logger import LOGGER
@@ -273,9 +273,30 @@ async def _scan_channel(client: Client, chat_id: int):
             except Exception as e:
                 LOGGER.warning(f"[/tara] Mükerrer kontrol hatası msg {msg_id}: {e}")
 
+            # Başlık veya dosya adındaki TMDB/IMDB linkini çıkar → override_id
+            override_id = None
+            try:
+                _url_match = re.search(
+                    r'https?://(?:www\.)?(?:themoviedb\.org|imdb\.com)/\S+',
+                    title,
+                    re.IGNORECASE,
+                )
+                if _url_match:
+                    _oid, _ = extract_default_id(_url_match.group(0))
+                    if _oid:
+                        override_id = _url_match.group(0)
+                        LOGGER.info(
+                            f"[/tara] msg {msg_id}: URL bulundu → override_id={override_id!r}"
+                        )
+            except Exception as _oe:
+                LOGGER.warning(f"[/tara] override_id çıkarma hatası msg {msg_id}: {_oe}")
+
             # Metadata
             try:
-                metadata_info = await metadata(clean_filename(title), channel_int, msg_id)
+                metadata_info = await metadata(
+                    clean_filename(title), channel_int, msg_id,
+                    override_id=override_id,
+                )
             except Exception as e:
                 LOGGER.warning(f"[/tara] Metadata istisnası msg {msg_id}: {e}")
                 metadata_info = None
