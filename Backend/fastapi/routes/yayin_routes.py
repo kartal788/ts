@@ -519,11 +519,18 @@ async def _hls_fetcher(session: BroadcastSession):
                     async with session.segment_lock:
                         segs_list = list(session.segments)
                         total_dur = sum(s.duration for s in segs_list)
-                        while len(segs_list) > 1 and total_dur > session.buffer_seconds + 30:
+                        while len(segs_list) > 1 and total_dur > session.buffer_seconds + 10:
                             removed = segs_list.pop(0)
                             total_dur -= removed.duration
                         session.segments = deque(segs_list)
                         session.buffered_segments = len(session.segments)
+
+                    # seen_uris'i önbellekteki segmentlerle hizala.
+                    # Temizlenmezse canlı yayın segmentleri sürekli "zaten görüldü"
+                    # sayılır ve yeni segment indirilmez → ekran donar.
+                    if session.segments:
+                        active_uris = {s.uri for s in session.segments}
+                        seen_uris &= active_uris
 
                 except asyncio.CancelledError:
                     break
@@ -531,7 +538,11 @@ async def _hls_fetcher(session: BroadcastSession):
                     logger.error(f"[Yayın {session.broadcast_id}] HLS fetcher hatası: {e}")
                     poll_interval = 3.0
 
-                await asyncio.sleep(poll_interval)
+                # Yeni segment bulunamadıysa hızlı tekrar dene; aksi hâlde normal bekle
+                if not new_segs:
+                    await asyncio.sleep(min(poll_interval, 2.0))
+                else:
+                    await asyncio.sleep(poll_interval)
 
         # ── Adım 2b: MPEG-TS akış modu ───────────────────────────────────────
         elif stream_mode == "ts":
@@ -592,7 +603,7 @@ async def _hls_fetcher(session: BroadcastSession):
                                 async with session.segment_lock:
                                     segs_list = list(session.segments)
                                     total_dur = sum(s.duration for s in segs_list)
-                                    while len(segs_list) > 1 and total_dur > session.buffer_seconds + 30:
+                                    while len(segs_list) > 1 and total_dur > session.buffer_seconds + 10:
                                         segs_list.pop(0)
                                         total_dur -= TS_CHUNK_SECONDS
                                     session.segments = deque(segs_list)
