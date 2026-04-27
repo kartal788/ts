@@ -111,9 +111,12 @@ def _load_db_map(collection_name: str) -> Dict[str, dict]:
         "description": 1, "description_tr": 1, "description_de": 1,
         "rating": 1, "release_year": 1,
         "cast": 1, "runtime": 1, "media_type": 1,
-        # Film kaliteleri (indirme linki icin)
+        # Film kaliteleri (stream kontrolü için)
         "telegram.name": 1, "telegram.quality": 1,
-        "telegram.size": 1, "telegram.id": 1,
+        "telegram.size": 1, "telegram.id": 1, "telegram.is_archive": 1,
+        # Dizi stream kontrolü için seasons yapısı
+        "seasons.episodes.telegram.name": 1,
+        "seasons.episodes.telegram.is_archive": 1,
     }
     db_name = os.getenv("MONGO_DB_NAME", "dbFyvio")
     # Tüm URI'leri tara — ilkini atlama, içerik her DB'de olabilir
@@ -171,6 +174,9 @@ def _doc_to_meta(doc: dict) -> dict:
         "runtime":        doc.get("runtime", ""),
         "media_type":     doc.get("media_type", "movie"),
         "qualities":      qualities,
+        # _has_video_stream() için gerekli ham alanlar
+        "telegram":       doc.get("telegram", []),
+        "seasons":        doc.get("seasons", []),
     }
 
 

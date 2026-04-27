@@ -1599,7 +1599,7 @@ async def get_catalog(token: str, media_type: str, id: str, extra: Optional[str]
             search_results = await db.search_documents(query=search_query, page=page, page_size=PAGE_SIZE)
             all_items = search_results.get("results", [])
             db_media_type = "tv" if media_type == "series" else "movie"
-            items = [item for item in all_items if item.get("media_type") == db_media_type]
+            items = [item for item in all_items if item.get("media_type") == db_media_type and _has_video_stream(item)]
         else:
             # ── Canlı Yayın kataloğu ──────────────────────────────────────
             if id.startswith("live_") and media_type == "channel":
@@ -1686,6 +1686,8 @@ async def get_catalog(token: str, media_type: str, id: str, extra: Optional[str]
 
                 # Yıla göre azalan sırala
                 all_items.sort(key=lambda m: int(m.get("release_year") or 0), reverse=True)
+                # Sadece gerçek video stream'i olan içerikleri göster (arşiv-only içerikler gizle)
+                all_items = [item for item in all_items if _has_video_stream(item)]
                 all_items = all_items[stremio_skip: stremio_skip + PAGE_SIZE]
                 metas = [convert_to_stremio_meta(item, lang) for item in all_items]
                 return {"metas": metas}
@@ -1712,6 +1714,7 @@ async def get_catalog(token: str, media_type: str, id: str, extra: Optional[str]
                     else:
                         items = [i for i in items if genre_filter in (i.get("genres_tr") or [])]
 
+                items = [item for item in items if _has_video_stream(item)]
                 items = items[stremio_skip: stremio_skip + PAGE_SIZE]
                 metas = [convert_to_stremio_meta(item, lang) for item in items]
                 return {"metas": metas}
@@ -1722,7 +1725,15 @@ async def get_catalog(token: str, media_type: str, id: str, extra: Optional[str]
                 is_movie = id.startswith("yerli_movies_")
                 col_type = "movie" if is_movie else "tv"
                 sort_params = [("updated_on", "desc")]
-                extra_filter = {"original_language": "tr"}
+                # original_language "tr" olanları göster;
+                # alan hiç set edilmemiş (None/eksik) eski içerikler dahil edilmez —
+                # sadece açıkça "tr" olarak işaretlenmiş içerikler katalogda çıkar.
+                extra_filter = {
+                    "$or": [
+                        {"original_language": "tr"},
+                        {"original_language": {"$regex": "^[Tt]ur", "$options": "i"}},
+                    ]
+                }
 
                 if genre_filter:
                     gf = "genres_de" if lang == "de" else ("genres" if lang == "original" else "genres_tr")
@@ -1737,6 +1748,7 @@ async def get_catalog(token: str, media_type: str, id: str, extra: Optional[str]
                                                   lang=lang, extra_filter=extra_filter)
                     items = data.get("tv_shows", [])
 
+                items = [item for item in items if _has_video_stream(item)]
                 metas = [convert_to_stremio_meta(item, lang) for item in items]
                 return {"metas": metas}
 
@@ -1816,6 +1828,8 @@ async def get_catalog(token: str, media_type: str, id: str, extra: Optional[str]
                 else:
                     return {"metas": []}
 
+                # Sadece gerçek video stream'i olan içerikleri göster
+                all_items = [item for item in all_items if _has_video_stream(item)]
                 # Film+dizi karışık liste — type filtresi yok
                 all_items = all_items[stremio_skip: stremio_skip + PAGE_SIZE]
                 metas = [convert_to_stremio_meta(item, lang) for item in all_items]

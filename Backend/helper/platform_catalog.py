@@ -100,6 +100,7 @@ def _doc_to_meta(doc: dict) -> dict:
         "media_type":     doc.get("media_type", "tv"),
         "collection_id":  doc.get("collection_id"),
         "telegram":       doc.get("telegram", []),
+        "seasons":        doc.get("seasons", []),
         "language":       doc.get("language", ""),
     }
 
@@ -221,6 +222,7 @@ class PlatformCatalog:
             "rating": 1, "release_year": 1,
             "cast": 1, "runtime": 1, "media_type": 1,
             "seasons.episodes.telegram.name": 1,
+            "seasons.episodes.telegram.is_archive": 1,
         }
 
         for uri in storage_uris:
