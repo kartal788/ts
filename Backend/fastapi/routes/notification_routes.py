@@ -199,15 +199,35 @@ async def _dispatch_tv(tmdb_id: int):
             else:
                 episode_lines = "🔔 Yeni içerik eklendi."
         else:
-            lines = []
-            for s, e in unique_eps:
-                if s and e:
-                    lines.append(f"🔹 {s}.Sezon {e}.Bölüm")
-                elif s:
-                    lines.append(f"🔹 {s}.Sezon")
-                elif e:
-                    lines.append(f"🔹 {e}.Bölüm")
-            episode_lines = "📺 Eklenen Bölümler:\n" + "\n".join(lines)
+            if len(unique_eps) > 4:
+                # 4'ten fazla bölüm varsa sezon bazında grupla
+                seasons_seen = []
+                for s, e in unique_eps:
+                    if s and s not in seasons_seen:
+                        seasons_seen.append(s)
+                if seasons_seen:
+                    lines = [f"🔹 {s}.Sezon" for s in sorted(seasons_seen)]
+                    episode_lines = "📺 Eklenen Sezonlar:\n" + "\n".join(lines)
+                else:
+                    lines = []
+                    for s, e in unique_eps:
+                        if s and e:
+                            lines.append(f"🔹 {s}.Sezon {e}.Bölüm")
+                        elif s:
+                            lines.append(f"🔹 {s}.Sezon")
+                        elif e:
+                            lines.append(f"🔹 {e}.Bölüm")
+                    episode_lines = "📺 Eklenen Bölümler:\n" + "\n".join(lines)
+            else:
+                lines = []
+                for s, e in unique_eps:
+                    if s and e:
+                        lines.append(f"🔹 {s}.Sezon {e}.Bölüm")
+                    elif s:
+                        lines.append(f"🔹 {s}.Sezon")
+                    elif e:
+                        lines.append(f"🔹 {e}.Bölüm")
+                episode_lines = "📺 Eklenen Bölümler:\n" + "\n".join(lines)
     else:
         episode_lines = "🔔 Yeni içerik eklendi."
 

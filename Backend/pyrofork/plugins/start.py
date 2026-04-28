@@ -105,7 +105,7 @@ async def send_start_message(client: Client, message: Message):
             keyboard = InlineKeyboardMarkup(keyboard_buttons)
 
             return await message.reply_text(
-                f'<b>{Telegram.ISIM} ile sinema keyfine hazır mısın? 🍿</b>\n\n'
+                f'<b>{Telegram.ISIM} ile sinema keyfine hazır mısın?</b>\n\n'
                 'Stremio üzerinden sunduğumuz özel içeriklere erişebilmen için aktif bir aboneliğin olması gerekiyor. Merak etme, senin için en avantajlı planları aşağıda listeledik.\n\n'
                 '🚀 Hemen başlamak için bir plan seç:',
                 reply_markup=keyboard,

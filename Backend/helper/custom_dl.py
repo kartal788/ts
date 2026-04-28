@@ -53,6 +53,7 @@ class ByteStreamer:
             ByteStreamer._instances[client_index] = self
         asyncio.create_task(self._clean_cache())
         asyncio.create_task(self._prewarm_sessions())
+        asyncio.create_task(self._refresh_sessions_periodically())
 
     async def _prewarm_sessions(self):
         common_dcs = [1, 2, 4, 5]  # Main Telegram DCs
@@ -105,6 +106,39 @@ class ByteStreamer:
             except Exception as e:
                 LOGGER.debug(f"Could not pre-warm DC {dc}: {e}")
                 continue
+
+    async def _refresh_sessions_periodically(self):
+        """Her 60 dakikada bir media session'ları yenile.
+
+        Uzun süreli çalışmalarda (örn. tv-status taraması 1000+ sn sürer) DC
+        oturumları eskiyebilir ve ardışık chunk hatalarına yol açar.  Bu döngü
+        mevcut session'ları temizleyip _prewarm_sessions ile yeniden kurar.
+        """
+        while True:
+            await asyncio.sleep(60 * 60)  # 60 dakika
+            try:
+                LOGGER.debug(
+                    "ByteStreamer client=%s: periyodik session yenileme başlıyor…",
+                    self.client_index,
+                )
+                # Mevcut media session'ları kapat ve cache'i temizle
+                stale_sessions = dict(self.client.media_sessions)
+                self.client.media_sessions.clear()
+                for dc, session in stale_sessions.items():
+                    try:
+                        await session.stop()
+                    except Exception:
+                        pass
+                await self._prewarm_sessions()
+                LOGGER.debug(
+                    "ByteStreamer client=%s: periyodik session yenileme tamamlandı.",
+                    self.client_index,
+                )
+            except Exception as e:
+                LOGGER.warning(
+                    "ByteStreamer client=%s: session yenileme hatası: %s",
+                    self.client_index, e,
+                )
 
     async def get_file_properties(self, chat_id: int, message_id: int) -> FileId:
         if message_id not in self._file_id_cache:
@@ -170,19 +204,19 @@ class ByteStreamer:
         async def fetch_chunk_with_retries(seq_idx: int, off: int) -> Tuple[int, Optional[bytes]]:
             """Fetch one chunk with timeout, exponential back-off, and bot fallback.
 
-            Retry schedule (max 6 tries):
-              tries 0-2  → same bot / same session, 15 s timeout each
-              tries 3-5  → try a healthier fallback bot (if available),
-                           still with 15 s timeout
+            Retry schedule (max 10 tries):
+              tries 0-1  → same bot / same session, 30 s timeout each
+              tries 2-9  → try a healthier fallback bot (if available),
+                           still with 30 s timeout
             On every TimeoutError the primary client's failure counter is incremented
             so select_best_client will avoid it for future requests.
             """
             tries = 0
-            while tries < 6 and not stop_event.is_set():
+            while tries < 10 and not stop_event.is_set():
                 # --- choose which media session to use this attempt ---
                 use_session = media_session
                 use_client_idx = client_index
-                if tries >= 3 and len(multi_clients) > 1:
+                if tries >= 2 and len(multi_clients) > 1:
                     # Pick the best *other* client by score = workload + 3×failures
                     def _score(idx):
                         return work_loads.get(idx, 0) + 3 * client_failures.get(idx, 0)
@@ -214,7 +248,7 @@ class ByteStreamer:
                                 location=location, offset=off, limit=chunk_size
                             )
                         ),
-                        timeout=15.0,
+                        timeout=30.0,
                     )
                     chunk_bytes = getattr(r, "bytes", None) if r else None
                     # If we succeeded via a fallback, mark primary as degraded
@@ -240,7 +274,7 @@ class ByteStreamer:
                 await asyncio.sleep(min(0.5 * (2 ** (tries - 1)), 10.0))
 
             LOGGER.error(
-                "Failed to fetch chunk seq=%s off=%s after 6 retries, client=%s",
+                "Failed to fetch chunk seq=%s off=%s after 10 retries, client=%s",
                 seq_idx, off, client_index,
             )
             return seq_idx, None
