@@ -353,10 +353,13 @@ async def _hls_fetcher(session: BroadcastSession):
                 url_lower = active_url.lower().split("?")[0]
 
                 # Xtream Codes URL'si mi? (son parça sayısal → /user/pass/12345)
+                # .ts veya .m3u8 uzantısını soyarak kontrol et
+                _url_stem = url_lower.rstrip("/")
+                if _url_stem.endswith(".ts") or _url_stem.endswith(".m3u8"):
+                    _url_stem = _url_stem.rsplit(".", 1)[0]
                 is_xtream = (
                     not url_lower.endswith(".m3u8")
-                    and not url_lower.endswith(".ts")
-                    and url_lower.rsplit("/", 1)[-1].isdigit()
+                    and _url_stem.rsplit("/", 1)[-1].isdigit()
                 )
 
                 if is_xtream:
@@ -518,12 +521,19 @@ async def _hls_fetcher(session: BroadcastSession):
                             logger.warning(f"[Yayın {session.broadcast_id}] Segment indirme hatası: {e}")
 
                     # Eski segmentleri temizle
+                    # Kural: en az 15 segment tut; üst limit buffer_seconds+10 sn
+                    # ama segment sayısı 15'in katına (15, 30, 45…) yuvarlanır
                     async with session.segment_lock:
                         segs_list = list(session.segments)
                         total_dur = sum(s.duration for s in segs_list)
-                        while len(segs_list) > 1 and total_dur > session.buffer_seconds + 10:
+                        MIN_SEGS  = 15
+                        while len(segs_list) > MIN_SEGS and total_dur > session.buffer_seconds + 10:
                             removed = segs_list.pop(0)
                             total_dur -= removed.duration
+                        # Segment sayısını 15'in katına yuvarla (aşağı)
+                        target = max(MIN_SEGS, (len(segs_list) // MIN_SEGS) * MIN_SEGS)
+                        while len(segs_list) > target:
+                            segs_list.pop(0)
                         session.segments = deque(segs_list)
                         session.buffered_segments = len(session.segments)
 
@@ -614,12 +624,19 @@ async def _hls_fetcher(session: BroadcastSession):
                                 ts_bitrate_bps = max(500_000, int(len(data) * 8 / TS_CHUNK_SECONDS))
 
                                 # Eski segmentleri temizle
+                                # Kural: en az 15 segment tut; üst limit buffer_seconds+10 sn
+                                # ama segment sayısı 15'in katına (15, 30, 45…) yuvarlanır
                                 async with session.segment_lock:
                                     segs_list = list(session.segments)
                                     total_dur = sum(s.duration for s in segs_list)
-                                    while len(segs_list) > 1 and total_dur > session.buffer_seconds + 10:
+                                    MIN_SEGS  = 15
+                                    while len(segs_list) > MIN_SEGS and total_dur > session.buffer_seconds + 10:
                                         segs_list.pop(0)
                                         total_dur -= TS_CHUNK_SECONDS
+                                    # Segment sayısını 15'in katına yuvarla (aşağı)
+                                    target = max(MIN_SEGS, (len(segs_list) // MIN_SEGS) * MIN_SEGS)
+                                    while len(segs_list) > target:
+                                        segs_list.pop(0)
                                     session.segments = deque(segs_list)
                                     session.buffered_segments = len(session.segments)
 
@@ -725,7 +742,8 @@ async def yayin_delete(broadcast_id: str, _: bool = Depends(require_auth)):
 
 async def _start_session(broadcast_id: str, bc: dict):
     # buffer_seconds çok küçükse (< 10) oynatıcı segmentlere yetişemez → minimum 10 zorla
-    buffer_secs = max(10, int(bc.get("buffer_seconds", 30)))
+    # Ek: 15 segment * TS_CHUNK_SECONDS (2-6s) = en az 30s buffer gerekebilir → minimum 30 zorla
+    buffer_secs = max(30, int(bc.get("buffer_seconds", 30)))
     session = BroadcastSession(
         broadcast_id   = broadcast_id,
         stream_url     = bc["stream_url"],
@@ -765,7 +783,7 @@ async def yayin_start(broadcast_id: str, _: bool = Depends(require_auth)):
 
     await _start_session(broadcast_id, bc)
     await db.update_broadcast(broadcast_id, {"active": True})
-    actual_buf = max(10, int(bc.get("buffer_seconds", 30)))
+    actual_buf = max(30, int(bc.get("buffer_seconds", 30)))
     return {"ok": True, "message": "Yayın başlatıldı", "buffer_seconds": actual_buf}
 
 

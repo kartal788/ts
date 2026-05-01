@@ -25,6 +25,10 @@ basicConfig(
 
 getLogger("httpx").setLevel(ERROR)
 getLogger("pyrogram").setLevel(ERROR)
+getLogger("pyrogram.session").setLevel(ERROR)
+getLogger("pyrogram.connection").setLevel(ERROR)
+getLogger("pyrogram.connection.transport").setLevel(ERROR)
+getLogger("pyrogram.session.session").setLevel(ERROR)
 getLogger("fastapi").setLevel(ERROR)
 
 

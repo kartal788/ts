@@ -214,7 +214,11 @@ class ByteStreamer:
             tries = 0
             while tries < 10 and not stop_event.is_set():
                 # --- choose which media session to use this attempt ---
-                use_session = media_session
+                # Her denemede _get_media_session çağır: dead session otomatik yenilenir
+                try:
+                    use_session = await self._get_media_session(file_id)
+                except Exception:
+                    use_session = media_session  # fallback: ilk session
                 use_client_idx = client_index
                 if tries >= 2 and len(multi_clients) > 1:
                     # Pick the best *other* client by score = workload + 3×failures
@@ -263,12 +267,38 @@ class ByteStreamer:
                         "Chunk timeout seq=%s off=%s try=%s client=%s",
                         seq_idx, off, tries, use_client_idx,
                     )
+                    # Timeout → session ölü olabilir, cache'den temizle ki
+                    # bir sonraki _get_media_session çağrısı yenisini kursun
+                    if use_client_idx == client_index:
+                        self.client.media_sessions.pop(file_id.dc_id, None)
+                    else:
+                        fb_s = ByteStreamer._instances.get(use_client_idx)
+                        if fb_s:
+                            fb_s.client.media_sessions.pop(file_id.dc_id, None)
                 except Exception as e:
                     tries += 1
-                    LOGGER.debug(
-                        "Fetch chunk error seq=%s off=%s try=%s client=%s err=%s",
-                        seq_idx, off, tries, use_client_idx, getattr(e, "args", e),
+                    err_str = str(e).lower()
+                    _conn_errors = ("connection", "socket", "oserror", "reset", "broken pipe", "transport")
+                    is_conn_err = any(tag in err_str for tag in _conn_errors) or isinstance(
+                        e, (OSError, ConnectionResetError, ConnectionAbortedError)
                     )
+                    if is_conn_err:
+                        # Bağlantı hatası → dead session'ı cache'den temizle
+                        if use_client_idx == client_index:
+                            self.client.media_sessions.pop(file_id.dc_id, None)
+                        else:
+                            fb_s = ByteStreamer._instances.get(use_client_idx)
+                            if fb_s:
+                                fb_s.client.media_sessions.pop(file_id.dc_id, None)
+                        LOGGER.debug(
+                            "Connection error on chunk seq=%s try=%s client=%s, session invalidated: %s",
+                            seq_idx, tries, use_client_idx, e,
+                        )
+                    else:
+                        LOGGER.debug(
+                            "Fetch chunk error seq=%s off=%s try=%s client=%s err=%s",
+                            seq_idx, off, tries, use_client_idx, getattr(e, "args", e),
+                        )
 
                 # Exponential back-off: 0.5 s, 1 s, 2 s, 4 s, 8 s, 10 s (cap)
                 await asyncio.sleep(min(0.5 * (2 ** (tries - 1)), 10.0))
@@ -547,49 +577,97 @@ class ByteStreamer:
 
         return consumer_generator()
 
+    async def _is_session_alive(self, session: Session) -> bool:
+        """Session'ın hâlâ bağlı olup olmadığını kontrol et.
+
+        Pyrogram'ın internal _connected bayrağını okur; erişilemezse
+        session.send() ile ping atmayı dener. Her iki yöntem de başarısız
+        olursa session ölü kabul edilir.
+        """
+        try:
+            # Pyrogram >= 2.x: Session._connection veya _connected attribute
+            connected = getattr(session, "_connected", None)
+            if connected is False:
+                return False
+
+            # Bazı sürümlerde connection nesnesi üzerinden kontrol
+            conn = getattr(session, "_connection", None)
+            if conn is not None:
+                if not getattr(conn, "_connected", True):
+                    return False
+
+            return True
+        except Exception:
+            return False
+
+    async def _build_media_session(self, dc: int) -> Session:
+        """Verilen DC için sıfırdan yeni bir media session kur ve döndür."""
+        test_mode = await self.client.storage.test_mode()
+        current_dc = await self.client.storage.dc_id()
+
+        if dc != current_dc:
+            auth_key = await Auth(self.client, dc, test_mode).create()
+        else:
+            auth_key = await self.client.storage.auth_key()
+
+        session = Session(self.client, dc, auth_key, test_mode, is_media=True)
+        session.no_updates = True
+        session.timeout = 30
+        session.sleep_threshold = 60
+
+        await session.start()
+
+        if dc != current_dc:
+            for _ in range(6):
+                try:
+                    exported = await self.client.invoke(
+                        raw.functions.auth.ExportAuthorization(dc_id=dc)
+                    )
+                    await session.send(
+                        raw.functions.auth.ImportAuthorization(
+                            id=exported.id, bytes=exported.bytes
+                        )
+                    )
+                    break
+                except AuthBytesInvalid:
+                    LOGGER.debug("AuthBytesInvalid during media session import; retrying...")
+                    await asyncio.sleep(0.5)
+                except OSError:
+                    LOGGER.debug("OSError during media session import; retrying...")
+                    await asyncio.sleep(1)
+
+        self.client.media_sessions[dc] = session
+        LOGGER.debug("Created media session for DC %s", dc)
+        return session
+
     async def _get_media_session(self, file_id: FileId) -> Session:
         dc = file_id.dc_id
         media_session = self.client.media_sessions.get(dc)
 
-        if media_session:
+        # Hızlı yol: session var ve sağlıklı
+        if media_session and await self._is_session_alive(media_session):
             return media_session
 
+        # Session yok ya da ölü — lock altında yeniden oluştur
         async with self._session_lock:
+            # Lock beklerken başka coroutine zaten yenilemiş olabilir
             media_session = self.client.media_sessions.get(dc)
-            if media_session:
+            if media_session and await self._is_session_alive(media_session):
                 return media_session
 
-            test_mode = await self.client.storage.test_mode()
-            current_dc = await self.client.storage.dc_id()
+            # Ölü session'ı cache'den temizle ve kapat
+            if media_session is not None:
+                LOGGER.debug(
+                    "Dead media session detected for DC %s (client=%s), rebuilding…",
+                    dc, self.client_index,
+                )
+                self.client.media_sessions.pop(dc, None)
+                try:
+                    await media_session.stop()
+                except Exception:
+                    pass
 
-            if dc != current_dc:
-                auth_key = await Auth(self.client, dc, test_mode).create()
-            else:
-                auth_key = await self.client.storage.auth_key()
-
-            session = Session(self.client, dc, auth_key, test_mode, is_media=True)
-            session.no_updates = True
-            session.timeout = 30 
-            session.sleep_threshold = 60 
-
-            await session.start()
-
-            if dc != current_dc:
-                for _ in range(6):
-                    try:
-                        exported = await self.client.invoke(raw.functions.auth.ExportAuthorization(dc_id=dc))
-                        await session.send(raw.functions.auth.ImportAuthorization(id=exported.id, bytes=exported.bytes))
-                        break
-                    except AuthBytesInvalid:
-                        LOGGER.debug("AuthBytesInvalid during media session import; retrying...")
-                        await asyncio.sleep(0.5)
-                    except OSError:
-                        LOGGER.debug("OSError during media session import; retrying...")
-                        await asyncio.sleep(1)
-
-            self.client.media_sessions[dc] = session
-            LOGGER.debug("Created media session for DC %s", dc)
-            return session
+            return await self._build_media_session(dc)
 
     @staticmethod
     async def _get_location(file_id: FileId) -> Union[

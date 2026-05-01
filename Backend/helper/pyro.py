@@ -55,7 +55,7 @@ async def get_file_ids(client: Client, chat_id: int, message_id: int) -> Optiona
             )
 
             if is_retryable and attempt < max_retries:
-                LOGGER.warning(
+                LOGGER.debug(
                     f"Error getting file IDs: {e} "
                     f"(attempt {attempt}/{max_retries}, {delay:.1f}s sonra yeniden deneniyor)"
                 )
