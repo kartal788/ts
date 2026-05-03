@@ -2985,16 +2985,20 @@ class Database:
         pass_hash = _hash_password(otp_pass)
 
         now = datetime.utcnow()
+        # Mevcut session_version'ı koru (invalidate_admin_session artırmış olabilir)
+        existing = await self.dbs["tracking"]["admin_sessions"].find_one({"_id": "admin"})
+        current_version = existing.get("session_version", 0) if existing else 0
         await self.dbs["tracking"]["admin_sessions"].update_one(
             {"_id": "admin"},
             {"$set": {
-                "_id":          "admin",
-                "otp_username": otp_username,
-                "pass_hash":    pass_hash,
-                "photo_url":    photo_url,
-                "display_name": display_name,
-                "used":         False,
-                "created_at":   now,
+                "_id":             "admin",
+                "otp_username":    otp_username,
+                "pass_hash":       pass_hash,
+                "photo_url":       photo_url,
+                "display_name":    display_name,
+                "used":            False,
+                "created_at":      now,
+                "session_version": current_version,
             }},
             upsert=True
         )
@@ -3002,10 +3006,34 @@ class Database:
 
     async def invalidate_admin_session(self):
         """
-        Eski yönetici oturumunu tamamen siler.
-        /start her çağrıldığında, create_admin_otp öncesinde çağrılır.
+        Eski yönetici oturumunu geçersiz kılar:
+        - OTP/kimlik bilgilerini siler
+        - session_version'ı artırır (aktif tarayıcı cookie'lerini otomatik geçersiz kılar)
+        Bot yeniden başladığında veya /start çağrıldığında tetiklenir.
         """
-        await self.dbs["tracking"]["admin_sessions"].delete_one({"_id": "admin"})
+        # Mevcut session_version'ı oku, +1 artır
+        doc = await self.dbs["tracking"]["admin_sessions"].find_one({"_id": "admin"})
+        new_version = (doc.get("session_version", 0) + 1) if doc else 1
+        await self.dbs["tracking"]["admin_sessions"].update_one(
+            {"_id": "admin"},
+            {"$set": {
+                "session_version": new_version,
+                "otp_username":    None,
+                "pass_hash":       None,
+                "used":            False,
+                "created_at":      None,
+            }},
+            upsert=True,
+        )
+
+    async def get_admin_session_version(self) -> int:
+        """
+        Geçerli session_version değerini döner.
+        require_auth tarafından cookie'nin hâlâ geçerli olup olmadığını
+        kontrol etmek için kullanılır.
+        """
+        doc = await self.dbs["tracking"]["admin_sessions"].find_one({"_id": "admin"})
+        return doc.get("session_version", 0) if doc else 0
 
     async def verify_admin_credentials(self, username: str, password: str) -> Optional[dict]:
         """

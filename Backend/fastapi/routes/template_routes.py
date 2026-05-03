@@ -115,9 +115,14 @@ async def login_post(
 
     admin_doc = await verify_credentials(username, password)
     if admin_doc:
+        import time as _time
         record_success(ip)
-        request.session["authenticated"] = True
-        request.session["username"]      = username
+        request.session["authenticated"]   = True
+        request.session["username"]        = username
+        request.session["login_at"]        = _time.time()
+        # session_version: bot restart veya /start ile artırılan DB değerini sakla
+        from Backend import db as _db
+        request.session["session_version"] = await _db.get_admin_session_version()
         # Katalog için member session da aç (photo_url ve display_name ile)
         if not request.session.get("member"):
             request.session["member"] = {
