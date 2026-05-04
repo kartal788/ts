@@ -301,9 +301,7 @@ class TmdbCatalog:
             trend.extend(_match(items, movie_db, tv_db, seen_trend))
 
         # ── Yeni çıkanlar: global film → global dizi → TR film → TR dizi ─────
-        # seen_new, seen_trend'in kopyasıyla başlatılıyor; böylece trendlerde
-        # zaten yer alan içerikler yeni çıkanlar kataloğunda görünmüyor.
-        seen_new: set = set(seen_trend)
+        seen_new: set = set()
         new_rel: List[dict] = []
         _this_year = time.gmtime().tm_year
         _new_min_year = _this_year - 1  # en fazla geçen yıl çıkmış içerikler
