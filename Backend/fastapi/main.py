@@ -371,13 +371,8 @@ except Exception:
 async def _startup():
     import asyncio
 
-    # ── Bot yeniden başladığında aktif admin oturumlarını geçersiz kıl ──────
-    try:
-        from Backend import db as _db
-        await _db.invalidate_admin_session()
-    except Exception as _e:
-        pass  # DB henüz hazır olmayabilir; sessizce geç
-
+    # NOT: Bot yeniden başladığında admin ve üye oturumları geçersiz kılınmaz.
+    # Admin şifresi yalnızca OWNER /start attığında yenilenir.
     asyncio.create_task(decay_client_failures())
 
     # ── Sana Özel cache temizleyici (TTL'i dolmuş RAM girişlerini sil) ──

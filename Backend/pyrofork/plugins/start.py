@@ -13,13 +13,14 @@ async def send_start_message(client: Client, message: Message):
         user_id = (message.from_user.id if message.from_user else None) or (message.sender_chat.id if message.sender_chat else None) or message.chat.id
         print(f"DEBUG: Received /start command from {user_id}")
 
-        # ── /start her çağrıldığında admin oturumunu geçersiz kıl ───────────
-        # Bu sayede önceki tarayıcı cookie'leri otomatik olarak geçersiz kalır.
-        try:
-            from Backend import db as _db
-            await _db.invalidate_admin_session()
-        except Exception as _inv_err:
-            print(f"DEBUG: invalidate_admin_session error: {_inv_err}")
+        # ── Admin oturumu yalnızca OWNER /start attığında geçersiz kılınır ──
+        # Diğer kullanıcıların /start komutu admin şifresini etkilemez.
+        if user_id == Telegram.OWNER_ID:
+            try:
+                from Backend import db as _db
+                await _db.invalidate_admin_session()
+            except Exception as _inv_err:
+                print(f"DEBUG: invalidate_admin_session error: {_inv_err}")
         # ────────────────────────────────────────────────────────────────────
 
         # Ban kontrolü
