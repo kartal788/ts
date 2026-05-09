@@ -1,13 +1,17 @@
 """
 duyuru.py
 ==========
-/duyuru komutu ile aktif abonelere toplu mesaj gönderir.
+/duyuru komutu ile bota /start yapmış kullanıcılara toplu mesaj gönderir.
+Önizleme sonrasında iki hedef seçeneği sunulur:
+  • Abonelere Gönder  → yalnızca aktif abonelere
+  • Tüm Üyelere Gönder → botla etkileşime girmiş herkese
 
 Kullanım:
   /duyuru           →  İçerik ister
-  İçerik gönder     →  Önizleme + Hemen / Zamanlı / İptal butonları çıkar
+  İçerik gönder     →  Önizleme + Abonelere / Tüm Üyelere / Zamanlı / İptal butonları çıkar
   ⏰ Zamanlı Gönder  →  Tarih/saat ister (ör: 20.04.2026 21:00)
-  ✅ Hemen Gönder   →  Anında tüm aktif abonelere gönderilir
+  📨 Abonelere Gönder  →  Anında sadece abonelere gönderilir
+  📣 Tüm Üyelere Gönder →  Anında tüm aktif kullanıcılara gönderilir
   ❌ İptal          →  İptal edilir
 
 Özellikler:
@@ -70,11 +74,21 @@ MAX_RETRY = 3
 # ── Klavye yardımcıları ───────────────────────────────────────────────────────
 
 def _confirm_keyboard(uid: int) -> InlineKeyboardMarkup:
-    """Önizleme sonrası: Hemen Gönder / Zamanlı Gönder / İptal."""
+    """Önizleme sonrası: Abonelere / Tüm Üyelere / Aboneliği Olmayanlar / Zamanlı / İptal."""
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("✅ Hemen Gönder",   callback_data=f"duyuru_send:{uid}"),
-            InlineKeyboardButton("⏰ Zamanlı Gönder", callback_data=f"duyuru_schedule:{uid}"),
+            InlineKeyboardButton("📨 Abonelere Gönder",    callback_data=f"duyuru_send_subs:{uid}"),
+            InlineKeyboardButton("📣 Herkese Gönder",  callback_data=f"duyuru_send_all:{uid}"),
+        ],
+        [
+            InlineKeyboardButton("🔕 Aboneliği Olmayanlara Gönder", callback_data=f"duyuru_send_nonsub:{uid}"),
+        ],
+        [
+            InlineKeyboardButton("⏰ Zamanlı Gönder (Aboneler)", callback_data=f"duyuru_schedule_subs:{uid}"),
+            InlineKeyboardButton("⏰ Zamanlı Gönder (Herkes)",     callback_data=f"duyuru_schedule_all:{uid}"),
+        ],
+        [
+            InlineKeyboardButton("⏰ Zamanlı Gönder (Aboneliği Olmayanlar)", callback_data=f"duyuru_schedule_nonsub:{uid}"),
         ],
         [
             InlineKeyboardButton("❌ İptal", callback_data=f"duyuru_cancel:{uid}"),
@@ -103,8 +117,8 @@ def _media_type_label(media_type: Optional[MessageMediaType]) -> str:
 
 async def _get_active_count() -> int | str:
     try:
-        subs = await db.get_all_subscribers()
-        return len([u for u in subs if u.get("subscription_status") == "active"])
+        users = await db.get_all_users()
+        return len(users)
     except Exception:
         return "?"
 
@@ -178,8 +192,8 @@ async def _show_preview(client: Client, message: Message, state: dict):
             f"─────────────────────\n"
             f"{text}\n"
             f"─────────────────────\n\n"
-            f"👥 Aktif abone: **{count}**\n\n"
-            f"Nasıl göndermek istersiniz?",
+            f"👥 Toplam kullanıcı: **{count}**\n\n"
+            f"Kime göndermek istersiniz?",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=_confirm_keyboard(uid),
             quote=True,
@@ -190,8 +204,8 @@ async def _show_preview(client: Client, message: Message, state: dict):
         await message.reply_text(
             f"📋 **Önizleme — Albüm ({len(msgs)} öğe)**\n"
             f"Tür: {types_str}\n\n"
-            f"👥 Aktif abone: **{count}**\n\n"
-            f"Nasıl göndermek istersiniz?",
+            f"👥 Toplam kullanıcı: **{count}**\n\n"
+            f"Kime göndermek istersiniz?",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=_confirm_keyboard(uid),
             quote=True,
@@ -202,8 +216,8 @@ async def _show_preview(client: Client, message: Message, state: dict):
         cap = f"\n📝 Açıklama: _{media_msg.caption}_" if (media_msg and media_msg.caption) else ""
         await message.reply_text(
             f"📋 **Önizleme — {label}**{cap}\n\n"
-            f"👥 Aktif abone: **{count}**\n\n"
-            f"Nasıl göndermek istersiniz?",
+            f"👥 Toplam kullanıcı: **{count}**\n\n"
+            f"Kime göndermek istersiniz?",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=_confirm_keyboard(uid),
             quote=True,
@@ -387,7 +401,7 @@ async def _scheduled_send_job(
     except Exception:
         pass
 
-    await _run_broadcast(client, owner_uid, state)
+    await _run_broadcast(client, owner_uid, state, target=state.get("target", "all"))
 
 
 # ── Komut prefix temizleyici ─────────────────────────────────────────────────
@@ -505,6 +519,7 @@ async def _run_broadcast(
     owner_uid: int,
     state: dict,
     status_msg: Message = None,
+    target: str = "all",   # "all" = tüm üyeler | "subs" = sadece aboneler
 ):
     """
     1. Tüm aktif abonelere gönderim (1. tur).
@@ -512,47 +527,57 @@ async def _run_broadcast(
     3. Özet + detaylı rapor (.txt) owner'a gönderilir.
     """
 
-    # ── Abone listesi ─────────────────────────────────────────────────────
+    # ── Kullanıcı listesi ─────────────────────────────────────────────────
     try:
-        subs = await db.get_all_subscribers()
-        active_subs = [u for u in subs if u.get("subscription_status") == "active"]
+        if target == "subs":
+            all_users = await db.get_active_subscribers()
+            target_label = "aktif abone"
+        elif target == "nonsub":
+            all_users = await db.get_non_active_users()
+            target_label = "aboneliği olmayanlar"
+        else:
+            all_users = await db.get_all_users()
+            target_label = "tüm üye"
     except Exception as e:
-        LOGGER.error("Duyuru: abone listesi alınamadı: %s", e)
-        err = "❌ Abone listesi alınamadı."
+        LOGGER.error("Duyuru: kullanıcı listesi alınamadı: %s", e)
+        err = "❌ Kullanıcı listesi alınamadı."
         if status_msg:
             await status_msg.edit_text(err)
         else:
             await client.send_message(chat_id=owner_uid, text=err)
         return
 
-    total = len(active_subs)
+    total = len(all_users)
 
     success_ids:   list[int]  = []
-    blocked_users: list[dict] = []   # {"id", "name", "reason"}
+    success_users: list[dict] = []   # {id, name, username}
+    blocked_users: list[dict] = []   # {id, name, username, reason}
     retry_queue:   list[dict] = []   # ilk turda başarısız → retry
     failed_final:  list[dict] = []   # retry sonrası da başarısız
 
     # ── 1. Tur ────────────────────────────────────────────────────────────
     if status_msg:
         await status_msg.edit_text(
-            f"⏳ Duyuru gönderiliyor… (0 / {total})",
+            f"⏳ Duyuru gönderiliyor ({target_label})… (0 / {total})",
             parse_mode=ParseMode.MARKDOWN,
         )
 
     last_edit = 0
 
-    for idx, user in enumerate(active_subs):
+    for idx, user in enumerate(all_users):
         uid_target = user.get("_id") or user.get("user_id")
         if not uid_target:
             failed_final.append({"id": 0, "name": "Bilinmeyen", "reason": "ID yok"})
             continue
 
-        uid_int = int(uid_target)
-        name    = user.get("first_name") or user.get("username") or str(uid_int)
+        uid_int  = int(uid_target)
+        name     = user.get("first_name") or str(uid_int)
+        username = user.get("username") or None
 
         try:
             await _send_to_user(client, uid_int, state)
             success_ids.append(uid_int)
+            success_users.append({"id": uid_int, "name": name, "username": username})
 
         except FloodWait as e:
             wait = max(e.value, 1)
@@ -561,14 +586,15 @@ async def _run_broadcast(
             try:
                 await _send_to_user(client, uid_int, state)
                 success_ids.append(uid_int)
+                success_users.append({"id": uid_int, "name": name, "username": username})
             except Exception as ex:
-                retry_queue.append({"id": uid_int, "name": name, "reason": str(ex)})
+                retry_queue.append({"id": uid_int, "name": name, "username": username, "reason": str(ex)})
 
         except (UserIsBlocked, InputUserDeactivated, PeerIdInvalid) as e:
-            blocked_users.append({"id": uid_int, "name": name, "reason": type(e).__name__})
+            blocked_users.append({"id": uid_int, "name": name, "username": username, "reason": type(e).__name__})
 
         except Exception as e:
-            retry_queue.append({"id": uid_int, "name": name, "reason": str(e)})
+            retry_queue.append({"id": uid_int, "name": name, "username": username, "reason": str(e)})
 
         await asyncio.sleep(0.05)
 
@@ -593,29 +619,31 @@ async def _run_broadcast(
             pass
 
     for entry in retry_queue:
-        uid_int = entry["id"]
-        name    = entry["name"]
-        sent    = False
+        uid_int  = entry["id"]
+        name     = entry["name"]
+        username = entry.get("username")
+        sent     = False
 
         for attempt in range(1, MAX_RETRY + 1):
             await asyncio.sleep(2 ** attempt)   # 2 → 4 → 8 sn
             try:
                 await _send_to_user(client, uid_int, state)
                 success_ids.append(uid_int)
+                success_users.append({"id": uid_int, "name": name, "username": username})
                 LOGGER.info("Retry başarılı (%s) — deneme %d", uid_int, attempt)
                 sent = True
                 break
             except FloodWait as e:
                 await asyncio.sleep(max(e.value, 1))
             except (UserIsBlocked, InputUserDeactivated, PeerIdInvalid) as e:
-                blocked_users.append({"id": uid_int, "name": name, "reason": type(e).__name__})
+                blocked_users.append({"id": uid_int, "name": name, "username": username, "reason": type(e).__name__})
                 sent = True   # artık retry'a gerek yok
                 break
             except Exception as e:
                 LOGGER.warning("Retry başarısız (%s) %d/%d: %s", uid_int, attempt, MAX_RETRY, e)
 
         if not sent:
-            failed_final.append({"id": uid_int, "name": name, "reason": entry["reason"]})
+            failed_final.append({"id": uid_int, "name": name, "username": username, "reason": entry["reason"]})
 
     # ── 3. Özet rapor ─────────────────────────────────────────────────────
     success_count = len(success_ids)
@@ -624,8 +652,8 @@ async def _run_broadcast(
     rate_str      = f"{success_count / total * 100:.1f}%" if total else "—"
 
     summary = (
-        f"✅ **Duyuru Tamamlandı**\n\n"
-        f"👥 Toplam abone:  `{total}`\n"
+        f"✅ **Duyuru Tamamlandı** ({'Aboneler' if target == 'subs' else 'Tüm Üyeler'})\n\n"
+        f"👥 Hedef kullanıcı:  `{total}`\n"
         f"✉️ Gönderildi:    `{success_count}`\n"
         f"🚫 Engelledi:     `{blocked_count}`\n"
         f"❌ Başarısız:     `{failed_count}`\n"
@@ -645,24 +673,30 @@ async def _run_broadcast(
     )
 
     # ── 4. Detaylı rapor (.txt) ───────────────────────────────────────────
-    if not (blocked_users or failed_final):
-        return   # Herşey başarılıysa dosya gönderme
-
     now_str = datetime.now(_TZ).strftime("%d.%m.%Y %H:%M")
     lines   = [
         f"Duyuru Detaylı Rapor — {now_str}\n",
-        f"Toplam: {total} | Başarılı: {success_count} | "
+        f"Hedef: {target_label} | Toplam: {total} | Gönderildi: {success_count} | "
         f"Engelledi: {blocked_count} | Başarısız: {failed_count}\n",
         "=" * 60 + "\n",
     ]
+
+    def _user_line(u: dict, extra: str = "") -> str:
+        uname = f" | @{u['username']}" if u.get("username") else ""
+        suffix = f" | {extra}" if extra else ""
+        return f"  ID: {u['id']:<12} | {u['name']:<20}{uname}{suffix}\n"
+
+    # Gönderilen kullanıcılar
+    lines.append(f"\n✉️ GÖNDERİLDİ ({success_count} kullanıcı)\n")
+    lines.append("-" * 40 + "\n")
+    for u in success_users:
+        lines.append(_user_line(u))
 
     if blocked_users:
         lines.append(f"\n🚫 ENGELLEDİ / HESAP KAPALI ({blocked_count} kullanıcı)\n")
         lines.append("-" * 40 + "\n")
         for u in blocked_users:
-            lines.append(
-                f"  ID: {u['id']:<12} | Ad: {u['name']:<20} | Sebep: {u['reason']}\n"
-            )
+            lines.append(_user_line(u, extra=f"Sebep: {u['reason']}"))
 
     if failed_final:
         lines.append(
@@ -670,9 +704,7 @@ async def _run_broadcast(
         )
         lines.append("-" * 40 + "\n")
         for u in failed_final:
-            lines.append(
-                f"  ID: {u['id']:<12} | Ad: {u['name']:<20} | Sebep: {u['reason']}\n"
-            )
+            lines.append(_user_line(u, extra=f"Sebep: {u['reason']}"))
 
     report_buf = io.BytesIO("".join(lines).encode("utf-8"))
     report_buf.name = f"duyuru_rapor_{datetime.now(_TZ).strftime('%Y%m%d_%H%M')}.txt"
@@ -683,7 +715,7 @@ async def _run_broadcast(
             document=report_buf,
             caption=(
                 f"📊 **Detaylı Rapor**\n"
-                f"🚫 Engelledi: `{blocked_count}` | ❌ Başarısız: `{failed_count}`"
+                f"✉️ Gönderildi: `{success_count}` | 🚫 Engelledi: `{blocked_count}` | ❌ Başarısız: `{failed_count}`"
             ),
             parse_mode=ParseMode.MARKDOWN,
         )
@@ -691,10 +723,28 @@ async def _run_broadcast(
         LOGGER.error("Detaylı rapor gönderilemedi: %s", e)
 
 
-# ── Callback: Hemen Gönder ────────────────────────────────────────────────────
+# ── Callback: Abonelere Gönder ────────────────────────────────────────────────
 
-@Client.on_callback_query(filters.regex(r"^duyuru_send:(\d+)$"))
-async def cb_duyuru_send(client: Client, callback: CallbackQuery):
+@Client.on_callback_query(filters.regex(r"^duyuru_send_subs:(\d+)$"))
+async def cb_duyuru_send_subs(client: Client, callback: CallbackQuery):
+    await _cb_send(client, callback, target="subs")
+
+
+# ── Callback: Tüm Üyelere Gönder ─────────────────────────────────────────────
+
+@Client.on_callback_query(filters.regex(r"^duyuru_send_all:(\d+)$"))
+async def cb_duyuru_send_all(client: Client, callback: CallbackQuery):
+    await _cb_send(client, callback, target="all")
+
+
+# ── Callback: Aboneliği Olmayanlara Gönder ───────────────────────────────────
+
+@Client.on_callback_query(filters.regex(r"^duyuru_send_nonsub:(\d+)$"))
+async def cb_duyuru_send_nonsub(client: Client, callback: CallbackQuery):
+    await _cb_send(client, callback, target="nonsub")
+
+
+async def _cb_send(client: Client, callback: CallbackQuery, target: str):
     owner_uid = int(callback.matches[0].group(1))
 
     if callback.from_user.id != owner_uid:
@@ -706,19 +756,38 @@ async def cb_duyuru_send(client: Client, callback: CallbackQuery):
         await callback.answer("Geçersiz işlem.", show_alert=True)
         return
 
-    await callback.answer("Gönderim başladı ✅")
+    label = "Abonelere" if target == "subs" else ("Aboneliği olmayanlara" if target == "nonsub" else "Tüm üyelere")
+    await callback.answer(f"{label} gönderim başladı ✅")
     await callback.message.edit_text(
-        "⏳ Duyuru gönderiliyor, lütfen bekleyin…",
+        f"⏳ Duyuru {label.lower()} gönderiliyor, lütfen bekleyin…",
         parse_mode=ParseMode.MARKDOWN,
     )
 
-    await _run_broadcast(client, owner_uid, state, status_msg=callback.message)
+    await _run_broadcast(client, owner_uid, state, status_msg=callback.message, target=target)
 
 
-# ── Callback: Zamanlı Gönder ──────────────────────────────────────────────────
+# ── Callback: Zamanlı Gönder (Aboneler) ──────────────────────────────────────
 
-@Client.on_callback_query(filters.regex(r"^duyuru_schedule:(\d+)$"))
-async def cb_duyuru_schedule(client: Client, callback: CallbackQuery):
+@Client.on_callback_query(filters.regex(r"^duyuru_schedule_subs:(\d+)$"))
+async def cb_duyuru_schedule_subs(client: Client, callback: CallbackQuery):
+    await _cb_schedule(client, callback, target="subs")
+
+
+# ── Callback: Zamanlı Gönder (Tümü) ──────────────────────────────────────────
+
+@Client.on_callback_query(filters.regex(r"^duyuru_schedule_all:(\d+)$"))
+async def cb_duyuru_schedule_all(client: Client, callback: CallbackQuery):
+    await _cb_schedule(client, callback, target="all")
+
+
+# ── Callback: Zamanlı Gönder (Aboneliği Olmayanlar) ──────────────────────────
+
+@Client.on_callback_query(filters.regex(r"^duyuru_schedule_nonsub:(\d+)$"))
+async def cb_duyuru_schedule_nonsub(client: Client, callback: CallbackQuery):
+    await _cb_schedule(client, callback, target="nonsub")
+
+
+async def _cb_schedule(client: Client, callback: CallbackQuery, target: str):
     owner_uid = int(callback.matches[0].group(1))
 
     if callback.from_user.id != owner_uid:
@@ -730,12 +799,14 @@ async def cb_duyuru_schedule(client: Client, callback: CallbackQuery):
         await callback.answer("Geçersiz işlem.", show_alert=True)
         return
 
-    state["step"] = "awaiting_schedule_time"
+    state["step"]   = "awaiting_schedule_time"
+    state["target"] = target
     _WAITING[owner_uid] = state
 
+    label = "Abonelere" if target == "subs" else ("Aboneliği olmayanlara" if target == "nonsub" else "Tüm üyelere")
     await callback.answer()
     await callback.message.edit_text(
-        "⏰ **Zamanlı Gönderim**\n\n"
+        f"⏰ **Zamanlı Gönderim** ({label})\n\n"
         "Gönderim tarih ve saatini girin (Türkiye saati):\n\n"
         "Format: `GG.AA.YYYY SS:DD`\n"
         "Örnek:  `20.04.2026 21:00`\n\n"

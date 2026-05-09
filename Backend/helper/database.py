@@ -434,6 +434,28 @@ class Database:
         users = await cursor.to_list(None)
         return [convert_objectid_to_str(u) for u in users]
 
+    async def get_active_subscribers(self) -> List[dict]:
+        """Yalnızca aktif aboneleri döndürür (subscription_status == active)."""
+        cursor = self.dbs["tracking"]["users"].find({
+            "subscription_status": "active"
+        }).sort("subscription_expiry", DESCENDING)
+        users = await cursor.to_list(None)
+        return [convert_objectid_to_str(u) for u in users]
+
+    async def get_all_users(self) -> List[dict]:
+        """Bota /start yapmış tüm kullanıcıları döndürür (abone olsun olmasın)."""
+        cursor = self.dbs["tracking"]["users"].find({})
+        users = await cursor.to_list(None)
+        return [convert_objectid_to_str(u) for u in users]
+
+    async def get_non_active_users(self) -> List[dict]:
+        """Aboneliği bitmiş, hiç başlamamış veya banned olan kullanıcıları döndürür."""
+        cursor = self.dbs["tracking"]["users"].find({
+            "subscription_status": {"$not": {"$eq": "active"}}
+        })
+        users = await cursor.to_list(None)
+        return [convert_objectid_to_str(u) for u in users]
+
     async def manage_subscriber(self, user_id: int, action: str, days: int = 0) -> bool:
         user = await self.get_user(user_id)
         if not user:

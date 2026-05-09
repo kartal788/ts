@@ -457,6 +457,13 @@ def start_scheduler(mongo_uri: str) -> None:
     except Exception as e:
         logger.warning("TV status zamanlayıcısı başlatılamadı: %s", e)
 
+    # Günlük yeni içerik bildirimi — her gün UTC+3 00:01'de
+    try:
+        from Backend.helper.daily_content_notifier import start_daily_content_notifier
+        start_daily_content_notifier(main_loop=_main_loop)
+    except Exception as e:
+        logger.warning("Günlük içerik bildirimi zamanlayıcısı başlatılamadı: %s", e)
+
 
 def stop_scheduler() -> None:
     global _running, _daily_timer, _similar_timer, _analytics_cleanup_timer, _expiry_notify_timer
@@ -494,3 +501,10 @@ def stop_scheduler() -> None:
         stop_tv_status_scheduler()
     except Exception as e:
         logger.warning("TV status zamanlayıcısı durdurulamadı: %s", e)
+
+    # Günlük içerik bildirimi zamanlayıcısını durdur
+    try:
+        from Backend.helper.daily_content_notifier import stop_daily_content_notifier
+        stop_daily_content_notifier()
+    except Exception as e:
+        logger.warning("Günlük içerik bildirimi zamanlayıcısı durdurulamadı: %s", e)
