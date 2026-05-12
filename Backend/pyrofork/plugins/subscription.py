@@ -193,7 +193,7 @@ async def admin_review(client: Client, callback_query: CallbackQuery):
                     otp = await db.create_member_otp(target_user_id, user_name2)
                     portal_url = f"{base_url}/uye/giris"
                     otp_text = (
-                        f"\n\n🌐 <b>{Telegram.ISIM} Dizi ve filmleri indirmek için:</b>\n"
+                        f"\n\n🌐 <b>Dizi ve filmleri indirmek için:</b>\n"
                         f"🔗 {portal_url}\n"
                         f"👤 <b>Kullanıcı Adı:</b> <code>{otp['username']}</code>\n"
                         f"🔑 <b>Şifre:</b> <code>{otp['password']}</code>\n"
