@@ -1,13 +1,12 @@
 """
 tmdb_catalog.py
 ================
-TMDB'den trendler ve yeni çıkanlar verilerini çeker,
+TMDB'den trendler verisini çeker,
 MongoDB veritabanındaki içeriklerle karşılaştırarak
 sadece veritabanında bulunanları katalog olarak sunar.
 
 2 katalog üretir:
   - trending     : Haftalık trendler (film + dizi, global + TR birleşik, tekrarsız)
-  - new_releases : Yeni çıkanlar (film + dizi, global + TR birleşik, tekrarsız)
 
 - Bot yeniden başlayınca ilk yükleme yapılır.
 - Yeni içerik eklendiğinde notify_new_content() çağrılır.
@@ -201,7 +200,7 @@ def _match(
 
     min_year:   Belirtilirse TMDB'nin release_date / first_air_date yılı
                 bu değerden küçük olan içerikler atlanır. Eski filmlerin
-                yeni çıkanlar kataloğuna sızmasını önler.
+                yeni çıkanlar kataloğuna sızmasını önler (gerektiğinde kullanılabilir).
     """
     matched: List[dict] = []
     for item in tmdb_items:
@@ -263,9 +262,8 @@ def _match(
 
 class TmdbCatalog:
     """
-    2 birleşik katalog:
+    1 birleşik katalog:
       trending     — haftalık trendler  (film+dizi, global+TR, tekrarsız)
-      new_releases — yeni çıkanlar      (film+dizi, global+TR, tekrarsız)
 
     Sadece veritabanında mevcut olan içerikler döner.
     """
@@ -273,7 +271,6 @@ class TmdbCatalog:
     def __init__(self) -> None:
         self._lock          = threading.RLock()
         self._trending:     List[dict] = []
-        self._new_releases: List[dict] = []
         self._loaded        = False
         self._last_refresh: float = 0.0
 
@@ -300,41 +297,19 @@ class TmdbCatalog:
                 it.setdefault("media_type", raw_type)
             trend.extend(_match(items, movie_db, tv_db, seen_trend))
 
-        # ── Yeni çıkanlar: global film → global dizi → TR film → TR dizi ─────
-        seen_new: set = set()
-        new_rel: List[dict] = []
-        _this_year = time.gmtime().tm_year
-        _new_min_year = _this_year - 1  # en fazla geçen yıl çıkmış içerikler
-        for endpoint, raw_type, extra_params in [
-            ("movie/now_playing", "movie", {}),
-            ("tv/on_the_air",     "tv",    {}),
-            ("movie/now_playing", "movie", {"region": "TR"}),
-            ("tv/on_the_air",     "tv",    {"region": "TR"}),
-        ]:
-            items = _fetch_pages(endpoint, {"language": "tr-TR", **extra_params})
-            # now_playing / on_the_air media_type içermez — force_type ile zorla
-            for it in items:
-                it["media_type"] = raw_type  # setdefault değil, üzerine yaz
-            new_rel.extend(_match(items, movie_db, tv_db, seen_new, force_type=raw_type, min_year=_new_min_year))
-
         with self._lock:
             self._trending     = trend
-            self._new_releases = new_rel
             self._loaded       = True
             self._last_refresh = time.time()
 
         logger.info(
-            "TMDB kataloğu hazır (%.1fs) — trendler: %d, yeni çıkanlar: %d",
-            time.time() - t0, len(trend), len(new_rel),
+            "TMDB kataloğu hazır (%.1fs) — trendler: %d",
+            time.time() - t0, len(trend),
         )
 
     def get_trending(self) -> List[dict]:
         with self._lock:
             return list(self._trending)
-
-    def get_new_releases(self) -> List[dict]:
-        with self._lock:
-            return list(self._new_releases)
 
     def is_loaded(self) -> bool:
         with self._lock:
@@ -348,7 +323,6 @@ class TmdbCatalog:
         with self._lock:
             return {
                 "trending":     len(self._trending),
-                "new_releases": len(self._new_releases),
             }
 
 

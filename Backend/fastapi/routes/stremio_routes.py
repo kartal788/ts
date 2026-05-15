@@ -82,7 +82,7 @@ LANG_LABELS = {
         "new": "Yeni eklenen", "popular": "Popüler", "movies": "Filmler",
         "series": "Diziler", "collections": "Seriler", "live": "Canlı Yayın",
         "tmdb_trending": "🔥 Trendler",
-        "tmdb_new": "🆕 Yeni Çıkanlar",
+
         "yerli_movies": "🇹🇷 Yerli Filmler",
         "yerli_series": "🇹🇷 Yerli Diziler",
         "similar": "🎯 Sana Özel",
@@ -91,7 +91,7 @@ LANG_LABELS = {
         "new": "Neu hinzugefügt", "popular": "Beliebt", "movies": "Filme",
         "series": "Serien", "collections": "Filmreihen", "live": "Live TV",
         "tmdb_trending": "🔥 Trends",
-        "tmdb_new": "🆕 Neu erschienen",
+
         "yerli_movies": "🇹🇷 Türkische Filme",
         "yerli_series": "🇹🇷 Türkische Serien",
         "similar": "🎯 Empfohlen für Sie",
@@ -100,7 +100,7 @@ LANG_LABELS = {
         "new": "Recently Added", "popular": "Popular", "movies": "Movies",
         "series": "Series", "collections": "Collections", "live": "Live TV",
         "tmdb_trending": "🔥 Trending",
-        "tmdb_new": "🆕 New Releases",
+
         "yerli_movies": "🇹🇷 Turkish Movies",
         "yerli_series": "🇹🇷 Turkish Series",
         "similar": "🎯 Recommended For You",
@@ -657,14 +657,6 @@ async def get_manifest(token: str, lang: str = "en", token_data: dict = Depends(
                 "extra": [{"name": "skip"}],
                 "extraSupported": ["skip"],
             },
-            # ── TMDB: Yeni Çıkanlar (film+dizi, global+TR birleşik) ──────────
-            {
-                "type": "movie",
-                "id": f"tmdb_new_releases_{lang}",
-                "name": lbl["tmdb_new"],
-                "extra": [{"name": "skip"}],
-                "extraSupported": ["skip"],
-            },
             # 1. Yeni eklenen filmler  (seri filmler dahil)
             {
                 "type": "movie",
@@ -1194,7 +1186,6 @@ async def configure_addon(token: str, lang: str = "en"):
     _CATALOGS_DEF = [
         ("similar",            "🎯 " + ("Sana Özel" if lang=="tr" else ("Empfohlen für Sie" if lang=="de" else "For You")), "movie"),
         ("tmdb_trending",   _lbl['tmdb_trending'],  "movie"),
-        ("tmdb_new_releases", _lbl['tmdb_new'],     "movie"),
         ("latest_movies",   f"🎬 {_lbl['new']}",            "movie"),
         ("top_movies",      f"🎬 {_lbl['popular']}",        "movie"),
         ("collcat",         f"🎬 {_lbl['collections']}",    "movie"),
@@ -1823,8 +1814,6 @@ async def get_catalog(token: str, media_type: str, id: str, extra: Optional[str]
 
                 if id.startswith("tmdb_trending_"):
                     all_items = _tmdb.get_trending()
-                elif id.startswith("tmdb_new_releases_"):
-                    all_items = _tmdb.get_new_releases()
                 else:
                     return {"metas": []}
 

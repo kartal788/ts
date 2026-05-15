@@ -575,20 +575,6 @@
     </div>
   </div>
 
-  <!-- Yeni Çıkanlar — yatay scroll satırı -->
-  <div id="new-releases-section" class="mb-5 hidden">
-    <div class="flex items-center gap-2 mb-2">
-      <span class="text-base font-bold" style="color:#f59e0b">🆕</span>
-      <span class="text-sm font-semibold" id="t-newrel-lbl">Yeni Çıkanlar</span>
-      <div class="flex-1 h-px" style="background:var(--c-border)"></div>
-    </div>
-    <div class="scroll-row-wrap" style="position:relative">
-      <button class="scroll-btn scroll-btn-l" onclick="scrollRow('new-releases-grid',-1)" aria-label="Geri">&#8249;</button>
-      <div id="new-releases-grid" class="scroll-row"></div>
-      <button class="scroll-btn scroll-btn-r" onclick="scrollRow('new-releases-grid',1)" aria-label="İleri">&#8250;</button>
-    </div>
-  </div>
-
   <!-- Yerli Diziler — yatay scroll satırı (sadece dizi modunda görünür) -->
   <div id="yerli-dizi-section" class="mb-5 hidden">
     <div class="flex items-center gap-2 mb-2">
@@ -786,7 +772,7 @@ function applyI18n(){
   const m={"t-movies":"movies","t-series":"series","t-loading":"loading","t-loading-more":"loadingMore","t-no-result":"noResult","t-prev":"prev","t-next":"next","t-logout":"logout","t-dl-title":"dlTitle","t-dl-prep":"dlPrep","t-dl-desc":"dlDesc","t-dl-size":"dlSize","t-daily-lbl":"dailyLbl","t-monthly-lbl":"monthlyLbl","t-daily-rem-lbl":"dailyRem","t-monthly-rem-lbl":"monthlyRem","t-filter":"filter","t-fl-genre":"flGenre","t-fl-year":"flYear","t-fl-cast":"flCast","t-cast-label":"castLabel","t-expiry-label":"expiryLbl","t-sub-end-lbl":"subEndLbl","t-speed-lbl":"speedLbl","t-device-lbl":"deviceLbl",
     "t-nav-film":"navFilm","t-nav-dizi":"navDizi","t-nav-toplam":"navToplam",
     "t-nav-film-m":"navFilm","t-nav-dizi-m":"navDizi",
-    "t-yerli-dizi-lbl":"yerliDiziler","t-trending-lbl":"trendler","t-newrel-lbl":"yeniCikanlar","t-see-all":"seeAll","t-modal-trailer-lbl":"trailerWatch"};
+    "t-yerli-dizi-lbl":"yerliDiziler","t-trending-lbl":"trendler","t-see-all":"seeAll","t-modal-trailer-lbl":"trailerWatch"};
   for(const[id,k]of Object.entries(m)){const el=document.getElementById(id);if(el)el.textContent=t(k);}
   const si=document.getElementById("search-input");if(si)si.placeholder=t("searchPh");
   // Sort options
@@ -2135,26 +2121,16 @@ setTimeout(()=>{
 setInterval(loadUsage,60000);
 
 // ── TMDB ÖNE ÇIKANLAR ────────────────────────────────────────────────────────
-let _tmdbTrendingItems=null,_tmdbNewItems=null;
+let _tmdbTrendingItems=null;
 
 async function loadTmdbSections(){
   try{
-    const [tRes,nRes]=await Promise.all([
-      fetch("/api/uye/tmdb?kind=trending"),
-      fetch("/api/uye/tmdb?kind=new")
-    ]);
+    const tRes=await fetch("/api/uye/tmdb?kind=trending");
     if(tRes.ok){
       const td=await tRes.json();
       if(td.items&&td.items.length){
         _tmdbTrendingItems=td.items;
         renderTmdbGrid("trending-grid","trending-section",td.items);
-      }
-    }
-    if(nRes.ok){
-      const nd=await nRes.json();
-      if(nd.items&&nd.items.length){
-        _tmdbNewItems=nd.items;
-        renderTmdbGrid("new-releases-grid","new-releases-section",nd.items);
       }
     }
   }catch(e){}
@@ -2166,8 +2142,6 @@ async function loadTmdbSections(){
 function reRenderTmdbSections(){
   if(_tmdbTrendingItems&&_tmdbTrendingItems.length)
     renderTmdbGrid("trending-grid","trending-section",_tmdbTrendingItems);
-  if(_tmdbNewItems&&_tmdbNewItems.length)
-    renderTmdbGrid("new-releases-grid","new-releases-section",_tmdbNewItems);
 }
 
 async function loadYerliDiziSection(){
