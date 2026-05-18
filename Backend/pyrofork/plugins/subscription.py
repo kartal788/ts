@@ -366,12 +366,34 @@ async def admin_review(client: Client, callback_query: CallbackQuery):
             await callback_query.answer("Bu kullanıcı zaten banlı değil.", show_alert=True)
 
 
+def _fmt_gb(bytes_val: float) -> str:
+    """Byte değerini GB olarak formatlar."""
+    gb = bytes_val / (1024 ** 3)
+    return f"{gb:.2f} GB"
+
+def _fmt_limit(limit_gb: float) -> str:
+    """0 ise Sınırsız, değilse GB cinsinden göster."""
+    if not limit_gb:
+        return "Sınırsız ♾️"
+    return f"{limit_gb:.2f} GB"
+
+def _fmt_requests(val: int) -> str:
+    """0 ise Sınırsız, değilse sayıyı göster."""
+    if not val:
+        return "Sınırsız ♾️"
+    return str(val)
+
+
 @Client.on_message(filters.command("abonelik"))
 async def check_status(client: Client, message: Message):
     if not Telegram.SUBSCRIPTION:
         return
 
-    user_id = (message.from_user.id if message.from_user else None) or (message.sender_chat.id if message.sender_chat else None) or message.chat.id
+    user_id = (
+        (message.from_user.id if message.from_user else None)
+        or (message.sender_chat.id if message.sender_chat else None)
+        or message.chat.id
+    )
 
     user = await db.get_user(user_id)
     if not user or user.get("subscription_status") != "active":
@@ -385,15 +407,119 @@ async def check_status(client: Client, message: Message):
     if now > expiry:
         return await message.reply_text("Aboneliğiniz sona ermiştir.")
 
+    # ── Zaman bilgileri (UTC+3 / İstanbul) ─────────────────────────────
+    tz_offset = timedelta(hours=3)
+    expiry_tr = expiry + tz_offset
     remaining = expiry - now
-    days = remaining.days
-    hours = remaining.seconds // 3600
+    rem_days  = remaining.days
+    rem_hours = remaining.seconds // 3600
 
-    expiry_tr = expiry + timedelta(hours=3)
+    # Plan süresi → başlangıç tarihi hesapla
+    plan_days = 0
+    plan_id   = user.get("plan_id")
+    if plan_id:
+        try:
+            from bson.objectid import ObjectId as _ObjId
+            plan_doc = await db.dbs["tracking"]["sub_plans"].find_one({"_id": _ObjId(plan_id)})
+            if plan_doc:
+                plan_days = int(plan_doc.get("days", 0))
+        except Exception:
+            pass
+
+    if plan_days > 0:
+        start_dt    = expiry - timedelta(days=plan_days)
+        start_tr    = start_dt + tz_offset
+        start_str   = start_tr.strftime("%d.%m.%Y")
+    else:
+        start_str = "—"
+
+    # ── Token / kullanım bilgileri ──────────────────────────────────────
+    token_doc = None
+    try:
+        token_doc = await db.dbs["tracking"]["api_tokens"].find_one(
+            {"$or": [{"user_id": user_id}, {"user_id": str(user_id)}]}
+        )
+    except Exception:
+        pass
+
+    # Limitler
+    if token_doc:
+        limits        = token_doc.get("limits", {})
+        daily_limit   = float(limits.get("daily_limit_gb",   0) or 0)
+        monthly_limit = float(limits.get("monthly_limit_gb", 0) or 0)
+    else:
+        daily_limit   = 0.0
+        monthly_limit = 0.0
+
+    # İstek limiti: token + plan + ek paket tümünü birleştiren metod
+    try:
+        req_limit = await db.get_user_request_limit(user_id)
+    except Exception:
+        req_limit = 0
+
+    # Kullanım
+    if token_doc:
+        usage          = token_doc.get("usage", {})
+        daily_bytes    = float(usage.get("daily",   {}).get("bytes", 0) or 0)
+        monthly_bytes  = float(usage.get("monthly", {}).get("bytes", 0) or 0)
+    else:
+        daily_bytes   = 0.0
+        monthly_bytes = 0.0
+
+    # Kalan trafik
+    if daily_limit > 0:
+        daily_remaining_bytes = max(0, daily_limit * (1024 ** 3) - daily_bytes)
+    else:
+        daily_remaining_bytes = None   # Sınırsız
+
+    if monthly_limit > 0:
+        monthly_remaining_bytes = max(0, monthly_limit * (1024 ** 3) - monthly_bytes)
+    else:
+        monthly_remaining_bytes = None  # Sınırsız
+
+    # İstek hakkı
+    req_used = 0
+    try:
+        req_used = await db.count_user_requests_this_month(user_id)
+    except Exception:
+        pass
+
+    if req_limit > 0:
+        req_remaining = max(0, req_limit - req_used)
+    else:
+        req_remaining = None  # Sınırsız
+
+    # ── Mesaj oluştur ───────────────────────────────────────────────────
+    lines = [
+        "━━━━━━━━━━━━━━━━━━━━━━━━━",
+        "        📋 <b>ABONELİK BİLGİLERİ</b>",
+        "━━━━━━━━━━━━━━━━━━━━━━━━━",
+        "",
+        "🗓 <b>Üyelik Dönemi</b>",
+        f"  ▫️ Bitiş      : <b>{expiry_tr.strftime('%d.%m.%Y %H:%M')}</b>",
+        f"  ▫️ Kalan      : <b>{rem_days} gün {rem_hours} saat</b>",
+        "",
+        "📊 <b>Günlük Trafik</b>",
+        f"  ▫️ Limit      : <b>{_fmt_limit(daily_limit)}</b>",
+        f"  ▫️ Kullanılan : <b>{_fmt_gb(daily_bytes)}</b>",
+        f"  ▫️ Kalan      : <b>{'Sınırsız ♾️' if daily_remaining_bytes is None else _fmt_gb(daily_remaining_bytes)}</b>",
+        "",
+        "📈 <b>Aylık Trafik</b>",
+        f"  ▫️ Limit      : <b>{_fmt_limit(monthly_limit)}</b>",
+        f"  ▫️ Kullanılan : <b>{_fmt_gb(monthly_bytes)}</b>",
+        f"  ▫️ Kalan      : <b>{'Sınırsız ♾️' if monthly_remaining_bytes is None else _fmt_gb(monthly_remaining_bytes)}</b>",
+        "",
+        "🎬 <b>Aylık İstek Hakkı</b>",
+        f"  ▫️ Limit      : <b>{_fmt_requests(req_limit)}</b>",
+        f"  ▫️ Kullanılan : <b>{req_used}</b>",
+        f"  ▫️ Kalan      : <b>{'Sınırsız ♾️' if req_remaining is None else req_remaining}</b>",
+        "",
+        "━━━━━━━━━━━━━━━━━━━━━━━━━",
+        "✅ <b>Aboneliğiniz aktif</b>",
+        "━━━━━━━━━━━━━━━━━━━━━━━━━",
+    ]
 
     await message.reply_text(
-        f"<b>Üyelik:</b> Aktif ✅\n"
-        f"<b>Bitiş:</b> {expiry_tr.strftime('%d.%m.%Y %H:%M')}\n"
-        f"<b>Kalan:</b> {days} gün {hours} saat",
+        "\n".join(lines),
         parse_mode=enums.ParseMode.HTML
     )

@@ -789,3 +789,224 @@ async def my_movie_reminders(request: Request):
     )
     items = await cursor.to_list(length=200)
     return {"reminders": items}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# İÇERİK İSTEĞİ (web sayfasından /istek komutu gibi)
+# ─────────────────────────────────────────────────────────────────────────────
+
+import re as _re
+from datetime import datetime as _datetime
+
+_IMDB_RE_W  = _re.compile(r"imdb\.com/title/(tt\d+)", _re.IGNORECASE)
+_TMDB_MOV_W = _re.compile(r"themoviedb\.org/movie/(\d+)", _re.IGNORECASE)
+_TMDB_TV_W  = _re.compile(r"themoviedb\.org/tv/(\d+)", _re.IGNORECASE)
+
+def _parse_link_web(text: str):
+    m = _IMDB_RE_W.search(text)
+    if m:
+        imdb_id = m.group(1)
+        return f"https://www.imdb.com/title/{imdb_id}/", "unknown", 0, imdb_id
+    m = _TMDB_MOV_W.search(text)
+    if m:
+        tid = int(m.group(1))
+        return f"https://www.themoviedb.org/movie/{tid}", "movie", tid, str(tid)
+    m = _TMDB_TV_W.search(text)
+    if m:
+        tid = int(m.group(1))
+        return f"https://www.themoviedb.org/tv/{tid}", "tv", tid, str(tid)
+    return None, None, 0, None
+
+
+def _content_requests_col():
+    return db.dbs["tracking"]["content_requests"]
+
+
+# ── POST /api/uye/icerik-iste ────────────────────────────────────────────────
+
+async def submit_content_request(request: Request):
+    """
+    Üye web sayfasından içerik talebi gönderir.
+    Gelen JSON: { "link": str, "note": str (opsiyonel) }
+    - İsteği DB'ye kaydeder (bot /istek komutuyla aynı koleksiyon)
+    - Yöneticiye Telegram bildirimi gönderir
+    - Ayrıca isteği hatırlatma olarak da kaydeder (TMDB link ise)
+    """
+    member = _require_member(request)
+    try:
+        user_id = int(member["user_id"])
+    except (KeyError, ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Geçersiz kullanıcı")
+
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Geçersiz JSON")
+
+    raw_link = (body.get("link") or "").strip()
+    note     = (body.get("note") or "").strip()[:200]
+    title    = (body.get("title") or "").strip()[:200]
+    poster   = _validate_poster_url(body.get("poster") or "")
+
+    if not raw_link:
+        raise HTTPException(status_code=400, detail="Link zorunlu")
+
+    link, media_type, tmdb_id, display_id = _parse_link_web(raw_link)
+    if link is None:
+        raise HTTPException(status_code=400, detail="Geçersiz link. IMDB veya TMDB linki girin.")
+
+    # Aylık limit kontrolü — count_user_requests_this_month created_at bazlı sayar (tutarlı)
+    request_limit = await db.get_user_request_limit(user_id)
+    monthly_count = await db.count_user_requests_this_month(user_id)
+    if request_limit > 0 and monthly_count >= request_limit:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Aylık istek limitine ulaştınız ({request_limit}). Bir sonraki ay sıfırlanır."
+        )
+
+    # DB'ye kaydet
+    now = _datetime.utcnow()
+    doc = {
+        "user_id":    user_id,
+        "link":       link,
+        "media_type": media_type,
+        "title":      title,
+        "tmdb_id":    tmdb_id,
+        "note":       note,
+        "poster":     poster,
+        "status":     "pending",
+        "month":      _datetime.utcnow().strftime("%Y-%m"),
+        "created_at": now,
+        "source":     "web",   # bot'tan gelenlerden ayırt etmek için
+    }
+    result = await _content_requests_col().insert_one(doc)
+    request_id = str(result.inserted_id)
+
+    # Aynı zamanda hatırlatma da kur (TMDB link ise)
+    reminder_set = False
+    if media_type in ("tv", "movie") and tmdb_id:
+        try:
+            col = _reminders_col() if media_type == "tv" else _movie_reminders_col()
+            existing = await col.find_one({"tmdb_id": tmdb_id})
+            if existing is None:
+                await col.insert_one({
+                    "tmdb_id":  tmdb_id,
+                    "db_index": 0,
+                    "title":    title,
+                    "poster":   poster,
+                    "status":   "",
+                    "user_ids": [user_id],
+                })
+            elif user_id not in (existing.get("user_ids") or []):
+                await col.update_one(
+                    {"tmdb_id": tmdb_id},
+                    {"$addToSet": {"user_ids": user_id},
+                     "$set": {"title": title or existing.get("title",""), "poster": poster or existing.get("poster","")}},
+                )
+            reminder_set = True
+        except Exception as _e:
+            _logger.warning("İstek sonrası hatırlatma kurulamadı: %s", _e)
+
+    # Yöneticiye Telegram bildirimi gönder
+    # Web session'da Telegram username'i bulunmadığından DB'den çekiyoruz
+    try:
+        _user_doc      = await db.get_user(user_id)
+        username_val   = (_user_doc or {}).get("username") or member.get("name") or str(user_id)
+    except Exception:
+        username_val   = member.get("name") or str(user_id)
+    first_name_val = member.get("name") or username_val or str(user_id)
+    type_label     = {"movie": "🎬 Film", "tv": "📺 Dizi", "unknown": "🎥 Bilinmiyor"}.get(media_type, "?")
+    title_str      = f"\n<b>📌 Başlık:</b> {_html.escape(title)}" if title else ""
+    note_str       = f"\n<b>💬 Not:</b> {_html.escape(note)}" if note else ""
+    limit_info     = f"\n📊 Bu ay: <b>{monthly_count + 1}/{request_limit}</b> istek" if request_limit > 0 else ""
+
+    admin_text = (
+        f"<b>🌐 Yeni İçerik Talebi (Web)</b>\n\n"
+        f"<b>👤 Kullanıcı:</b> {_html.escape(first_name_val)}\n"
+        f"<b>🔗 Kullanıcı Adı:</b> @{_html.escape(username_val)}\n"
+        f"<b>🆔 Telegram ID:</b> <code>{user_id}</code>\n"
+        f"<b>📂 Tür:</b> {type_label}{title_str}\n"
+        f"<b>🔗 Link:</b> {link}{note_str}{limit_info}\n\n"
+        f"Talebi onaylayın veya reddedin."
+    )
+
+    from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ Onayla", callback_data=f"req_approve_{request_id}_{user_id}"),
+        InlineKeyboardButton("❌ Reddet", callback_data=f"req_reject_{request_id}_{user_id}"),
+    ]])
+
+    approver_ids = Telegram.APPROVER_IDS if Telegram.APPROVER_IDS else [Telegram.OWNER_ID]
+    try:
+        from Backend.pyrofork.bot import StreamBot as _StreamBot
+    except Exception:
+        _StreamBot = None
+        _logger.warning("StreamBot import edilemedi, istek bildirimi gönderilemedi.")
+
+    if _StreamBot:
+        for approver_id in approver_ids:
+            try:
+                await _StreamBot.send_message(
+                    approver_id,
+                    admin_text,
+                    reply_markup=keyboard,
+                    parse_mode=enums.ParseMode.HTML,
+                    disable_web_page_preview=True,
+                )
+            except Exception as e:
+                _logger.warning("İstek admin bildirimi gönderilemedi (%s): %s", approver_id, e)
+
+    remaining = None
+    if request_limit > 0:
+        remaining = request_limit - (monthly_count + 1)
+
+    return {
+        "ok":          True,
+        "request_id":  request_id,
+        "reminder_set": reminder_set,
+        "remaining":   remaining,
+        "message":     "İsteğiniz alındı!" + (" Hatırlatma da kuruldu." if reminder_set else ""),
+    }
+
+
+# ── GET /api/uye/isteklerim ──────────────────────────────────────────────────
+
+async def my_content_requests(request: Request):
+    """Oturumdaki üyenin tüm içerik taleplerini döndürür."""
+    member = _require_member(request)
+    try:
+        user_id = int(member["user_id"])
+    except (KeyError, ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Geçersiz kullanıcı")
+
+    cursor = _content_requests_col().find(
+        {"user_id": user_id},
+        {"_id": 1, "link": 1, "media_type": 1, "title": 1, "poster": 1,
+         "status": 1, "note": 1, "created_at": 1, "source": 1},
+    ).sort("created_at", -1).limit(100)
+
+    docs = await cursor.to_list(length=100)
+    items = []
+    for d in docs:
+        items.append({
+            "id":         str(d["_id"]),
+            "link":       d.get("link", ""),
+            "media_type": d.get("media_type", "unknown"),
+            "title":      d.get("title", ""),
+            "poster":     d.get("poster", ""),
+            "status":     d.get("status", "pending"),
+            "note":       d.get("note", ""),
+            "source":     d.get("source", "bot"),
+            "created_at": d["created_at"].isoformat() if d.get("created_at") else "",
+        })
+    # Limit bilgisini ekle
+    request_limit = await db.get_user_request_limit(user_id)
+    used_this_month = await db.count_user_requests_this_month(user_id)
+    remaining = (request_limit - used_this_month) if request_limit > 0 else None
+
+    return {
+        "requests": items,
+        "request_limit": request_limit,       # 0 = sınırsız
+        "used_this_month": used_this_month,
+        "remaining": remaining,               # None = sınırsız
+    }

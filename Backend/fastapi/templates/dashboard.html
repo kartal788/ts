@@ -477,6 +477,19 @@
                                         <span class="text-gray-400">∞</span>
                                         {% endif %}
                                     </div>
+                                    <div class="flex items-center gap-1 mt-1">
+                                        <span class="w-4 text-gray-400 text-xs font-medium">İ:</span>
+                                        {% set req_lim = token.monthly_request_limit_effective | default(0) | int %}
+                                        {% if req_lim > 0 %}
+                                            {% set req_used = token.monthly_request_used if token.monthly_request_used is not none else 0 %}
+                                            {% set req_remaining = [req_lim - req_used, 0] | max %}
+                                            <span class="font-semibold text-xs {% if req_used >= req_lim %}text-red-500{% elif req_used >= (req_lim * 0.8) %}text-orange-500{% else %}text-green-600{% endif %}">
+                                                {{ req_used }}/{{ req_lim }}
+                                            </span>
+                                        {% else %}
+                                            <span class="text-gray-400 text-xs">∞</span>
+                                        {% endif %}
+                                    </div>
                                 </div>
                             </td>
                             
@@ -522,7 +535,7 @@
 </td>
                             <td class="py-4 px-4 text-right">
                                 <button
-                                    onclick="openEditModal('{{ token.token }}', '{{ token.limits.daily_limit_gb|default(0) }}', '{{ token.limits.monthly_limit_gb|default(0) }}', '{{ token.limits.speed_limit_mbps|default(0) }}', '{{ token.portal_username|default('') }}', '{{ token.portal_password|default('') }}', '{{ token.validity_days|default(0) }}', '{{ token.user_id|default('') }}')"
+                                    onclick="openEditModal('{{ token.token }}', '{{ token.limits.daily_limit_gb|default(0) }}', '{{ token.limits.monthly_limit_gb|default(0) }}', '{{ token.limits.speed_limit_mbps|default(0) }}', '{{ token.portal_username|default('') }}', '{{ token.portal_password|default('') }}', '{{ token.validity_days|default(0) }}', '{{ token.user_id|default('') }}', '{{ token.limits.monthly_request_limit|default(0) }}')"
                                     class="text-blue-500 hover:text-blue-700 font-medium text-sm px-3 py-1 mr-2 rounded border border-blue-200 hover:bg-blue-50 transition-colors">
                                     Düzenle
                                 </button>
@@ -543,8 +556,8 @@
         </div>
 
         <!-- Edit Limit Modal -->
-        <div id="edit-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50">
-            <div class="bg-white rounded-lg p-6 w-full max-w-md shadow-xl transform transition-all">
+        <div id="edit-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50 p-4 overflow-y-auto">
+            <div class="bg-white rounded-lg p-6 w-full max-w-md shadow-xl transform transition-all my-auto">
                 <h3 class="text-lg font-bold mb-4 theme-text-primary">Eklenti limitini düzenle</h3>
                 <input type="hidden" id="edit-token-id">
 
@@ -569,13 +582,22 @@
                         <p class="text-xs theme-text-secondary mt-1">0 = config varsayılanı veya sınırsız</p>
                     </div>
                     <div>
-                        <label class="block text-sm font-medium theme-text-secondary mb-1">📅 Geçerlilik (Gün)</label>
+                        <label class="block text-sm font-medium theme-text-secondary mb-1">📅 Eklenecek Gün</label>
                         <div class="relative">
-                            <input type="number" id="edit-validity-days" placeholder="0 = sınırsız" step="1" min="0"
+                            <input type="number" id="edit-validity-days" placeholder="1" step="1" min="1"
                                 class="w-full theme-card border border-gray-300 rounded-lg px-4 py-2 pr-12 focus:outline-none focus:border-primary">
                             <span class="absolute right-3 top-2 text-gray-400 text-sm pointer-events-none">Gün</span>
                         </div>
-                        <p class="text-xs theme-text-secondary mt-1">0 = süresiz. Girilen gün mevcut bitiş tarihine eklenir; süre yoksa bugünden başlar.</p>
+                        <p class="text-xs theme-text-secondary mt-1">Abonelik bitiş tarihine eklenecek gün sayısı. Varsayılan 1. Eğer 0 yazılırsa üyelik süresi sınırsıza döner.</p>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium theme-text-secondary mb-1">📩 Aylık İstek Limiti</label>
+                        <div class="relative">
+                            <input type="number" id="edit-request-limit" placeholder="0 = sınırsız" step="1" min="0"
+                                class="w-full theme-card border border-gray-300 rounded-lg px-4 py-2 pr-16 focus:outline-none focus:border-primary">
+                            <span class="absolute right-3 top-2 text-gray-400 text-sm pointer-events-none">istek</span>
+                        </div>
+                        <p class="text-xs theme-text-secondary mt-1">0 = sınırsız. /istek komutuyla ayda kaç içerik talep edebileceği.</p>
                     </div>
                     <div>
                         <label class="block text-sm font-medium theme-text-secondary mb-1">📱 Telegram Kullanıcı ID</label>
@@ -633,7 +655,7 @@
 
     let currentEditToken = null;
 
-    function openEditModal(token, daily, monthly, speed, portalUsername, portalPassword, validityDays, telegramUserId) {
+    function openEditModal(token, daily, monthly, speed, portalUsername, portalPassword, validityDays, telegramUserId, requestLimit) {
         currentEditToken = token;
         document.getElementById('edit-token-id').value = token;
         document.getElementById('edit-daily').value = daily == 'None' ? 0 : daily;
@@ -641,8 +663,9 @@
         document.getElementById('edit-speed').value = (speed == 'None' || speed == '0') ? '' : speed;
         document.getElementById('edit-portal-username').value = portalUsername || '';
         document.getElementById('edit-portal-password').value = portalPassword || '';
-        document.getElementById('edit-validity-days').value = (validityDays && validityDays != 'None' && validityDays != '0') ? validityDays : '';
+        document.getElementById('edit-validity-days').value = 1;
         document.getElementById('edit-telegram-user-id').value = (telegramUserId && telegramUserId != 'None') ? telegramUserId : '';
+        document.getElementById('edit-request-limit').value = (requestLimit && requestLimit != 'None') ? requestLimit : 0;
 
         document.getElementById('edit-modal').classList.remove('hidden');
     }
@@ -685,6 +708,7 @@
         const portalPassword = document.getElementById('edit-portal-password').value;
         const validityDays = document.getElementById('edit-validity-days').value;
         const telegramUserId = document.getElementById('edit-telegram-user-id').value;
+        const requestLimit = document.getElementById('edit-request-limit').value;
 
         try {
             const response = await fetch('/api/tokens/' + currentEditToken, {
@@ -696,8 +720,9 @@
                     speed_limit_mbps: document.getElementById('edit-speed').value || 0,
                     portal_username: portalUsername || null,
                     portal_password: portalPassword || null,
-                    validity_days: validityDays ? parseInt(validityDays) : null,
+                    validity_days: validityDays ? parseInt(validityDays) : 1,
                     telegram_user_id: telegramUserId ? parseInt(telegramUserId) : null,
+                    monthly_request_limit: requestLimit !== '' ? parseInt(requestLimit) : 0,
                 })
             });
 

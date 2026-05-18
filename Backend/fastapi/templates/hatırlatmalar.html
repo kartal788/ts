@@ -270,6 +270,79 @@
   </div>
 </div>
 
+<!-- İSTEKLERİM BÖLÜMÜ -->
+<div class="tc border-b py-5 px-4" style="border-color:var(--c-border)" id="requests-section">
+  <div class="max-w-5xl mx-auto">
+    <!-- Başlık + toggle -->
+    <div class="flex items-center gap-2 mb-3 cursor-pointer select-none" onclick="toggleRequestsPanel()">
+      <i class="fas fa-paper-plane" style="color:#f59e0b"></i>
+      <h2 id="t-req-title" class="font-bold text-sm" style="color:var(--c-text)">İçerik İstekleri</h2>
+      <span id="req-count-badge" class="text-xs font-semibold px-2 py-0.5 rounded-full ml-1"
+            style="background:rgba(245,158,11,.15);color:#fbbf24;border:1px solid rgba(245,158,11,.3);display:none"></span>
+      <div class="flex-1"></div>
+      <i id="req-chevron" class="fas fa-chevron-down ts transition-transform" style="font-size:.75rem"></i>
+    </div>
+
+    <!-- İstek gönderme formu -->
+    <div id="req-form-wrap">
+      <p id="t-req-desc" class="text-xs ts mb-3">TMDB veya IMDB linki yapıştırın — yönetici onayladığında kataloga eklenecek. İstek aynı zamanda hatırlatma olarak da kaydedilir.</p>
+      <div class="flex flex-col sm:flex-row gap-2 mb-2">
+        <div class="relative flex-1">
+          <i class="fas fa-link absolute left-3 top-1/2 -translate-y-1/2 ts" style="font-size:.75rem"></i>
+          <input id="req-link-input" type="url"
+                 placeholder="https://www.themoviedb.org/movie/12345  veya  https://www.imdb.com/title/tt1234567"
+                 class="w-full rounded-lg text-sm px-3 py-2 pl-8"
+                 style="background:var(--c-bg);color:var(--c-text);border:1px solid var(--c-border);outline:none"
+                 onfocus="this.style.borderColor='#f59e0b'"
+                 onblur="this.style.borderColor='var(--c-border)'"
+                 onkeydown="if(event.key==='Enter')sendContentRequest()">
+        </div>
+        <button onclick="sendContentRequest()"
+                id="btn-send-request"
+                class="flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold shrink-0 transition"
+                style="background:#f59e0b;color:#000">
+          <i class="fas fa-paper-plane"></i>
+          <span id="t-req-btn">İstek Gönder</span>
+        </button>
+      </div>
+      <div class="relative">
+        <input id="req-note-input" type="text" maxlength="200"
+               placeholder="Not ekle (opsiyonel)…"
+               class="w-full rounded-lg text-xs px-3 py-1.5"
+               style="background:var(--c-bg);color:var(--c-text);border:1px solid var(--c-border);outline:none"
+               onfocus="this.style.borderColor='#f59e0b'"
+               onblur="this.style.borderColor='var(--c-border)'">
+      </div>
+      <!-- Aylık istek hakkı -->
+      <div id="req-limit-info" class="hidden mt-2 flex items-center gap-2">
+        <span style="font-size:.7rem;color:var(--c-text2)" id="req-limit-label"></span>
+        <div id="req-limit-bar-wrap" class="hidden flex-1 rounded-full overflow-hidden" style="height:4px;background:rgba(255,255,255,.1)">
+          <div id="req-limit-bar" style="height:100%;border-radius:999px;background:#f59e0b;transition:width .4s"></div>
+        </div>
+      </div>
+      <div id="req-send-result" class="mt-2 hidden"></div>
+    </div>
+
+    <!-- İstek listesi -->
+    <div id="req-list-wrap" class="mt-4 hidden">
+      <div class="flex items-center gap-2 mb-2">
+        <span id="t-req-history" class="text-xs font-semibold ts uppercase tracking-wide">Geçmiş İstekler</span>
+        <button onclick="loadMyRequests()" class="ml-auto text-xs ts hover:opacity-80 transition bg-transparent border-0 p-0">
+          <i class="fas fa-sync-alt"></i>
+        </button>
+      </div>
+      <div id="req-list" class="flex flex-col gap-2"></div>
+      <div id="req-list-empty" class="hidden text-center py-6 ts text-xs">
+        <i class="fas fa-inbox" style="font-size:2rem;opacity:.3;margin-bottom:.5rem;display:block"></i>
+        <span id="t-req-empty">Henüz istek göndermediniz.</span>
+      </div>
+      <div id="req-list-loading" class="text-center py-4 ts text-xs">
+        <i class="fas fa-circle-notch fa-spin"></i>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ANA İÇERİK -->
 <main class="max-w-5xl mx-auto px-4 py-6">
 
@@ -821,6 +894,14 @@ const I18N = {
     confirmDelete:'hatırlatmayı silmek istediğinizden emin misiniz?',
     confirmDeleteAll:'hatırlatmanın tamamını silmek istediğinizden emin misiniz?',
     removedBulk:'hatırlatma kaldırıldı.',
+    // İstekler bölümü
+    reqTitle:'İçerik İstekleri', reqDesc:'TMDB veya IMDB linki yapıştırın — yönetici onayladığında kataloga eklenecek. İstek aynı zamanda hatırlatma olarak da kaydedilir.',
+    reqBtn:'İstek Gönder', reqHistory:'Geçmiş İstekler', reqEmpty:'Henüz istek göndermediniz.',
+    reqInvalidLink:'Geçersiz link. TMDB veya IMDB linki girin.',
+    reqSuccess:'✅ İsteğiniz alındı!', reqReminderAlso:' Hatırlatma da kuruldu.',
+    reqErr:'Hata: ', reqLimit:'Aylık istek limitinize ulaştınız.',
+    reqLimitUsed:'Bu ay kullanılan:', reqLimitOf:'/', reqLimitRem:'kalan', reqLimitUnlimited:'Sınırsız istek hakkı',
+    reqPending:'⏳ Bekliyor', reqApproved:'✅ Onaylandı', reqRejected:'❌ Reddedildi',
   },
   en: {
     back:'Back to Catalog', title:'🔔 My Reminders', logout:'Sign Out',
@@ -844,6 +925,13 @@ const I18N = {
     confirmDelete:'reminders will be deleted. Are you sure?',
     confirmDeleteAll:'reminders will all be deleted. Are you sure?',
     removedBulk:'reminder(s) removed.',
+    reqTitle:'Content Requests', reqDesc:'Paste a TMDB or IMDB link — it will be added to the catalog after admin approval. The request is also saved as a reminder.',
+    reqBtn:'Send Request', reqHistory:'Request History', reqEmpty:'You have not sent any requests yet.',
+    reqInvalidLink:'Invalid link. Enter a TMDB or IMDB link.',
+    reqSuccess:'✅ Request received!', reqReminderAlso:' Reminder also set.',
+    reqErr:'Error: ', reqLimit:'You have reached your monthly request limit.',
+    reqLimitUsed:'Used this month:', reqLimitOf:'/', reqLimitRem:'remaining', reqLimitUnlimited:'Unlimited requests',
+    reqPending:'⏳ Pending', reqApproved:'✅ Approved', reqRejected:'❌ Rejected',
   },
   de: {
     back:'Zurück zum Katalog', title:'🔔 Meine Erinnerungen', logout:'Abmelden',
@@ -867,6 +955,13 @@ const I18N = {
     confirmDelete:'Erinnerungen löschen? Sicher?',
     confirmDeleteAll:'Alle Erinnerungen löschen? Sicher?',
     removedBulk:'Erinnerung(en) entfernt.',
+    reqTitle:'Inhaltsanfragen', reqDesc:'TMDB- oder IMDB-Link einfügen — wird nach Admin-Genehmigung zum Katalog hinzugefügt. Die Anfrage wird auch als Erinnerung gespeichert.',
+    reqBtn:'Anfrage senden', reqHistory:'Anfrageverlauf', reqEmpty:'Sie haben noch keine Anfragen gesendet.',
+    reqInvalidLink:'Ungültiger Link. Bitte TMDB- oder IMDB-Link eingeben.',
+    reqSuccess:'✅ Anfrage erhalten!', reqReminderAlso:' Erinnerung auch gesetzt.',
+    reqErr:'Fehler: ', reqLimit:'Monatliches Anfragelimit erreicht.',
+    reqLimitUsed:'Diesen Monat genutzt:', reqLimitOf:'/', reqLimitRem:'übrig', reqLimitUnlimited:'Unbegrenzte Anfragen',
+    reqPending:'⏳ Ausstehend', reqApproved:'✅ Genehmigt', reqRejected:'❌ Abgelehnt',
   },
 };
 
@@ -909,6 +1004,14 @@ function applyLang() {
   set('t-add-reminder-btn',   t('addBtn'));
   const inp = document.getElementById('reminder-link-input');
   if (inp) inp.placeholder = t('addPlaceholder');
+  // İstekler bölümü
+  set('t-req-title',   t('reqTitle'));
+  set('t-req-desc',    t('reqDesc'));
+  set('t-req-btn',     t('reqBtn'));
+  set('t-req-history', t('reqHistory'));
+  set('t-req-empty',   t('reqEmpty'));
+  const reqInp = document.getElementById('req-link-input');
+  if (reqInp) reqInp.placeholder = t('addPlaceholder');
   // Seçim modu / toplu silme
   set('t-select-mode',      window._selectMode ? t('cancelSelect') : t('selectMode'));
   set('t-select-all',       t('selectAll'));
@@ -1160,6 +1263,222 @@ async function addReminderByLink() {
     btn.innerHTML = origContent;
   }
 }
+
+// ── İÇERİK İSTEĞİ FONKSİYONLARI ────────────────────────────────────────────
+
+let _reqPanelOpen = false;
+
+function toggleRequestsPanel() {
+  _reqPanelOpen = !_reqPanelOpen;
+  const listWrap = document.getElementById('req-list-wrap');
+  const chevron  = document.getElementById('req-chevron');
+  if (_reqPanelOpen) {
+    listWrap.classList.remove('hidden');
+    chevron.style.transform = 'rotate(180deg)';
+    loadMyRequests();
+  } else {
+    listWrap.classList.add('hidden');
+    chevron.style.transform = '';
+  }
+}
+
+function showReqResult(msg, ok) {
+  const el = document.getElementById('req-send-result');
+  el.className = '';
+  el.style.cssText = `font-size:.78rem;font-weight:600;padding:.4rem .75rem;border-radius:.5rem;margin-top:.5rem;` +
+    (ok ? 'background:rgba(34,197,94,.15);color:#4ade80;border:1px solid rgba(34,197,94,.3)' :
+          'background:rgba(239,68,68,.15);color:#f87171;border:1px solid rgba(239,68,68,.3)');
+  el.textContent = msg;
+  el.classList.remove('hidden');
+  setTimeout(() => el.classList.add('hidden'), 5000);
+}
+
+function _renderRequestLimit(data) {
+  const wrap  = document.getElementById('req-limit-info');
+  const label = document.getElementById('req-limit-label');
+  const bar   = document.getElementById('req-limit-bar');
+  const barWrap = document.getElementById('req-limit-bar-wrap');
+  if (!wrap || !label) return;
+
+  const limit    = data.request_limit;      // 0 = sınırsız
+  const used     = data.used_this_month ?? 0;
+  const remaining = data.remaining;         // null = sınırsız
+
+  if (limit === undefined) return;          // eski endpoint — gösterme
+
+  wrap.classList.remove('hidden');
+
+  if (!limit || limit === 0) {
+    // Sınırsız
+    label.innerHTML = `<i class="fas fa-infinity" style="margin-right:.3rem;color:#4ade80"></i>${t('reqLimitUnlimited')}`;
+    if (barWrap) barWrap.classList.add('hidden');
+    return;
+  }
+
+  // Limitli plan
+  const pct = Math.min(100, Math.round(used / limit * 100));
+  const color = pct >= 100 ? '#f87171' : pct >= 75 ? '#fb923c' : '#f59e0b';
+  label.innerHTML = `<i class="fas fa-paper-plane" style="margin-right:.3rem;color:${color}"></i>`
+    + `${t('reqLimitUsed')} <b style="color:var(--c-text)">${used}${t('reqLimitOf')}${limit}</b>`
+    + (remaining !== null && remaining !== undefined
+        ? ` — <span style="color:${color}">${remaining} ${t('reqLimitRem')}</span>`
+        : '');
+  if (barWrap) { barWrap.classList.remove('hidden'); }
+  if (bar) { bar.style.width = pct + '%'; bar.style.background = color; }
+}
+
+async function sendContentRequest() {
+  const linkEl = document.getElementById('req-link-input');
+  const noteEl = document.getElementById('req-note-input');
+  const btn    = document.getElementById('btn-send-request');
+  const url    = (linkEl.value || '').trim();
+  const note   = (noteEl ? noteEl.value || '' : '').trim();
+
+  if (!url) { showReqResult(t('reqInvalidLink'), false); return; }
+
+  const info = parseLinkInfo(url);
+  if (!info) { showReqResult(t('reqInvalidLink'), false); return; }
+
+  btn.disabled = true;
+  const origHTML = btn.innerHTML;
+  btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i>';
+
+  try {
+    let tmdbId = info.id, mediaType = info.type, metaTitle = '', metaPoster = '';
+
+    if (info.source === 'imdb') {
+      const fr = await fetch(`/api/uye/imdb-to-tmdb?imdb_id=${info.id}`);
+      if (fr.ok) {
+        const fd = await fr.json();
+        tmdbId    = String(fd.tmdb_id);
+        mediaType = fd.media_type;
+      }
+    }
+
+    if (tmdbId && mediaType && mediaType !== 'unknown') {
+      const mr = await fetch(`/api/uye/tmdb-meta?tmdb_id=${tmdbId}&type=${mediaType}`);
+      if (mr.ok) {
+        const md = await mr.json();
+        metaTitle  = md.title  || '';
+        metaPoster = md.poster || '';
+      }
+    }
+
+    const res = await fetch('/api/uye/icerik-iste', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ link: url, note, title: metaTitle, poster: metaPoster }),
+    });
+    const data = await res.json();
+
+    if (!res.ok) {
+      const detail = data.detail || '';
+      if (res.status === 429 || detail.toLowerCase().includes('limit')) {
+        showReqResult(t('reqLimit'), false);
+      } else {
+        showReqResult(t('reqErr') + detail, false);
+      }
+    } else {
+      let msg = t('reqSuccess');
+      if (data.reminder_set) msg += t('reqReminderAlso');
+      if (data.remaining !== null && data.remaining !== undefined) {
+        msg += ` (Kalan: ${data.remaining})`;
+      }
+      showReqResult(msg, true);
+      showToast(t('reqSuccess'), 'info');
+      linkEl.value = '';
+      if (noteEl) noteEl.value = '';
+      if (!_reqPanelOpen) {
+        _reqPanelOpen = true;
+        document.getElementById('req-list-wrap').classList.remove('hidden');
+        document.getElementById('req-chevron').style.transform = 'rotate(180deg)';
+      }
+      loadMyRequests();
+      if (data.reminder_set) await loadAll();
+    }
+  } catch(err) {
+    showReqResult(t('reqErr') + err.message, false);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = origHTML;
+  }
+}
+
+async function loadMyRequests() {
+  const listEl    = document.getElementById('req-list');
+  const emptyEl   = document.getElementById('req-list-empty');
+  const loadingEl = document.getElementById('req-list-loading');
+  const badgeEl   = document.getElementById('req-count-badge');
+
+  loadingEl.classList.remove('hidden');
+  listEl.innerHTML = '';
+  emptyEl.classList.add('hidden');
+
+  try {
+    const r = await fetch('/api/uye/isteklerim');
+    if (!r.ok) throw new Error('Yüklenemedi');
+    const data = await r.json();
+    const items = data.requests || [];
+
+    // Limit bilgisini göster
+    _renderRequestLimit(data);
+
+    loadingEl.classList.add('hidden');
+
+    if (badgeEl) {
+      if (items.length > 0) { badgeEl.textContent = items.length; badgeEl.style.display = ''; }
+      else { badgeEl.style.display = 'none'; }
+    }
+
+    if (items.length === 0) { emptyEl.classList.remove('hidden'); return; }
+
+    items.forEach(item => {
+      const statusMap = {
+        pending:  { label: t('reqPending'),  color: '#fbbf24', bg: 'rgba(245,158,11,.15)', border: 'rgba(245,158,11,.3)' },
+        approved: { label: t('reqApproved'), color: '#4ade80', bg: 'rgba(34,197,94,.15)',  border: 'rgba(34,197,94,.3)'  },
+        rejected: { label: t('reqRejected'), color: '#f87171', bg: 'rgba(239,68,68,.15)',  border: 'rgba(239,68,68,.3)'  },
+      };
+      const st   = statusMap[item.status] || statusMap.pending;
+      const date = item.created_at ? new Date(item.created_at).toLocaleDateString(CUR_LANG === 'tr' ? 'tr-TR' : 'en-US') : '';
+      const srcIcon  = item.source === 'web' ? '🌐' : '🤖';
+      const typeIcon = { movie: '🎬', tv: '📺', unknown: '🎥' }[item.media_type] || '🎥';
+
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;align-items:center;gap:.65rem;padding:.55rem .75rem;border-radius:.6rem;border:1px solid var(--c-border);background:var(--c-bg)';
+      row.innerHTML = `
+        <span style="font-size:1rem;flex-shrink:0">${typeIcon}</span>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:.78rem;font-weight:600;color:var(--c-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+            ${item.title ? item.title : '<span style="opacity:.5">' + (item.link||'') + '</span>'}
+          </div>
+          ${item.note ? `<div style="font-size:.65rem;color:var(--c-text2);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${item.note}</div>` : ''}
+          <div style="font-size:.6rem;color:var(--c-text2);margin-top:2px">${srcIcon} ${date}</div>
+        </div>
+        <span style="font-size:.6rem;font-weight:700;padding:2px 8px;border-radius:4px;white-space:nowrap;flex-shrink:0;background:${st.bg};color:${st.color};border:1px solid ${st.border}">${st.label}</span>
+        <a href="${item.link}" target="_blank" rel="noopener"
+           style="flex-shrink:0;font-size:.65rem;color:var(--c-prim);opacity:.7"
+           title="Linki aç"><i class="fas fa-external-link-alt"></i></a>
+      `;
+      listEl.appendChild(row);
+    });
+  } catch(e) {
+    loadingEl.classList.add('hidden');
+    listEl.innerHTML = `<div style="font-size:.75rem;color:#f87171;text-align:center;padding:.5rem">${e.message}</div>`;
+  }
+}
+
+// Sayfa yüklenince badge'i arka planda güncelle
+(async () => {
+  try {
+    const r = await fetch('/api/uye/isteklerim');
+    if (!r.ok) return;
+    const d   = await r.json();
+    const cnt = (d.requests || []).length;
+    const b   = document.getElementById('req-count-badge');
+    if (b && cnt > 0) { b.textContent = cnt; b.style.display = ''; }
+    _renderRequestLimit(d);
+  } catch(_) {}
+})();
 
 loadAll();
 </script>

@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import json
 from fastapi import Request, Query, HTTPException
 from fastapi.responses import StreamingResponse
@@ -7,6 +8,8 @@ from Backend.helper.pyro import get_readable_time
 from Backend.pyrofork.bot import multi_clients, StreamBot
 from Backend.helper.custom_dl import run_speed_test, _speed_test_single_client
 from time import time
+
+_logger = logging.getLogger(__name__)
 
 
 # --- API Routes for System Stats ---
@@ -318,6 +321,7 @@ async def update_token_limits_api(token: str, payload: dict):
         portal_username = payload.get("portal_username")
         portal_password = payload.get("portal_password")
         validity_days = payload.get("validity_days")
+        monthly_request_limit = payload.get("monthly_request_limit")
         telegram_user_id = payload.get("telegram_user_id")
 
         def parse_limit(val):
@@ -335,16 +339,29 @@ async def update_token_limits_api(token: str, payload: dict):
                 if days > 0:
                     from datetime import datetime, timedelta, timezone
                     existing_token = await db.get_api_token(token)
-                    # Başlangıç: mevcut expires_at varsa ona ekle, yoksa bugünden başlat
+                    # Başlangıç: önce token'ın expires_at'ine bak
                     current_expires = existing_token.get("expires_at") if existing_token else None
                     if isinstance(current_expires, str):
                         try:
                             current_expires = datetime.fromisoformat(current_expires.replace("Z", "+00:00"))
                         except Exception:
                             current_expires = None
+                    # Token'da expires_at yoksa, bağlı Telegram kullanıcısının subscription_expiry'sine bak
+                    if current_expires is None and telegram_user_id:
+                        try:
+                            tg_user = await db.get_user(int(telegram_user_id))
+                            if tg_user:
+                                current_expires = tg_user.get("subscription_expiry")
+                                if isinstance(current_expires, str):
+                                    try:
+                                        current_expires = datetime.fromisoformat(current_expires.replace("Z", "+00:00"))
+                                    except Exception:
+                                        current_expires = None
+                        except Exception:
+                            current_expires = None
                     if current_expires is not None:
                         # Naive ise UTC-aware yap
-                        if current_expires.tzinfo is None:
+                        if hasattr(current_expires, 'tzinfo') and current_expires.tzinfo is None:
                             current_expires = current_expires.replace(tzinfo=timezone.utc)
                         # Eğer süre zaten dolmuşsa bugünden başlat
                         now_utc = datetime.now(timezone.utc)
@@ -368,6 +385,7 @@ async def update_token_limits_api(token: str, payload: dict):
             clear_expiry=(validity_days is not None and int(validity_days) == 0),
             validity_days=int(validity_days) if validity_days is not None else None,
             telegram_user_id=int(telegram_user_id) if telegram_user_id else None,
+            monthly_request_limit=int(monthly_request_limit) if monthly_request_limit is not None else None,
         )
 
         # Telegram ID varsa abonelik kaydını da güncelle/oluştur
@@ -681,12 +699,13 @@ async def add_subscription_plan_api(payload: dict) -> dict:
         daily_limit_gb = float(payload.get("daily_limit_gb") or 0)
         monthly_limit_gb = float(payload.get("monthly_limit_gb") or 0)
         speed_limit_mbps = float(payload.get("speed_limit_mbps") or 0)
+        monthly_request_limit = int(payload.get("monthly_request_limit") or 0)
         if not is_unlimited and days <= 0:
             raise HTTPException(status_code=400, detail="Invalid plan parameters")
         if price < 0:
             raise HTTPException(status_code=400, detail="Invalid plan parameters")
             
-        plan_id = await db.add_subscription_plan(days, price, label, currency, is_unlimited, daily_limit_gb, monthly_limit_gb, speed_limit_mbps)
+        plan_id = await db.add_subscription_plan(days, price, label, currency, is_unlimited, daily_limit_gb, monthly_limit_gb, speed_limit_mbps, monthly_request_limit=monthly_request_limit)
         if plan_id:
             return {"status": "success", "message": "Plan added successfully", "plan_id": plan_id}
         else:
@@ -709,12 +728,13 @@ async def update_subscription_plan_api(plan_id: str, payload: dict) -> dict:
         daily_limit_gb = float(payload.get("daily_limit_gb") or 0)
         monthly_limit_gb = float(payload.get("monthly_limit_gb") or 0)
         speed_limit_mbps = float(payload.get("speed_limit_mbps") or 0)
+        monthly_request_limit = int(payload.get("monthly_request_limit") or 0)
         if not is_unlimited and days <= 0:
              raise HTTPException(status_code=400, detail="Invalid plan parameters")
         if price < 0:
              raise HTTPException(status_code=400, detail="Invalid plan parameters")
              
-        success = await db.update_subscription_plan(plan_id, days, price, label, currency, is_unlimited, daily_limit_gb, monthly_limit_gb, speed_limit_mbps)
+        success = await db.update_subscription_plan(plan_id, days, price, label, currency, is_unlimited, daily_limit_gb, monthly_limit_gb, speed_limit_mbps, monthly_request_limit=monthly_request_limit)
         if success:
              return {"status": "success", "message": "Plan updated successfully"}
         else:
@@ -899,6 +919,7 @@ async def revoke_token_api(token: str, delete_subscription: bool = False, user_i
         if delete_subscription and user_id:
             await db.manage_subscriber(user_id, "delete")
             await db.delete_user_reminders(user_id)
+            await db.delete_user_content_requests(user_id)
         return {"status": "success", "message": "Token (ve varsa abonelik) silindi."}
     except HTTPException:
         raise

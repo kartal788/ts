@@ -268,10 +268,14 @@ class Database:
             from datetime import timedelta
             new_expiry = now + timedelta(days=duration)
 
+        plan_id_str = user["pending_payment"].get("plan_id", "")
+        set_fields: dict = {"subscription_expiry": new_expiry, "subscription_status": "active"}
+        if plan_id_str:
+            set_fields["plan_id"] = plan_id_str
         await self.dbs["tracking"]["users"].update_one(
             {"_id": user_id},
             {
-                "$set": {"subscription_expiry": new_expiry, "subscription_status": "active"},
+                "$set": set_fields,
                 "$unset": {"pending_payment": "", "reminder_sent": ""}
             }
         )
@@ -288,29 +292,33 @@ class Database:
         if plan_doc is None and plan_label:
             plan_doc = await self.dbs["tracking"]["sub_plans"].find_one({"label": plan_label})
 
-        plan_daily_gb   = 0.0
-        plan_monthly_gb = 0.0
-        plan_speed_mbps = 0.0
+        plan_daily_gb      = 0.0
+        plan_monthly_gb    = 0.0
+        plan_speed_mbps    = 0.0
+        plan_request_limit = 0
         if plan_doc is not None:
-            plan_daily_gb   = float(plan_doc.get("daily_limit_gb",  0) or 0)
-            plan_monthly_gb = float(plan_doc.get("monthly_limit_gb", 0) or 0)
-            plan_speed_mbps = float(plan_doc.get("speed_limit_mbps", 0) or 0)
+            plan_daily_gb      = float(plan_doc.get("daily_limit_gb",  0) or 0)
+            plan_monthly_gb    = float(plan_doc.get("monthly_limit_gb", 0) or 0)
+            plan_speed_mbps    = float(plan_doc.get("speed_limit_mbps", 0) or 0)
+            plan_request_limit = int(plan_doc.get("monthly_request_limit", 0) or 0)
             # Token zaten varsa anında güncelle (hem str hem int user_id için)
             await self.dbs["tracking"]["api_tokens"].update_many(
                 {"$or": [{"user_id": str(user_id)}, {"user_id": int(user_id)}]},
                 {"$set": {
-                    "limits.daily_limit_gb":   plan_daily_gb,
-                    "limits.monthly_limit_gb": plan_monthly_gb,
-                    "limits.speed_limit_mbps": plan_speed_mbps,
+                    "limits.daily_limit_gb":        plan_daily_gb,
+                    "limits.monthly_limit_gb":      plan_monthly_gb,
+                    "limits.speed_limit_mbps":      plan_speed_mbps,
+                    "limits.monthly_request_limit": plan_request_limit,
                 }}
             )
 
         user_data = await self.get_user(user_id)
         if user_data is not None:
             # Plan limitlerini çağıran koda ilet — add_api_token bu değerleri kullanacak
-            user_data["_plan_daily_gb"]   = plan_daily_gb
-            user_data["_plan_monthly_gb"] = plan_monthly_gb
-            user_data["_plan_speed_mbps"] = plan_speed_mbps
+            user_data["_plan_daily_gb"]      = plan_daily_gb
+            user_data["_plan_monthly_gb"]    = plan_monthly_gb
+            user_data["_plan_speed_mbps"]    = plan_speed_mbps
+            user_data["_plan_request_limit"] = plan_request_limit
         return user_data
 
     async def reject_payment(self, user_id: int) -> bool:
@@ -386,7 +394,7 @@ class Database:
         plans = await cursor.to_list(None)
         return [convert_objectid_to_str(plan) for plan in plans]
 
-    async def add_subscription_plan(self, days: int, price: float, label: str = "", currency: str = "USD", is_unlimited: bool = False, daily_limit_gb: float = 0, monthly_limit_gb: float = 0, speed_limit_mbps: float = 0) -> Optional[str]:
+    async def add_subscription_plan(self, days: int, price: float, label: str = "", currency: str = "USD", is_unlimited: bool = False, daily_limit_gb: float = 0, monthly_limit_gb: float = 0, speed_limit_mbps: float = 0, monthly_request_limit: int = 0) -> Optional[str]:
         result = await self.dbs["tracking"]["sub_plans"].insert_one({
             "days": days,
             "price": price,
@@ -396,11 +404,12 @@ class Database:
             "daily_limit_gb": daily_limit_gb,
             "monthly_limit_gb": monthly_limit_gb,
             "speed_limit_mbps": speed_limit_mbps,
+            "monthly_request_limit": monthly_request_limit,
             "created_at": datetime.utcnow()
         })
         return str(result.inserted_id)
 
-    async def update_subscription_plan(self, plan_id: str, days: int, price: float, label: str = "", currency: str = "USD", is_unlimited: bool = False, daily_limit_gb: float = 0, monthly_limit_gb: float = 0, speed_limit_mbps: float = 0) -> bool:
+    async def update_subscription_plan(self, plan_id: str, days: int, price: float, label: str = "", currency: str = "USD", is_unlimited: bool = False, daily_limit_gb: float = 0, monthly_limit_gb: float = 0, speed_limit_mbps: float = 0, monthly_request_limit: int = 0) -> bool:
         try:
             result = await self.dbs["tracking"]["sub_plans"].update_one(
                 {"_id": ObjectId(plan_id)},
@@ -413,6 +422,7 @@ class Database:
                     "daily_limit_gb": daily_limit_gb,
                     "monthly_limit_gb": monthly_limit_gb,
                     "speed_limit_mbps": speed_limit_mbps,
+                    "monthly_request_limit": monthly_request_limit,
                     "updated_at": datetime.utcnow()
                 }}
             )
@@ -488,10 +498,40 @@ class Database:
             return result.modified_count > 0
             
         elif action == "delete":
+            # Aboneliği iptal et — tüm plan/addon alanlarını da temizle
             result = await self.dbs["tracking"]["users"].update_one(
                 {"_id": user_id},
-                {"$unset": {"subscription_expiry": "", "subscription_status": ""}}
+                {"$unset": {
+                    "subscription_expiry": "",
+                    "subscription_status": "",
+                    "plan_id": "",
+                    "pending_payment": "",
+                    "pending_addon": "",
+                    "addon_extra_daily_gb": "",
+                    "addon_extra_monthly_gb": "",
+                    "addon_extra_speed_mbps": "",
+                    "addon_extra_requests": "",
+                    "reminder_sent": "",
+                }}
             )
+            # Token limitlerini sıfırla
+            try:
+                await self.dbs["tracking"]["api_tokens"].update_many(
+                    {"$or": [{"user_id": user_id}, {"user_id": str(user_id)}]},
+                    {"$set": {
+                        "limits.daily_limit_gb":        0,
+                        "limits.monthly_limit_gb":      0,
+                        "limits.speed_limit_mbps":      0,
+                        "limits.monthly_request_limit": 0,
+                    }}
+                )
+            except Exception as e:
+                print(f"manage_subscriber delete: token reset error: {e}")
+            # Bu ayki istek sayacını sıfırla
+            try:
+                await self.delete_user_content_requests(user_id)
+            except Exception as e:
+                print(f"manage_subscriber delete: request count reset error: {e}")
             return result.modified_count > 0
             
         return False
@@ -2010,7 +2050,8 @@ class Database:
                                        expires_at=None, clear_expiry: bool = False,
                                        validity_days: int = None,
                                        telegram_user_id: int = None,
-                                       ip_limit: int = None, device_limit: int = None) -> bool:
+                                       ip_limit: int = None, device_limit: int = None,
+                                       monthly_request_limit: int = None) -> bool:
         update_fields = {
             "limits": {
                 "daily_limit_gb": daily_limit_gb if daily_limit_gb else 0,
@@ -2018,6 +2059,7 @@ class Database:
                 "speed_limit_mbps": float(speed_limit_mbps) if speed_limit_mbps else 0,
                 "ip_limit":     int(ip_limit)     if ip_limit     is not None else 0,
                 "device_limit": int(device_limit) if device_limit is not None else 0,
+                "monthly_request_limit": int(monthly_request_limit) if monthly_request_limit is not None else 0,
             }
         }
         if portal_username is not None:
@@ -3216,6 +3258,113 @@ class Database:
         doc = await self.dbs["tracking"]["subtitles"].find_one({"_id": oid})
         return convert_objectid_to_str(doc) if doc else None
 
+    # ------------------------------------------------------------------ #
+    #  İçerik Talep (İstek) Metodları                                     #
+    # ------------------------------------------------------------------ #
+
+    async def get_user_request_limit(self, user_id: int) -> int:
+        """
+        Kullanıcının aylık istek limitini döndürür.
+        Önce kullanıcıya bağlı token'ın limits.monthly_request_limit alanına bakar,
+        sonra abonelik planına bakar. 0 → sınırsız.
+        """
+        # 1. Kullanıcıya bağlı token'dan bak (ek paket eklenince burası güncellenir)
+        try:
+            token_doc = await self.dbs["tracking"]["api_tokens"].find_one(
+                {"$or": [{"user_id": user_id}, {"user_id": str(user_id)}]},
+                {"limits.monthly_request_limit": 1}
+            )
+            if token_doc:
+                token_limit = int((token_doc.get("limits") or {}).get("monthly_request_limit") or 0)
+                if token_limit > 0:
+                    return token_limit
+        except Exception:
+            pass
+
+        # 2. Kullanıcının plan_id'sine göre plan koleksiyonuna bak
+        user = await self.get_user(user_id)
+        if not user:
+            return 0
+
+        plan_limit = 0
+        plan_id = user.get("plan_id") or user.get("pending_payment", {}).get("plan_id")
+        if plan_id:
+            try:
+                plan = await self.dbs["tracking"]["sub_plans"].find_one({"_id": ObjectId(plan_id)})
+                if plan:
+                    plan_limit = int(plan.get("monthly_request_limit") or 0)
+            except Exception:
+                pass
+
+        # 3. Ek paket ile eklenen ekstra istek hakkını da ekle
+        addon_extra = int(user.get("addon_extra_requests") or 0)
+
+        total = plan_limit + addon_extra
+        return total
+
+    async def count_user_requests_this_month(self, user_id: int) -> int:
+        """
+        Kullanıcının bu takvim ayında yaptığı içerik talebi sayısını döndürür.
+        """
+        now = datetime.utcnow()
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        count = await self.dbs["tracking"]["content_requests"].count_documents({
+            "user_id": user_id,
+            "created_at": {"$gte": month_start}
+        })
+        return count
+
+    async def add_content_request(
+        self,
+        user_id: int,
+        link: str,
+        media_type: str,
+        tmdb_id: int = 0,
+    ) -> str:
+        """
+        Yeni bir içerik talebi kaydeder ve oluşturulan belge _id'sini string olarak döndürür.
+        """
+        result = await self.dbs["tracking"]["content_requests"].insert_one({
+            "user_id": user_id,
+            "link": link,
+            "media_type": media_type,
+            "tmdb_id": tmdb_id,
+            "status": "pending",
+            "created_at": datetime.utcnow(),
+        })
+        return str(result.inserted_id)
+
+    async def get_content_request(self, request_id: str) -> Optional[dict]:
+        """
+        Belirtilen _id'ye sahip içerik talebini döndürür.
+        """
+        try:
+            doc = await self.dbs["tracking"]["content_requests"].find_one({"_id": ObjectId(request_id)})
+            return doc
+        except Exception:
+            return None
+
+    async def update_content_request_status(self, request_id: str, status: str) -> bool:
+        """
+        İçerik talebinin durumunu günceller (pending → approved / rejected).
+        """
+        try:
+            result = await self.dbs["tracking"]["content_requests"].update_one(
+                {"_id": ObjectId(request_id)},
+                {"$set": {"status": status, "updated_at": datetime.utcnow()}}
+            )
+            return result.modified_count > 0
+        except Exception:
+            return False
+
+    async def delete_user_content_requests(self, user_id: int) -> int:
+        """
+        Kullanıcıya ait tüm içerik taleplerini siler.
+        Silinen kayıt sayısını döndürür.
+        """
+        result = await self.dbs["tracking"]["content_requests"].delete_many({"user_id": user_id})
+        return result.deleted_count
+
     async def cleanup_expired_ip_bans(self) -> int:
         """
         Süresi dolmuş tüm IP ban kayıtlarını sil.
@@ -3227,3 +3376,264 @@ class Database:
             {"ban_until": {"$lt": datetime.utcnow()}}
         )
         return result.deleted_count
+
+    async def get_plan_image(self) -> Optional[str]:
+        """
+        Abonelik planları mesajında kullanılacak resmin Telegram file_id'sini döndürür.
+        Resim ayarlanmamışsa None döner.
+        """
+        doc = await self.dbs["tracking"]["bot_settings"].find_one({"_id": "plan_image"})
+        if doc:
+            return doc.get("file_id")
+        return None
+
+    async def set_plan_image(self, file_id: str) -> bool:
+        """
+        Abonelik planları mesajında kullanılacak resmin Telegram file_id'sini kaydeder.
+        Bot yeniden başlasa bile MongoDB'de kalır.
+        """
+        try:
+            await self.dbs["tracking"]["bot_settings"].update_one(
+                {"_id": "plan_image"},
+                {"$set": {"file_id": file_id, "updated_at": datetime.utcnow()}},
+                upsert=True
+            )
+            return True
+        except Exception as e:
+            print(f"set_plan_image error: {e}")
+            return False
+
+    async def delete_plan_image(self) -> bool:
+        """
+        Kayıtlı plan resmini siler; bundan sonra mesaj olarak gönderilir.
+        """
+        try:
+            await self.dbs["tracking"]["bot_settings"].delete_one({"_id": "plan_image"})
+            return True
+        except Exception as e:
+            print(f"delete_plan_image error: {e}")
+            return False
+
+    # ------------------------------------------------------------------
+    # Yükselt (/yukselt) komutunda gösterilecek resim — /plan2 ile ayarlanır
+    # ------------------------------------------------------------------
+    async def get_upgrade_image(self) -> Optional[str]:
+        """
+        /yukselt komutunda gösterilecek resmin Telegram file_id'sini döndürür.
+        Resim ayarlanmamışsa None döner.
+        """
+        doc = await self.dbs["tracking"]["bot_settings"].find_one({"_id": "upgrade_image"})
+        if doc:
+            return doc.get("file_id")
+        return None
+
+    async def set_upgrade_image(self, file_id: str) -> bool:
+        try:
+            await self.dbs["tracking"]["bot_settings"].update_one(
+                {"_id": "upgrade_image"},
+                {"$set": {"file_id": file_id, "updated_at": datetime.utcnow()}},
+                upsert=True
+            )
+            return True
+        except Exception as e:
+            print(f"set_upgrade_image error: {e}")
+            return False
+
+    async def delete_upgrade_image(self) -> bool:
+        try:
+            await self.dbs["tracking"]["bot_settings"].delete_one({"_id": "upgrade_image"})
+            return True
+        except Exception as e:
+            print(f"delete_upgrade_image error: {e}")
+            return False
+
+    # ------------------------------------------------------------------
+    # Ek Paketler — sadece /yukselt komutunda görünür
+    # ------------------------------------------------------------------
+    async def get_addon_packages(self) -> List[dict]:
+        cursor = self.dbs["tracking"]["addon_packages"].find().sort("price", ASCENDING)
+        packages = await cursor.to_list(None)
+        return [convert_objectid_to_str(p) for p in packages]
+
+    async def add_addon_package(
+        self,
+        label: str,
+        price: float,
+        extra_days: int = 0,
+        extra_daily_gb: float = 0,
+        extra_monthly_gb: float = 0,
+        extra_speed_mbps: float = 0,
+        extra_requests: int = 0,
+    ) -> Optional[str]:
+        result = await self.dbs["tracking"]["addon_packages"].insert_one({
+            "label": label,
+            "price": price,
+            "extra_days": extra_days,
+            "extra_daily_gb": extra_daily_gb,
+            "extra_monthly_gb": extra_monthly_gb,
+            "extra_speed_mbps": extra_speed_mbps,
+            "extra_requests": extra_requests,
+            "created_at": datetime.utcnow(),
+        })
+        return str(result.inserted_id)
+
+    async def update_addon_package(
+        self,
+        pkg_id: str,
+        label: str,
+        price: float,
+        extra_days: int = 0,
+        extra_daily_gb: float = 0,
+        extra_monthly_gb: float = 0,
+        extra_speed_mbps: float = 0,
+        extra_requests: int = 0,
+    ) -> bool:
+        try:
+            result = await self.dbs["tracking"]["addon_packages"].update_one(
+                {"_id": ObjectId(pkg_id)},
+                {"$set": {
+                    "label": label,
+                    "price": price,
+                    "extra_days": extra_days,
+                    "extra_daily_gb": extra_daily_gb,
+                    "extra_monthly_gb": extra_monthly_gb,
+                    "extra_speed_mbps": extra_speed_mbps,
+                    "extra_requests": extra_requests,
+                    "updated_at": datetime.utcnow(),
+                }}
+            )
+            return result.modified_count > 0
+        except Exception:
+            return False
+
+    async def delete_addon_package(self, pkg_id: str) -> bool:
+        try:
+            result = await self.dbs["tracking"]["addon_packages"].delete_one({"_id": ObjectId(pkg_id)})
+            return result.deleted_count > 0
+        except Exception:
+            return False
+
+    async def set_pending_addon(
+        self,
+        user_id: int,
+        pkg_id: str,
+        label: str,
+        price: float,
+        extra_days: int,
+        extra_daily_gb: float,
+        extra_monthly_gb: float,
+        extra_speed_mbps: float,
+        extra_requests: int,
+        admin_messages: list = None,
+    ):
+        data = {
+            "pending_addon": {
+                "pkg_id": pkg_id,
+                "label": label,
+                "price": price,
+                "extra_days": extra_days,
+                "extra_daily_gb": extra_daily_gb,
+                "extra_monthly_gb": extra_monthly_gb,
+                "extra_speed_mbps": extra_speed_mbps,
+                "extra_requests": extra_requests,
+                "date": datetime.utcnow(),
+            }
+        }
+        if admin_messages is not None:
+            data["pending_addon"]["admin_messages"] = admin_messages
+        await self.dbs["tracking"]["users"].update_one(
+            {"_id": user_id},
+            {"$set": data},
+            upsert=True
+        )
+
+    async def approve_addon(self, user_id: int) -> Optional[dict]:
+        """
+        Bekleyen ek paketi onaylar; kullanıcının limitlerini ve abonelik süresini artırır.
+        """
+        user = await self.get_user(user_id)
+        if not user or "pending_addon" not in user:
+            return None
+
+        addon = user["pending_addon"]
+        extra_days      = int(addon.get("extra_days", 0))
+        extra_daily_gb  = float(addon.get("extra_daily_gb", 0))
+        extra_monthly_gb = float(addon.get("extra_monthly_gb", 0))
+        extra_speed_mbps = float(addon.get("extra_speed_mbps", 0))
+        extra_requests  = int(addon.get("extra_requests", 0))
+
+        now = datetime.utcnow()
+
+        # Abonelik süresini uzat
+        set_fields = {}
+        if extra_days > 0:
+            current_expiry = user.get("subscription_expiry")
+            if current_expiry and current_expiry > now:
+                from datetime import timedelta
+                new_expiry = current_expiry + timedelta(days=extra_days)
+            else:
+                from datetime import timedelta
+                new_expiry = now + timedelta(days=extra_days)
+            set_fields["subscription_expiry"] = new_expiry
+            set_fields["subscription_status"] = "active"
+
+        await self.dbs["tracking"]["users"].update_one(
+            {"_id": user_id},
+            {
+                "$set": set_fields,
+                "$unset": {"pending_addon": ""},
+                "$inc": {
+                    "addon_extra_daily_gb": extra_daily_gb,
+                    "addon_extra_monthly_gb": extra_monthly_gb,
+                    "addon_extra_speed_mbps": extra_speed_mbps,
+                    "addon_extra_requests": extra_requests,
+                }
+            }
+        )
+
+        # API token limitlerini güncelle — mevcut plan + ek paket toplamı
+        try:
+            token_doc = await self.dbs["tracking"]["api_tokens"].find_one(
+                {"$or": [{"user_id": str(user_id)}, {"user_id": int(user_id)}]}
+            )
+            if token_doc:
+                limits = token_doc.get("limits", {})
+
+                # Token'daki request limiti 0 ise planın kendi limitini fallback olarak al
+                token_req = int(limits.get("monthly_request_limit", 0) or 0)
+                if token_req == 0 and extra_requests > 0:
+                    plan_req = 0
+                    plan_id_str = user.get("plan_id", "")
+                    if plan_id_str:
+                        try:
+                            plan_doc = await self.dbs["tracking"]["sub_plans"].find_one({"_id": ObjectId(plan_id_str)})
+                            if plan_doc:
+                                plan_req = int(plan_doc.get("monthly_request_limit", 0) or 0)
+                        except Exception:
+                            pass
+                    token_req = plan_req
+
+                new_daily    = (limits.get("daily_limit_gb",    0) or 0) + extra_daily_gb
+                new_monthly  = (limits.get("monthly_limit_gb",  0) or 0) + extra_monthly_gb
+                new_speed    = (limits.get("speed_limit_mbps",  0) or 0) + extra_speed_mbps
+                new_requests = token_req + extra_requests
+                await self.dbs["tracking"]["api_tokens"].update_many(
+                    {"$or": [{"user_id": str(user_id)}, {"user_id": int(user_id)}]},
+                    {"$set": {
+                        "limits.daily_limit_gb":        new_daily,
+                        "limits.monthly_limit_gb":      new_monthly,
+                        "limits.speed_limit_mbps":      new_speed,
+                        "limits.monthly_request_limit": new_requests,
+                    }}
+                )
+        except Exception as e:
+            print(f"approve_addon token update error: {e}")
+
+        return await self.get_user(user_id)
+
+    async def reject_addon(self, user_id: int) -> bool:
+        result = await self.dbs["tracking"]["users"].update_one(
+            {"_id": user_id},
+            {"$unset": {"pending_addon": ""}}
+        )
+        return result.modified_count > 0

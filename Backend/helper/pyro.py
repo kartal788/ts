@@ -182,27 +182,10 @@ async def restart_notification():
 
 # Bot commands
 commands = [
-BotCommand("start", "🚀 Botu başlatır."),
-BotCommand("abonelik", "📅 Abonelik bitiş tarihini gösterir."),
-BotCommand("istatistik", "📈 Bot istatistiklerini görüntüler."),
-BotCommand("aynivideolarisil", "🧹 Aynı olan videoları siler."),
-BotCommand("calismayanlinklerisil", "🗑️ Çalışmayan linkleri siler."),
-BotCommand("katalogyenile", "🔄 Platform ve içerik kataloğunu tazeler."),
-BotCommand("ekle", "📥 Rclone/Google drive klasöründeki dizi/filmleri stremioya ekler/siler."),
-BotCommand("s", "☁️ Sunucuya dizi/film yükler."),
-BotCommand("sunucudansil", "🗑 Sunucudaki dizi/film dosyaları seçerek siler."),
-BotCommand("duyuru", "📢 Tüm kullanıcılara mesaj gönderir."),
-BotCommand("set", "📝 IMDb verilerini manuel olarak tanımlar."),
-BotCommand("eskiverileriyenile", "♻️ Eski kayıtları güncel bilgilerle tazeler."),
-BotCommand("engelkaldir", "🛡️ Kullanıcı yasağını kaldırır."),
-BotCommand("ayarlar", "⚙️ Botun çalışma tercihlerini yapılandırır."),
-BotCommand("vindir", "💾 Veritabanı (DB) yedeğini alır."),
-BotCommand("log", "📜 Sistem günlüklerini raporlar."),
-BotCommand("depolama", "🔑 depolama bilgilerini görüntüler."),
-BotCommand("tara", "🔍 İçerikleri tarar ve indeksler."),
-BotCommand("m3ukontrol", "📋 M3U linklerinin durumunu kontrol eder."),
-BotCommand("temizle", "🧹 RAM ve SSD üzerindeki gereksiz verileri temizler."),
-BotCommand("restart", "🔃 Sistemi yeniden başlatır.")
+    BotCommand("start", "🚀 Botu başlatır."),
+    BotCommand("abonelik", "📅 Abonelik bilgilerini gösterir."),
+    BotCommand("istek", "✍️ Yeni dizi/film isteğinde bulunur."),
+    BotCommand("yukselt", "⚡ Abonelik planını yükseltir.")
 ]
 
 

@@ -114,14 +114,29 @@ async def send_start_message(client: Client, message: Message):
 
             keyboard = InlineKeyboardMarkup(keyboard_buttons)
 
-            return await message.reply_text(
+            plan_caption = (
                 f'<b>{Telegram.ISIM} ile sinema keyfine hazır mısın?</b>\n\n'
-                'Stremio üzerinden sunduğumuz özel içeriklere erişebilmen için aktif bir aboneliğin olması gerekiyor. Merak etme, senin için en avantajlı planları aşağıda listeledik.\n\n'
-                '🚀 Hemen başlamak için bir plan seç:',
-                reply_markup=keyboard,
-                quote=True,
-                parse_mode=enums.ParseMode.HTML
+                'Stremio üzerinden sunduğumuz özel içeriklere erişebilmen için aktif bir aboneliğin olması gerekiyor. '
+                'Merak etme, senin için en avantajlı planları aşağıda listeledik.\n\n'
+                '🚀 Hemen başlamak için bir plan seç:'
             )
+
+            plan_image_id = await db.get_plan_image()
+            if plan_image_id:
+                return await message.reply_photo(
+                    photo=plan_image_id,
+                    caption=plan_caption,
+                    reply_markup=keyboard,
+                    quote=True,
+                    parse_mode=enums.ParseMode.HTML
+                )
+            else:
+                return await message.reply_text(
+                    plan_caption,
+                    reply_markup=keyboard,
+                    quote=True,
+                    parse_mode=enums.ParseMode.HTML
+                )
 
         # User is active, fetch their token
         all_tokens = await db.get_all_api_tokens()

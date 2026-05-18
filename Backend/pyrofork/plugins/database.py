@@ -200,29 +200,33 @@ class Database:
         if plan_doc is None and plan_label:
             plan_doc = await self.dbs["tracking"]["sub_plans"].find_one({"label": plan_label})
 
-        plan_daily_gb   = 0.0
-        plan_monthly_gb = 0.0
-        plan_speed_mbps = 0.0
+        plan_daily_gb         = 0.0
+        plan_monthly_gb       = 0.0
+        plan_speed_mbps       = 0.0
+        plan_request_limit    = 0
         if plan_doc is not None:
-            plan_daily_gb   = float(plan_doc.get("daily_limit_gb",  0) or 0)
-            plan_monthly_gb = float(plan_doc.get("monthly_limit_gb", 0) or 0)
-            plan_speed_mbps = float(plan_doc.get("speed_limit_mbps", 0) or 0)
+            plan_daily_gb      = float(plan_doc.get("daily_limit_gb",  0) or 0)
+            plan_monthly_gb    = float(plan_doc.get("monthly_limit_gb", 0) or 0)
+            plan_speed_mbps    = float(plan_doc.get("speed_limit_mbps", 0) or 0)
+            plan_request_limit = int(plan_doc.get("monthly_request_limit", 0) or 0)
             # Token zaten varsa anında güncelle (hem str hem int user_id için)
             await self.dbs["tracking"]["api_tokens"].update_many(
                 {"$or": [{"user_id": str(user_id)}, {"user_id": int(user_id)}]},
                 {"$set": {
-                    "limits.daily_limit_gb":   plan_daily_gb,
-                    "limits.monthly_limit_gb": plan_monthly_gb,
-                    "limits.speed_limit_mbps": plan_speed_mbps,
+                    "limits.daily_limit_gb":        plan_daily_gb,
+                    "limits.monthly_limit_gb":      plan_monthly_gb,
+                    "limits.speed_limit_mbps":      plan_speed_mbps,
+                    "limits.monthly_request_limit": plan_request_limit,
                 }}
             )
 
         user_data = await self.get_user(user_id)
         if user_data is not None:
             # Plan limitlerini çağıran koda ilet — add_api_token bu değerleri kullanacak
-            user_data["_plan_daily_gb"]   = plan_daily_gb
-            user_data["_plan_monthly_gb"] = plan_monthly_gb
-            user_data["_plan_speed_mbps"] = plan_speed_mbps
+            user_data["_plan_daily_gb"]      = plan_daily_gb
+            user_data["_plan_monthly_gb"]    = plan_monthly_gb
+            user_data["_plan_speed_mbps"]    = plan_speed_mbps
+            user_data["_plan_request_limit"] = plan_request_limit
         return user_data
 
     async def reject_payment(self, user_id: int) -> bool:
@@ -298,7 +302,7 @@ class Database:
         plans = await cursor.to_list(None)
         return [convert_objectid_to_str(plan) for plan in plans]
 
-    async def add_subscription_plan(self, days: int, price: float, label: str = "", currency: str = "USD", is_unlimited: bool = False, daily_limit_gb: float = 0, monthly_limit_gb: float = 0, speed_limit_mbps: float = 0) -> Optional[str]:
+    async def add_subscription_plan(self, days: int, price: float, label: str = "", currency: str = "USD", is_unlimited: bool = False, daily_limit_gb: float = 0, monthly_limit_gb: float = 0, speed_limit_mbps: float = 0, monthly_request_limit: int = 0) -> Optional[str]:
         result = await self.dbs["tracking"]["sub_plans"].insert_one({
             "days": days,
             "price": price,
@@ -308,11 +312,12 @@ class Database:
             "daily_limit_gb": daily_limit_gb,
             "monthly_limit_gb": monthly_limit_gb,
             "speed_limit_mbps": speed_limit_mbps,
+            "monthly_request_limit": monthly_request_limit,
             "created_at": datetime.utcnow()
         })
         return str(result.inserted_id)
 
-    async def update_subscription_plan(self, plan_id: str, days: int, price: float, label: str = "", currency: str = "USD", is_unlimited: bool = False, daily_limit_gb: float = 0, monthly_limit_gb: float = 0, speed_limit_mbps: float = 0) -> bool:
+    async def update_subscription_plan(self, plan_id: str, days: int, price: float, label: str = "", currency: str = "USD", is_unlimited: bool = False, daily_limit_gb: float = 0, monthly_limit_gb: float = 0, speed_limit_mbps: float = 0, monthly_request_limit: int = 0) -> bool:
         try:
             result = await self.dbs["tracking"]["sub_plans"].update_one(
                 {"_id": ObjectId(plan_id)},
@@ -325,6 +330,7 @@ class Database:
                     "daily_limit_gb": daily_limit_gb,
                     "monthly_limit_gb": monthly_limit_gb,
                     "speed_limit_mbps": speed_limit_mbps,
+                    "monthly_request_limit": monthly_request_limit,
                     "updated_at": datetime.utcnow()
                 }}
             )
@@ -1517,28 +1523,31 @@ class Database:
     # API Token Methods
     # -------------------------------
 
-    async def add_api_token(self, name: str, daily_limit_gb: float = None, monthly_limit_gb: float = None, speed_limit_mbps: float = None, portal_username: str = None, portal_password: str = None, user_id: int = None) -> dict:
+    async def add_api_token(self, name: str, daily_limit_gb: float = None, monthly_limit_gb: float = None, speed_limit_mbps: float = None, portal_username: str = None, portal_password: str = None, user_id: int = None, monthly_request_limit: int = None) -> dict:
         # If a user_id is provided, return existing token if already created
         if user_id:
             existing = await self.dbs["tracking"]["api_tokens"].find_one({"user_id": user_id})
             if existing:
                 # Limit parametresi geçildiyse mevcut token'ı da güncelle
-                if daily_limit_gb is not None or monthly_limit_gb is not None or speed_limit_mbps is not None:
+                if daily_limit_gb is not None or monthly_limit_gb is not None or speed_limit_mbps is not None or monthly_request_limit is not None:
                     new_daily   = float(daily_limit_gb)    if daily_limit_gb    else 0.0
                     new_monthly = float(monthly_limit_gb)  if monthly_limit_gb  else 0.0
                     new_speed   = float(speed_limit_mbps)  if speed_limit_mbps  else 0.0
+                    new_req_lim = int(monthly_request_limit) if monthly_request_limit else 0
                     await self.dbs["tracking"]["api_tokens"].update_one(
                         {"_id": existing["_id"]},
                         {"$set": {
-                            "limits.daily_limit_gb":   new_daily,
-                            "limits.monthly_limit_gb": new_monthly,
-                            "limits.speed_limit_mbps": new_speed,
+                            "limits.daily_limit_gb":        new_daily,
+                            "limits.monthly_limit_gb":      new_monthly,
+                            "limits.speed_limit_mbps":      new_speed,
+                            "limits.monthly_request_limit": new_req_lim,
                         }}
                     )
                     existing.setdefault("limits", {})
-                    existing["limits"]["daily_limit_gb"]   = new_daily
-                    existing["limits"]["monthly_limit_gb"] = new_monthly
-                    existing["limits"]["speed_limit_mbps"] = new_speed
+                    existing["limits"]["daily_limit_gb"]        = new_daily
+                    existing["limits"]["monthly_limit_gb"]      = new_monthly
+                    existing["limits"]["speed_limit_mbps"]      = new_speed
+                    existing["limits"]["monthly_request_limit"] = new_req_lim
                 return convert_objectid_to_str(existing)
 
         alphabet = string.ascii_letters + string.digits
@@ -1552,9 +1561,10 @@ class Database:
             "portal_username": portal_username or None,
             "portal_password": portal_password or None,
             "limits": {
-                "daily_limit_gb": daily_limit_gb if daily_limit_gb else 0,
-                "monthly_limit_gb": monthly_limit_gb if monthly_limit_gb else 0,
-                "speed_limit_mbps": speed_limit_mbps if speed_limit_mbps else 0,
+                "daily_limit_gb":        daily_limit_gb if daily_limit_gb else 0,
+                "monthly_limit_gb":      monthly_limit_gb if monthly_limit_gb else 0,
+                "speed_limit_mbps":      speed_limit_mbps if speed_limit_mbps else 0,
+                "monthly_request_limit": monthly_request_limit if monthly_request_limit else 0,
             },
             "usage": {
                 "total_bytes": 0,
@@ -1686,12 +1696,14 @@ class Database:
 
     async def update_api_token_limits(self, token: str, daily_limit_gb: float, monthly_limit_gb: float,
                                        speed_limit_mbps: float = None,
-                                       portal_username: str = None, portal_password: str = None) -> bool:
+                                       portal_username: str = None, portal_password: str = None,
+                                       monthly_request_limit: int = None) -> bool:
         update_fields = {
             "limits": {
-                "daily_limit_gb": daily_limit_gb if daily_limit_gb else 0,
-                "monthly_limit_gb": monthly_limit_gb if monthly_limit_gb else 0,
-                "speed_limit_mbps": float(speed_limit_mbps) if speed_limit_mbps else 0,
+                "daily_limit_gb":        daily_limit_gb if daily_limit_gb else 0,
+                "monthly_limit_gb":      monthly_limit_gb if monthly_limit_gb else 0,
+                "speed_limit_mbps":      float(speed_limit_mbps) if speed_limit_mbps else 0,
+                "monthly_request_limit": int(monthly_request_limit) if monthly_request_limit else 0,
             }
         }
         if portal_username is not None:
@@ -1838,6 +1850,65 @@ class Database:
                                 })
                                 
         return dead_links
+
+    # -------------------------------
+    # -------------------------------
+    # İstek (Request) Takibi
+    # -------------------------------
+
+    async def add_content_request(self, user_id: int, link: str, media_type: str,
+                                   title: str = "", tmdb_id: int = 0,
+                                   status: str = "pending") -> Optional[str]:
+        """Kullanıcının /istek komutundan gelen içerik talebini kaydeder."""
+        now = datetime.utcnow()
+        month_str = now.strftime("%Y-%m")
+        doc = {
+            "user_id": user_id,
+            "link": link,
+            "media_type": media_type,  # "movie" | "tv" | "unknown"
+            "title": title,
+            "tmdb_id": tmdb_id,
+            "status": status,  # "pending" | "approved" | "rejected"
+            "month": month_str,
+            "created_at": now,
+        }
+        result = await self.dbs["tracking"]["content_requests"].insert_one(doc)
+        return str(result.inserted_id)
+
+    async def count_user_requests_this_month(self, user_id: int) -> int:
+        """Bu ayki kullanıcının istek sayısını döndürür."""
+        month_str = datetime.utcnow().strftime("%Y-%m")
+        return await self.dbs["tracking"]["content_requests"].count_documents(
+            {"user_id": user_id, "month": month_str}
+        )
+
+    async def get_user_request_limit(self, user_id: int) -> int:
+        """Kullanıcının api_tokens kaydından aylık istek limitini döndürür. 0 = sınırsız."""
+        token_doc = await self.dbs["tracking"]["api_tokens"].find_one(
+            {"$or": [{"user_id": user_id}, {"user_id": str(user_id)}]}
+        )
+        if not token_doc:
+            return 0
+        return int(token_doc.get("limits", {}).get("monthly_request_limit", 0) or 0)
+
+    async def update_content_request_status(self, request_id: str, status: str) -> bool:
+        """İsteğin durumunu (approved/rejected) günceller."""
+        try:
+            result = await self.dbs["tracking"]["content_requests"].update_one(
+                {"_id": ObjectId(request_id)},
+                {"$set": {"status": status, "updated_at": datetime.utcnow()}}
+            )
+            return result.modified_count > 0
+        except Exception:
+            return False
+
+    async def get_pending_requests(self) -> List[dict]:
+        """Bekleyen tüm içerik isteklerini döndürür."""
+        cursor = self.dbs["tracking"]["content_requests"].find(
+            {"status": "pending"}
+        ).sort("created_at", DESCENDING)
+        docs = await cursor.to_list(None)
+        return [convert_objectid_to_str(d) for d in docs]
 
     # -------------------------------
     # Stream Analytics

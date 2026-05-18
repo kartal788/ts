@@ -258,6 +258,27 @@ async def dashboard_page(request: Request, _: bool = Depends(require_auth)):
         }
 
     api_tokens = await db.get_all_api_tokens()
+    # Her token için aylık istek kullanımını hesapla
+    for tok in api_tokens:
+        uid = tok.get("user_id")
+        req_limit = int((tok.get("limits") or {}).get("monthly_request_limit") or 0)
+        # Token'da limit yoksa kullanıcının planından bak
+        if req_limit == 0 and uid:
+            try:
+                req_limit = await db.get_user_request_limit(int(uid))
+            except Exception:
+                req_limit = 0
+        tok["monthly_request_limit_effective"] = req_limit
+        if req_limit > 0:
+            if uid:
+                try:
+                    tok["monthly_request_used"] = await db.count_user_requests_this_month(int(uid))
+                except Exception:
+                    tok["monthly_request_used"] = 0
+            else:
+                tok["monthly_request_used"] = 0
+        else:
+            tok["monthly_request_used"] = None
     # BASE_URL config'den alınır; yoksa request.base_url kullanılır (port bilgisi korunur)
     configured_base_url = Telegram.BASE_URL.rstrip("/") + "/" if Telegram.BASE_URL else None
     _hiz = (Telegram.HIZ_LIMITI or "").strip()

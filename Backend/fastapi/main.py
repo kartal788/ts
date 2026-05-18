@@ -51,6 +51,8 @@ from Backend.fastapi.routes.notification_routes import (
     toggle_movie_reminder,
     movie_reminder_status,
     my_movie_reminders,
+    submit_content_request,
+    my_content_requests,
 )
 from Backend.fastapi.routes.api_routes import (
     list_media_api, delete_media_api, update_media_api, requery_media_api,
@@ -561,6 +563,14 @@ async def uye_film_hatirla_durum(
 async def uye_film_hatirlatmalarim(request: Request):
     return await my_movie_reminders(request)
 
+@app.post("/api/uye/icerik-iste")
+async def uye_icerik_iste(request: Request):
+    return await submit_content_request(request)
+
+@app.get("/api/uye/isteklerim")
+async def uye_isteklerim(request: Request):
+    return await my_content_requests(request)
+
 @app.get("/api/uye/tmdb")
 async def uye_tmdb(request: Request, kind: str = Query("trending", regex="^(trending|new)$")):
     from Backend.fastapi.routes.member_routes import _get_member
@@ -1015,6 +1025,75 @@ async def update_subscription_plan(plan_id: str, payload: dict, _: bool = Depend
 @app.delete("/api/admin/subscriptions/plans/{plan_id}")
 async def delete_subscription_plan(plan_id: str, _: bool = Depends(require_auth)):
     return await delete_subscription_plan_api(plan_id)
+
+# ---------------------------------------------------------------------------
+# Ek Paketler (Addon Packages) API Routes
+# ---------------------------------------------------------------------------
+@app.get("/api/admin/addon-packages")
+async def get_addon_packages(_: bool = Depends(require_auth)):
+    from Backend import db as _db
+    try:
+        packages = await _db.get_addon_packages()
+        return {"status": "success", "data": packages}
+    except Exception:
+        raise HTTPException(status_code=500, detail="Sunucu hatası")
+
+@app.post("/api/admin/addon-packages")
+async def add_addon_package(payload: dict, _: bool = Depends(require_auth)):
+    from Backend import db as _db
+    try:
+        label = str(payload.get("label", "")).strip()
+        price = float(payload.get("price", 0) or 0)
+        extra_days = int(payload.get("extra_days", 0) or 0)
+        extra_daily_gb = float(payload.get("extra_daily_gb", 0) or 0)
+        extra_monthly_gb = float(payload.get("extra_monthly_gb", 0) or 0)
+        extra_speed_mbps = float(payload.get("extra_speed_mbps", 0) or 0)
+        extra_requests = int(payload.get("extra_requests", 0) or 0)
+        if not label:
+            raise HTTPException(status_code=400, detail="Paket adı gereklidir")
+        pkg_id = await _db.add_addon_package(label, price, extra_days, extra_daily_gb, extra_monthly_gb, extra_speed_mbps, extra_requests)
+        if pkg_id:
+            return {"status": "success", "pkg_id": pkg_id}
+        raise HTTPException(status_code=500, detail="Eklenemedi")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=500, detail="Sunucu hatası")
+
+@app.put("/api/admin/addon-packages/{pkg_id}")
+async def update_addon_package(pkg_id: str, payload: dict, _: bool = Depends(require_auth)):
+    from Backend import db as _db
+    try:
+        label = str(payload.get("label", "")).strip()
+        price = float(payload.get("price", 0) or 0)
+        extra_days = int(payload.get("extra_days", 0) or 0)
+        extra_daily_gb = float(payload.get("extra_daily_gb", 0) or 0)
+        extra_monthly_gb = float(payload.get("extra_monthly_gb", 0) or 0)
+        extra_speed_mbps = float(payload.get("extra_speed_mbps", 0) or 0)
+        extra_requests = int(payload.get("extra_requests", 0) or 0)
+        if not label:
+            raise HTTPException(status_code=400, detail="Paket adı gereklidir")
+        success = await _db.update_addon_package(pkg_id, label, price, extra_days, extra_daily_gb, extra_monthly_gb, extra_speed_mbps, extra_requests)
+        if success:
+            return {"status": "success"}
+        raise HTTPException(status_code=404, detail="Paket bulunamadı")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=500, detail="Sunucu hatası")
+
+@app.delete("/api/admin/addon-packages/{pkg_id}")
+async def delete_addon_package(pkg_id: str, _: bool = Depends(require_auth)):
+    from Backend import db as _db
+    try:
+        success = await _db.delete_addon_package(pkg_id)
+        if success:
+            return {"status": "success"}
+        raise HTTPException(status_code=404, detail="Paket bulunamadı")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=500, detail="Sunucu hatası")
 
 @app.get("/api/admin/subscriptions/users")
 async def get_subscribers(_: bool = Depends(require_auth)):
