@@ -21,11 +21,12 @@ from pyrogram.types import (
 )
 from Backend.config import Telegram
 from Backend import db
+from Backend.helper.custom_filter import CustomFilters
 
 print("DEBUG: plan_image.py PLUGIN LOADED SUCCESSFULLY!")
 
 
-# ─── Sadece owner kullanabilir ────────────────────────────────────────────────
+# ─── Sadece owner kullanabilir (callback handler'lar için) ───────────────────
 def _is_owner(message_or_query) -> bool:
     if hasattr(message_or_query, "from_user") and message_or_query.from_user:
         return message_or_query.from_user.id == Telegram.OWNER_ID
@@ -33,14 +34,8 @@ def _is_owner(message_or_query) -> bool:
 
 
 # ─── /plan komutu ─────────────────────────────────────────────────────────────
-@Client.on_message(filters.command("plan") & filters.private)
+@Client.on_message(filters.command("plan") & filters.private & CustomFilters.owner)
 async def plan_command(client: Client, message: Message):
-    if not _is_owner(message):
-        return await message.reply_text(
-            "🚫 Bu komut yalnızca yöneticiye özeldir.",
-            quote=True,
-        )
-
     # Eğer komutla birlikte bir fotoğraf gönderildiyse direkt kaydet
     if message.photo:
         await _save_photo(message, message.photo.file_id)
@@ -150,14 +145,8 @@ async def _save_photo(message: Message, file_id: str):
 
 
 # ─── /plan2 komutu (/yukselt resmi) ──────────────────────────────────────────
-@Client.on_message(filters.command("plan2") & filters.private)
+@Client.on_message(filters.command("plan2") & filters.private & CustomFilters.owner)
 async def plan2_command(client: Client, message: Message):
-    if not _is_owner(message):
-        return await message.reply_text(
-            "🚫 Bu komut yalnızca yöneticiye özeldir.",
-            quote=True,
-        )
-
     if message.photo:
         await _save_upgrade_photo(message, message.photo.file_id)
         return

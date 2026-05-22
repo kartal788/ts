@@ -173,38 +173,67 @@ Telegram ➜ MongoDB ➜ FastAPI ➜ Stremio ➜ Kullanıcı
 | Komut | Açıklama |
 |:---|:---|
 | `/start` | Stremio Eklenti URL'sini gösterir / Abonelik menüsünü açar |
-| `/abonelik` | Abonelik bitiş tarihini gösterir |
+| `/abonelik` | Abonelik bitiş tarihini ve durumunu gösterir |
+| `/yukselt` | Aktif aboneler için ek paket yükseltme menüsünü açar; yöneticiye bildirim gider, onaylanınca limitler artar |
+| `/istek` | IMDb veya TMDB linki göndererek içerik talebinde bulunulur; yönetici onaylar veya reddeder |
 | `/help` | Mevcut komutları listeler |
 
 ## Yönetici (Owner) Komutları
 
+### 📋 Genel Yönetim
+
 | Komut | Açıklama |
 |:---|:---|
-| `/ayarlar` | Bot ayarlarını Telegram üzerinden yönetir (toggle, stremio, erişim, abonelik, sistem, kuyruk, güvenlik sayfaları) |
-| `/set <imdb-url>` | Sonraki yüklenen dosyayı belirtilen IMDb kaydına bağlar |
+| `/ayarlar` | Bot ayarlarını Telegram üzerinden yönetir; toggle (REPLACE_MODE, HIDE_CATALOG, SUBSCRIPTION, WEBSITESI, Proxy), stremio, erişim, abonelik, sistem, kuyruk, güvenlik ve proxy sayfalarını kapsar |
+| `/set <imdb-url>` | Sonraki yüklenen dosyayı belirtilen IMDb/TMDB kaydına bağlar |
 | `/log` | En son log dosyasını gönderir |
 | `/restart` | Botu yeniden başlatır ve upstream repodan güncelleme çeker |
-| `/duyuru` | Tüm aktif abonelere toplu mesaj gönderir |
+| `/duyuru` | Aktif abonelere veya tüm üyelere toplu mesaj gönderir; zamanlı gönderim ve medya grubu (albüm) desteği mevcuttur |
 | `/ekle` | Google Drive'dan içerik tarar ve onay sistemini başlatır |
-| `/engelkaldir` | Kullanıcının engelini kaldırır |
+| `/engelkaldir` | Engellenmiş bir kullanıcının yasağını kaldırır |
 | `/istatistik` | Veritabanı ve bot istatistiklerini gösterir |
-| `/vindir` | Veritabanı koleksiyonlarını JSON olarak indirir |
-| `/aynivideolarisil` | Yinelenen video kayıtlarını temizler |
-| `/katalogyenile` | Stremio kataloğunu yeniden oluşturur |
-| `/linklerisil` | Geçersiz linkleri veritabanından temizler |
-| `/calismayanlinklerisil` | Çalışmayan stream linklerini siler |
-| `/eskiverileriyenile` | Eski format veritabanı kayıtlarını günceller |
+| `/vindir` | Veritabanı koleksiyonlarını JSON dosyası olarak indirir |
+| `/plan` | Abonelik planları ekranında gösterilecek resmi ayarlar veya kaldırır; resimle birlikte gönderilirse direkt kaydeder |
+| `/plan2` | `/yukselt` ekranında gösterilecek resmi ayarlar veya kaldırır |
+
+### 🗃️ İçerik & Veritabanı
+
+| Komut | Açıklama |
+|:---|:---|
+| `/aynivideolarisil` | Veritabanındaki yinelenen video kayıtlarını temizler |
+| `/katalogyenile` | Stremio kataloğunu sıfırdan yeniden oluşturur |
+| `/linklerisil` | Geçersiz/bozuk linkleri veritabanından temizler |
+| `/calismayanlinklerisil` | Gerçek zamanlı test edilerek çalışmayan stream linklerini siler |
+| `/eskiverileriyenile` | Eski format veritabanı kayıtlarını yeni şemaya günceller |
+| `/iceriksil <anahtar>` | Belirtilen anahtar kelimeyle eşleşen film/dizi videolarını veritabanından siler; boşalan film/bölüm/sezon/dizi kademeli olarak temizlenir |
+| `/iceriksiltest <anahtar>` | `/iceriksil` ile aynı mantıkla çalışır ancak silme yapmaz, eşleşen kayıtları listeler ve `.txt` olarak gönderir |
+| `/dizisil` | Belirli bir diziyi veritabanından siler |
+| `/filmsil` | Belirli bir filmi veritabanından siler |
+| `/dizisiltest` | Silme işlemi yapmadan dizi silme önizlemesi yapar |
+| `/filmsiltest` | Silme işlemi yapmadan film silme önizlemesi yapar |
+| `/turkcesil` | Veritabanındaki Türkçe (tr) ve Almanca (de) metadata alanlarını, sertifika bilgilerini ve koleksiyon ID'lerini temizler |
+
+### 🖥️ Sunucu & Sistem
+
+| Komut | Açıklama |
+|:---|:---|
 | `/sunucuyayukle` / `/s` | URL veya dosyayı sunucuya yükler |
-| `/sunucudansil` | Sunucudan yüklenen içeriği siler |
+| `/sunucudansil` | Sunucuya yüklenmiş bir içeriği siler |
+| `/depolama` | TS yazılımı, sistem ve Docker disk/RAM kullanımını detaylı gösterir (RAM durumu, genel disk, TS'nin yazdığı konumlar, Docker depolama, silinmiş-ama-açık dosyalar ve 100MB+ büyük dosyalar) |
+| `/temizle` | Kapsamlı sistem temizliği yapar: MongoDB eski stream kayıtları, uygulama RAM cache'leri, `/tmp` dizini, pip/uv cache, log dosyası, Docker dangling objeleri ve journald logları |
+| `/ramraporu` | Sistem ve process bazlı RAM kullanımını gösterir; en çok RAM kullanan 15 process ve botun kendi RSS/VMS değerleri raporlanır |
 | `/durdur` | Devam eden bir işlemi durdurur |
 | `/iptal` | Kuyruktaki bir görevi iptal eder |
-| `/depolama` | TS yazılımı, sistem ve Docker disk/RAM kullanımını detaylı olarak gösterir (RAM durumu, genel disk, TS'nin yazdığı konumlar, Docker depolama, silinmiş-ama-açık dosyalar ve 100MB+ büyük dosyalar) |
-| `/temizle` | Sistem temizliği yapar: MongoDB eski stream kayıtları, uygulama RAM cache'leri, /tmp dizini, pip/uv cache, log dosyası, Docker dangling objeleri ve journald logları temizlenir |
-| `/ramraporu` | Sistem ve process bazlı RAM kullanımını gösterir; en çok RAM kullanan 15 process ve botun kendi RSS/VMS değerleri raporlanır |
-| `/m3ukontrol` | Verilen M3U linklerini eş zamanlı olarak kontrol eder; gerçek `.m3u` dosyası döndüren çalışan linkleri filtreler ve sonuçları `.txt` dosyası olarak gönderir |
-| `/tara` | Tüm DB'yi silerek `AUTH_CHANNEL` kanallarını baştan tarar; video ve arşiv dosyalarını veritabanına ekler. `/tara db` ile mevcut kayıtlar korunarak yalnızca yeni içerikler eklenir |
+
+### 📡 Tarama & M3U
+
+| Komut | Açıklama |
+|:---|:---|
+| `/tara` | Tüm DB'yi silerek `AUTH_CHANNEL` kanallarını baştan tarar; video ve arşiv dosyalarını veritabanına ekler |
+| `/tara db` | Mevcut kayıtlar korunarak yalnızca yeni içerikler eklenir |
 | `/tara_durum` | Devam eden taramanın anlık istatistiklerini gösterir (işlenen, eklenen, atlanan, hata sayısı) |
-| `/tara_iptal` | Devam eden taramayı durdurur |
+| `/tara_iptal` | Devam eden taramayı durdurur; tamamlanan kayıtlar korunur |
+| `/m3ukontrol` | Verilen M3U linklerini eş zamanlı kontrol eder; gerçek `.m3u` döndüren çalışan linkleri filtreler ve sonuçları `.txt` olarak gönderir |
 
 ### `/set` Komutu Kullanımı
 
@@ -212,7 +241,7 @@ Telegram ➜ MongoDB ➜ FastAPI ➜ Stremio ➜ Kullanıcı
 /set https://m.imdb.com/title/tt665723
 ```
 
-1. `/set` komutunu IMDb URL'siyle birlikte gönder.
+1. `/set` komutunu IMDb veya TMDB URL'siyle birlikte gönder.
 2. İlgili film veya dizi dosyalarını kanala ilet.
 3. İşlem bittikten sonra sadece `/set` yazarak bağlantıyı temizle.
 
