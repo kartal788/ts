@@ -130,11 +130,106 @@ async def istatistik(client: Client, message: Message):
     await message.reply_text(text, parse_mode=enums.ParseMode.HTML)
 
 # ---------- benzerleri sil ----------
+def _dedup_telegram(telegram: list) -> tuple[list, int]:
+    """
+    Verilen telegram listesinden (name, size) bazlı tekrarları kaldırır.
+    Her grupta HTTP olmayan (gerçek TG file_id) olanı tercih eder, yoksa
+    en son eklenenı tutar.
+    Döndürür: (yeni_liste, silinen_sayisi)
+    """
+    grouped: dict = {}
+    for idx, t in enumerate(telegram):
+        key = (t.get("name"), t.get("size"))
+        grouped.setdefault(key, []).append((idx, t))
+
+    new_telegram = []
+    removed = 0
+    for items in grouped.values():
+        non_http = [
+            (i, t) for i, t in items
+            if not str(t.get("id", "")).lower().startswith(("http://", "https://"))
+        ]
+        keep_i, keep_t = max(non_http if non_http else items, key=lambda x: x[0])
+        new_telegram.append(keep_t)
+        removed += len(items) - 1
+    return new_telegram, removed
+
+
+def _process_movie_doc(doc: dict) -> tuple[bool, list, int, list]:
+    """
+    Bir film dökümanını işler (sync — executor içinde çalışır).
+    Döndürür: (degisti, new_telegram, silinen_sayi, log_satirlari)
+    """
+    telegram = doc.get("telegram", [])
+    if len(telegram) <= 1:
+        return False, telegram, 0, []
+
+    new_telegram, removed = _dedup_telegram(telegram)
+    if removed == 0:
+        return False, telegram, 0, []
+
+    logs = []
+    original_ids = {id(t) for t in new_telegram}
+    for t in telegram:
+        if id(t) not in original_ids and t not in new_telegram:
+            logs.append(
+                f"[Koleksiyon] movie\n"
+                f"ID: {doc.get('tmdb_id')}\n"
+                f"Başlık: {doc.get('title')}\n"
+                f"Name: {t.get('name')}\n"
+                f"Size: {t.get('size')}\n"
+                f"id: {t.get('id')}\n"
+                f"{'-'*50}"
+            )
+    # log sayısını removed ile eşitle (id karşılaştırması yetersiz kalabilir)
+    return True, new_telegram, removed, logs
+
+
+def _process_tv_doc(doc: dict) -> tuple[bool, list, int, list]:
+    """
+    Bir dizi dökümanını işler (sync — executor içinde çalışır).
+    Döndürür: (degisti, new_seasons, silinen_sayi, log_satirlari)
+    """
+    seasons = doc.get("seasons", [])
+    total_removed = 0
+    logs = []
+    doc_changed = False
+
+    for season in seasons:
+        season_no = season.get("season_number")
+        for ep in season.get("episodes", []):
+            telegram = ep.get("telegram", [])
+            if len(telegram) <= 1:
+                continue
+            new_telegram, removed = _dedup_telegram(telegram)
+            if removed == 0:
+                continue
+            doc_changed = True
+            total_removed += removed
+            ep["telegram"] = new_telegram
+            for t in telegram:
+                if t not in new_telegram:
+                    logs.append(
+                        f"[Koleksiyon] tv\n"
+                        f"ID: {doc.get('imdb_id')}\n"
+                        f"Dizi: {doc.get('title')}\n"
+                        f"Sezon: {season_no} | Bölüm: {ep.get('episode_number')}\n"
+                        f"Name: {t.get('name')}\n"
+                        f"Size: {t.get('size')}\n"
+                        f"id: {t.get('id')}\n"
+                        f"{'-'*50}"
+                    )
+
+    return doc_changed, seasons, total_removed, logs
+
+
 @Client.on_message(filters.command("aynivideolarisil") & filters.private & CustomFilters.owner)
 async def benzerleri_sil(client: Client, message: Message):
     status = await message.reply_text("🔍 Arşiv taranıyor, kayıt sayısı hesaplanıyor...")
 
     loop = asyncio.get_event_loop()
+    PROGRESS_INTERVAL = 5   # saniye — daha sık güncelle
+    BATCH_SIZE        = 100  # bulk_write için batch büyüklüğü
 
     # Toplam kayıt sayısını önceden çek (ilerleme % için)
     total_movie = await loop.run_in_executor(None, movie_col.count_documents, {})
@@ -146,7 +241,6 @@ async def benzerleri_sil(client: Client, message: Message):
     processed     = 0
     log_lines     = []
     last_edit     = time.time()
-    PROGRESS_INTERVAL = 15  # saniye
 
     def progress_bar(pct: float, width: int = 16) -> str:
         filled = int(width * pct / 100)
@@ -171,132 +265,71 @@ async def benzerleri_sil(client: Client, message: Message):
                 pass
 
     collections = [
-        (movie_col, "movie"),
-        (series_col, "tv")
+        (movie_col, "movie", "🎬 Filmler"),
+        (series_col, "tv",   "📺 Diziler"),
     ]
 
-    for col, col_name in collections:
-        col_label = "🎬 Filmler" if col_name == "movie" else "📺 Diziler"
-        docs = await loop.run_in_executor(
-            None,
-            lambda c=col: list(c.find({}, {"telegram": 1, "seasons": 1, "title": 1, "tmdb_id": 1, "imdb_id": 1}))
-        )
+    for col, col_name, col_label in collections:
+        # Tüm dökümanları RAM'e almak yerine cursor ile ilerle
+        # batch_size=200 → MongoDB driver her seferinde 200 döküman getirir
+        def _get_cursor(c=col):
+            return c.find(
+                {},
+                {"telegram": 1, "seasons": 1, "title": 1, "tmdb_id": 1, "imdb_id": 1}
+            ).batch_size(200)
 
-        for doc in docs:
-            doc_updated = False
+        cursor = await loop.run_in_executor(None, _get_cursor)
+
+        bulk_ops   = []
+
+        while True:
+            # Bir sonraki dökümanı executor'da çek (sync MongoDB driver)
+            doc = await loop.run_in_executor(None, lambda c=cursor: next(c, None))
+            if doc is None:
+                break
+
             processed += 1
 
-            # ---------- FILM ----------
-            if col_name == "movie" and "telegram" in doc:
-                telegram = doc.get("telegram", [])
-                grouped = {}
-
-                for idx, t in enumerate(telegram):
-                    key = (t.get("name"), t.get("size"))
-                    if key not in grouped:
-                        grouped[key] = []
-                    grouped[key].append((idx, t))
-
-                new_telegram = []
-
-                for (name, size), items in grouped.items():
-                    non_http_items = []
-                    for i, t in items:
-                        tid = str(t.get("id", "")).lower()
-                        if not (tid.startswith("http://") or tid.startswith("https://")):
-                            non_http_items.append((i, t))
-
-                    if non_http_items:
-                        keep_i, keep_t = max(non_http_items, key=lambda x: x[0])
-                    else:
-                        keep_i, keep_t = max(items, key=lambda x: x[0])
-
-                    new_telegram.append(keep_t)
-
-                    for i, t in items:
-                        if t is not keep_t:
-                            total_removed += 1
-                            doc_updated = True
-                            log_lines.append(
-                                f"[Koleksiyon] movie\n"
-                                f"ID: {doc.get('tmdb_id')}\n"
-                                f"Başlık: {doc.get('title')}\n"
-                                f"Name: {t.get('name')}\n"
-                                f"Size: {t.get('size')}\n"
-                                f"id: {t.get('id')}\n"
-                                f"{'-'*50}"
-                            )
-
-                if doc_updated:
-                    await loop.run_in_executor(
-                        None,
-                        lambda: col.update_one({"_id": doc["_id"]}, {"$set": {"telegram": new_telegram}})
+            if col_name == "movie":
+                changed, new_telegram, removed, logs = await loop.run_in_executor(
+                    None, _process_movie_doc, doc
+                )
+                if changed:
+                    bulk_ops.append(
+                        UpdateOne({"_id": doc["_id"]}, {"$set": {"telegram": new_telegram}})
                     )
-                    total_docs += 1
+                    total_docs    += 1
+                    total_removed += removed
+                    log_lines.extend(logs)
 
-            # ---------- DİZİ / BÖLÜM ----------
-            if col_name == "tv":
-                seasons = doc.get("seasons", [])
-
-                for season in seasons:
-                    season_no = season.get("season_number")
-                    episodes = season.get("episodes", [])
-
-                    for ep in episodes:
-                        if "telegram" not in ep:
-                            continue
-
-                        telegram = ep.get("telegram", [])
-                        grouped = {}
-
-                        for idx, t in enumerate(telegram):
-                            key = (t.get("name"), t.get("size"))
-                            if key not in grouped:
-                                grouped[key] = []
-                            grouped[key].append((idx, t))
-
-                        new_telegram = []
-
-                        for (name, size), items in grouped.items():
-                            non_http_items = []
-                            for i, t in items:
-                                tid = str(t.get("id", "")).lower()
-                                if not (tid.startswith("http://") or tid.startswith("https://")):
-                                    non_http_items.append((i, t))
-
-                            if non_http_items:
-                                keep_i, keep_t = max(non_http_items, key=lambda x: x[0])
-                            else:
-                                keep_i, keep_t = max(items, key=lambda x: x[0])
-
-                            new_telegram.append(keep_t)
-
-                            for i, t in items:
-                                if t is not keep_t:
-                                    total_removed += 1
-                                    doc_updated = True
-                                    log_lines.append(
-                                        f"[Koleksiyon] tv\n"
-                                        f"ID: {doc.get('imdb_id')}\n"
-                                        f"Dizi: {doc.get('title')}\n"
-                                        f"Sezon: {season_no} | Bölüm: {ep.get('episode_number')}\n"
-                                        f"Name: {t.get('name')}\n"
-                                        f"Size: {t.get('size')}\n"
-                                        f"id: {t.get('id')}\n"
-                                        f"{'-'*50}"
-                                    )
-
-                        if doc_updated:
-                            ep["telegram"] = new_telegram
-
-                if doc_updated:
-                    await loop.run_in_executor(
-                        None,
-                        lambda d=doc, s=seasons: col.update_one({"_id": d["_id"]}, {"$set": {"seasons": s}})
+            else:  # tv
+                changed, new_seasons, removed, logs = await loop.run_in_executor(
+                    None, _process_tv_doc, doc
+                )
+                if changed:
+                    bulk_ops.append(
+                        UpdateOne({"_id": doc["_id"]}, {"$set": {"seasons": new_seasons}})
                     )
-                    total_docs += 1
+                    total_docs    += 1
+                    total_removed += removed
+                    log_lines.extend(logs)
+
+            # Toplu yazma (belleği boşalt)
+            if len(bulk_ops) >= BATCH_SIZE:
+                ops_to_write = bulk_ops[:]
+                bulk_ops.clear()
+                await loop.run_in_executor(
+                    None, lambda ops=ops_to_write: col.bulk_write(ops, ordered=False)
+                )
 
             await maybe_update_progress(col_label)
+
+        # Koleksiyon sonu — kalan işlemleri yaz
+        if bulk_ops:
+            await loop.run_in_executor(
+                None, lambda ops=bulk_ops[:]: col.bulk_write(ops, ordered=False)
+            )
+            bulk_ops.clear()
 
     # ---------- LOG DOSYASI ----------
     if log_lines:

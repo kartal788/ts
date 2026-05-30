@@ -53,9 +53,14 @@ async def plan_selection(client: Client, callback_query: CallbackQuery):
     now = datetime.utcnow()
     current_expiry = user.get("subscription_expiry") if user else None
 
+    # Kullanıcının önceki aboneliği bitmiş mi?
+    previous_expiry_str = None
     if current_expiry and current_expiry > now:
         new_expiry = current_expiry + timedelta(days=int(plan["days"]))
     else:
+        if current_expiry and current_expiry <= now:
+            # Daha önce aboneliği vardı ama bitti — son kullanma tarihini kaydet
+            previous_expiry_str = current_expiry.strftime("%d.%m.%Y")
         new_expiry = now + timedelta(days=int(plan["days"]))
 
     expiry_str = new_expiry.strftime("%d.%m.%Y")
@@ -94,14 +99,20 @@ async def plan_selection(client: Client, callback_query: CallbackQuery):
         ]
     ])
 
+    renewal_line = (
+        f"<b>🔄 Yenileme:</b> Evet — önceki abonelik <b>{previous_expiry_str}</b> tarihinde bitti\n"
+        if previous_expiry_str else ""
+    )
+
     admin_text = (
         f"<b>📩 Yeni Abonelik Talebi</b>\n\n"
         f"<b>👤 Kullanıcı:</b> {user_mention}\n"
         f"<b>🆔 Kullanıcı ID:</b> <code>{user_id}</code>\n"
         f"<b>🔗 Kullanıcı Adı:</b> {username_str}\n\n"
         f"<b>📦 Plan:</b> {plan['days']} gün — {plan['price']} TL\n"
-        f"<b>📅 Tahmini bitiş:</b> {expiry_str}\n\n"
-        f"Lütfen talebi onaylayın veya reddedin."
+        f"<b>📅 Tahmini bitiş:</b> {expiry_str}\n"
+        f"{renewal_line}"
+        f"\nLütfen talebi onaylayın veya reddedin."
     )
 
     approver_ids = Telegram.APPROVER_IDS if Telegram.APPROVER_IDS else [Telegram.OWNER_ID]
@@ -263,7 +274,7 @@ async def admin_review(client: Client, callback_query: CallbackQuery):
             await client.send_message(
                 target_user_id,
                 "❌ <b>Talebiniz Reddedildi</b>\n\nAbonelik talebiniz yönetici tarafından reddedildi. "
-                "Daha fazla bilgi için yönetici ile iletişime geçin ya da tekrar deneyin.",
+                "Daha fazla bilgi için yönetici ile iletişime geçin.",
                 parse_mode=enums.ParseMode.HTML
             )
 
