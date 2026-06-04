@@ -2027,9 +2027,9 @@ async def get_streams(
         from Backend.config import Telegram as _TG
         from Backend.fastapi.security.tokens import _configure_url
         _EXPIRED_MESSAGES = {
-            "tr": ("🚫 Abonelik Süresi Doldu", "Aboneliğinizin süresi dolmuştur. Yenilemek için lütfen iletişime geçin."),
-            "de": ("🚫 Abonnement abgelaufen", "Ihr Abonnement ist abgelaufen. Bitte erneuern Sie es."),
-            "en": ("🚫 Subscription Expired", "Your subscription has expired. Please renew to continue watching."),
+            "tr": ("🚫 Abonelik Süresi Doldu", "Aboneliğinizin süresi dolmuştur. Yenilemek için yönetici ile iletişime geçin."),
+            "de": ("🚫 Abonnement abgelaufen", "Ihr Abonnement ist abgelaufen. Bitte wenden Sie sich an den Administrator, um es zu verlängern."),
+            "en": ("🚫 Subscription Expired", "Your subscription has expired. Please contact the administrator to renew."),
         }
         _resolved = lang if lang in _EXPIRED_MESSAGES else "en"
         _exp_name, _exp_title = _EXPIRED_MESSAGES[_resolved]
