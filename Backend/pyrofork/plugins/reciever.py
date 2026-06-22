@@ -6,6 +6,7 @@ from Backend import db
 from Backend.config import Telegram
 from Backend.helper.pyro import clean_filename, get_readable_file_size, remove_urls
 from Backend.helper.metadata import metadata
+from Backend.helper.split_files import parse_split_info, strip_part_suffix
 from pyrogram import filters, Client
 from pyrogram.types import Message
 from pyrogram.errors import FloodWait
@@ -22,10 +23,10 @@ METADATA_SEMAPHORE = Semaphore(5)
 
 async def process_file():
     while True:
-        metadata_info, channel, msg_id, size, title = await file_queue.get()
+        metadata_info, channel, msg_id, size, title, size_bytes = await file_queue.get()
         try:
             async with db_lock:
-                updated_id = await db.insert_media(metadata_info, channel=channel, msg_id=msg_id, size=size, name=title)
+                updated_id = await db.insert_media(metadata_info, channel=channel, msg_id=msg_id, size=size, name=title, size_bytes=size_bytes)
                 if updated_id:
                     LOGGER.info(f"{metadata_info['media_type']} updated with ID: {updated_id}")
                     # ── TV dizisi ise hatırlatma bildirimlerini tetikle ──────────
@@ -141,6 +142,9 @@ def _is_archive_file(doc) -> bool:
         return True
     if _re_archive.search(r'\.(zip|7z|rar|z)\.(\d+)$', name):
         return True
+    # .mkv.001, .mp4.002 gibi video split dosyaları
+    if _re_archive.search(r'\.(mkv|mp4|avi|mov|ts)\.(\d+)$', name):
+        return True
     if _re_archive.search(r'\.part\d+\.rar$', name):
         return True
     if mime in ("application/zip", "application/x-7z-compressed",
@@ -201,6 +205,9 @@ async def _handle_video_message(client: Client, message: Message):
                 return
 
             title = remove_urls(title)
+            # Split dosya ise görünen adı temizle (.mkv.001 → .mkv)
+            if metadata_info.get("group_key"):
+                title = strip_part_suffix(title)
             if not title.endswith(('.mkv', '.mp4')):
                 title += '.mkv'
 
@@ -212,7 +219,7 @@ async def _handle_video_message(client: Client, message: Message):
                     new_caption=new_caption
                 ))
 
-            await file_queue.put((metadata_info, int(channel), msg_id, size, title))
+            await file_queue.put((metadata_info, int(channel), msg_id, size, title, file.file_size))
 
         elif is_archive:
             file = doc
@@ -224,7 +231,15 @@ async def _handle_video_message(client: Client, message: Message):
             from Backend.helper.metadata import extract_default_id
             override_id, _id_media_type = extract_default_id(raw_title) if raw_title else (None, None)
 
-            video_name = _archive_to_video_name(file.file_name or raw_title)
+            # .mkv.001 gibi video split dosyalarında group_key/part_number ve
+            # görünen ad CAPTION'dan çıkarılmalı (varsa) — leech botları dosyayı
+            # kısaltılmış adla yükleyip orijinal/uzun adı caption'a yazabiliyor.
+            # file.file_name'i raw_title'a göre önceliklendirmek bu durumda
+            # kısaltılmış adın veritabanına yazılmasına yol açıyordu.
+            split_source = raw_title or file.file_name
+            split_info_raw = parse_split_info(split_source)
+
+            video_name = _archive_to_video_name(split_source)
             clean_name = clean_filename(video_name)
 
             async with METADATA_SEMAPHORE:
@@ -234,11 +249,23 @@ async def _handle_video_message(client: Client, message: Message):
                 LOGGER.warning(f"Metadata failed for archive: {raw_title} (ID: {msg_id})")
                 return
 
-            archive_display_name = remove_urls(file.file_name or raw_title)
-            metadata_info["_is_archive"] = True
+            # split dosya ise group_key ve part_number'ı metadata'ya enjekte et
+            if split_info_raw:
+                quality = metadata_info.get("quality", "")
+                metadata_info["group_key"] = f"{channel}:{quality}:{split_info_raw[0]}"
+                metadata_info["part_number"] = split_info_raw[1]
+                LOGGER.info(f"Split dosya tespit edildi: part={split_info_raw[1]} group_key={metadata_info['group_key']}")
+
+            # Görünen ad da aynı önceliği izlemeli: caption (uzun/orijinal ad)
+            # varsa o kullanılır, yoksa Telegram'daki (kısaltılmış olabilen)
+            # dosya adına düşülür.
+            archive_display_name = remove_urls(split_source)
+            # .mkv.001 gibi split video dosyaları arşiv DEĞİL — sadece gerçek arşivler (zip/7z/rar) işaretlenir
+            if not split_info_raw:
+                metadata_info["_is_archive"] = True
 
             LOGGER.info(f"Archive file processed as media: {archive_display_name} -> {metadata_info.get('title')}")
-            await file_queue.put((metadata_info, int(channel), msg_id, size, archive_display_name))
+            await file_queue.put((metadata_info, int(channel), msg_id, size, archive_display_name, file.file_size))
 
         else:
             try:
@@ -276,6 +303,9 @@ async def file_edited_handler(client: Client, message: Message):
             _doc = message.document
             if message.video or (_doc and _doc.mime_type and _doc.mime_type.startswith("video/")) or _is_archive_file(_doc):
                 file = message.video or _doc
+                if file is None:
+                    LOGGER.warning(f"file_edited_handler: file is None for msg {message.id}, skipping")
+                    return
                 title = message.caption or file.file_name
                 msg_id = message.id
                 size = get_readable_file_size(file.file_size)
@@ -303,7 +333,7 @@ async def file_edited_handler(client: Client, message: Message):
                     if not title.endswith(('.mkv', '.mp4')):
                         title += '.mkv'
 
-                    await file_queue.put((metadata_info, int(channel), msg_id, size, title))
+                    await file_queue.put((metadata_info, int(channel), msg_id, size, title, file.file_size))
             else:
                 pass
         except FloodWait as e:

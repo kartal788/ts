@@ -273,6 +273,16 @@ def _is_archive_fn(name: str) -> bool:
         return True
     return False
 
+def _is_split_video(q: dict) -> bool:
+    """Split video dosyası mı? (.mkv.001 gibi) parts listesi varsa veya adı video+numeri ile bitiyorsa."""
+    import re as _re_sv
+    name = (q.get("name") or "").lower()
+    if _re_sv.search(r'\.(mkv|mp4|avi|ts|m4v|mov|wmv|webm|flv)\.\d+$', name):
+        return True
+    if q.get("parts") and not q.get("is_archive", False):
+        return True
+    return False
+
 def _has_video_stream(item: dict) -> bool:
     """Film/dizi item'ının gerçek oynatılabilir video stream'i var mı kontrol eder.
     Sadece arşiv dosyası olan (zip/7z vb.) içerikler için False döner.
@@ -280,8 +290,13 @@ def _has_video_stream(item: dict) -> bool:
     def _check_qualities(qualities):
         for q in qualities:
             name = q.get("name", "")
-            if _is_archive_fn(name) or q.get("is_archive", False):
+            if q.get("is_archive", False):
                 continue
+            if _is_archive_fn(name):
+                continue
+            # Split video dosyaları (.mkv.001) doğrudan geçer
+            if _is_split_video(q):
+                return True
             if any(name.lower().endswith(ext) for ext in _ALLOWED_VIDEO_EXTS_MOD):
                 return True
         return False
@@ -430,14 +445,17 @@ def _hdr_badge(parsed: dict, filename: str) -> str:
     return ""
 
 
-def format_stream_details(filename: str, quality: str, size: str, file_id: str, certification: str = "") -> tuple[str, str]:
+def format_stream_details(filename: str, quality: str, size: str, file_id: str, certification: str = "", is_split: bool = False) -> tuple[str, str]:
     # Kaynak: Link mi Telegram mı?
     source_prefix = "Link" if file_id.startswith(("http://", "https://")) else Telegram.ISIM
+
+    # Kesilmiş (parçalı/split) dosyalarda boyut emojisi 📦, normal dosyalarda 💾
+    size_emoji = "📦" if is_split else "💾"
 
     try:
         parsed = PTN.parse(filename)
     except Exception:
-        return (f"{source_prefix} {quality}", f"📁 {filename}\n💾 {size}")
+        return (f"{source_prefix} {quality}", f"📁 {filename}\n{size_emoji} {size}")
 
     # --- Temel alanlar ---
     resolution   = parsed.get("resolution", quality)
@@ -528,7 +546,7 @@ def format_stream_details(filename: str, quality: str, size: str, file_id: str, 
     year = str(parsed.get("year", "")) if parsed.get("year") else ""
 
     # --- Satır 2: Boyut + Codec + Platform + Encoder ---
-    line2 = [f"💾 {size}"]
+    line2 = [f"{size_emoji} {size}"]
     if codec:
         line2.append(f"🎥 {codec}")
     if site_display:
@@ -1978,8 +1996,14 @@ async def get_meta(token: str, media_type: str, id: str, lang: str = "tr", token
                 has_real_video = False
                 for _q in ep_qualities:
                     _qname = _q.get("name", "")
-                    if _is_archive_fn(_qname) or _q.get("is_archive", False):
+                    if _q.get("is_archive", False):
                         continue
+                    if _is_archive_fn(_qname):
+                        continue
+                    # Split video dosyaları (.mkv.001) doğrudan geçer
+                    if _is_split_video(_q):
+                        has_real_video = True
+                        break
                     if any(_qname.lower().endswith(ext) for ext in _ALLOWED_VIDEO_EXTS_MOD):
                         has_real_video = True
                         break
@@ -2208,25 +2232,74 @@ async def get_streams(
 
     for quality in media_details.get("telegram", []):
         file_id = quality.get("id")
+
+        # ── Split dosya: parts listesi varsa virtual stream URL üret ─────────
+        parts_list = quality.get("parts")
+        if parts_list and len(parts_list) >= 1:
+            from Backend.helper.encrypt import encode_string as _enc_str
+            from Backend.helper.stream_token import media_token_manager
+            _parts_payload = [
+                {"chat_id": p["chat_id"], "msg_id": p["msg_id"], "part_number": p["part_number"]}
+                for p in sorted(parts_list, key=lambda x: x.get("part_number", 0))
+            ]
+            _encoded_parts_id = await _enc_str({"parts": _parts_payload})
+            _vtok = media_token_manager.create(token, _encoded_parts_id, kind="video")
+            _base_url = Telegram.BASE_URL.rstrip("/")
+            filename = quality.get("name", "video.mkv")
+            # Split dosya adındaki .001 suffix'ini temizle (video.mkv.001 → video.mkv)
+            from Backend.helper.split_files import strip_part_suffix as _strip_suffix
+            filename_clean = _strip_suffix(filename) if filename else "video.mkv"
+            quality_str = quality.get("quality", "HD")
+            size = quality.get("size", "")
+            stream_name, stream_title = format_stream_details(
+                filename_clean, quality_str, size, _encoded_parts_id, certification=cert, is_split=True
+            )
+            _safe_fn = __import__("urllib.parse", fromlist=["quote"]).quote(filename_clean or "video.mkv", safe=".-_")
+            url = f"{_base_url}/dl/{token}/{_encoded_parts_id}/{_vtok}/{_safe_fn}"
+            proxy_url = (
+                f"{Telegram.HTTP_PROXY_URL}{url}"
+                if Telegram.PROXY and Telegram.HTTP_PROXY_URL
+                else None
+            )
+            if Telegram.PROXY and proxy_url and Telegram.PROXY_MODE == 2:
+                streams.append({"name": f"{stream_name} 🔀 Proxy", "title": stream_title, "url": proxy_url, "_size_bytes": parse_size_to_bytes(size)})
+                streams.append({"name": stream_name, "title": stream_title, "url": url, "_size_bytes": parse_size_to_bytes(size)})
+            elif Telegram.PROXY and proxy_url and Telegram.PROXY_MODE == 3:
+                streams.append({"name": f"{stream_name} 🔀 Proxy", "title": stream_title, "url": proxy_url, "_size_bytes": parse_size_to_bytes(size)})
+            else:
+                streams.append({"name": stream_name, "title": stream_title, "url": url, "_size_bytes": parse_size_to_bytes(size)})
+            continue
+        # ─────────────────────────────────────────────────────────────────────
+
         if not file_id:
             continue
 
         filename = quality.get("name", "")
-
         # Arşiv ve desteklenmeyen dosyaları Stremio'da gösterme
         if _is_archive_filename(filename) or quality.get("is_archive", False):
             continue
         # Sadece video uzantılarına izin ver: .mkv .avi .mpg .mp4
         _ALLOWED_VIDEO_EXTS = (".mkv", ".avi", ".mpg", ".mpeg", ".mp4", ".ts", ".m4v", ".webm", ".flv", ".mov", ".wmv")
         _fn_lower = filename.lower()
-        if not any(_fn_lower.endswith(ext) for ext in _ALLOWED_VIDEO_EXTS):
+
+        # Split video dosyalarını (.mkv.001 gibi) da kabul et
+        _is_split = _is_split_video(quality)
+        if not _is_split and not any(_fn_lower.endswith(ext) for ext in _ALLOWED_VIDEO_EXTS):
             continue
 
-        quality_str = quality.get("quality", "HD")
+        quality_str = quality.get("quality", "")
         size = quality.get("size", "")
 
+        # Split dosya: tek parça file_id ile kaydedilmiş ama adı .mkv.001 ile bitiyor
+        # Bu durumda dosya adındaki .001 suffix'ini temizleyerek format_stream_details'e gönder
+        if _is_split and not quality.get("parts"):
+            from Backend.helper.split_files import strip_part_suffix as _strip_suffix_single
+            filename_for_display = _strip_suffix_single(filename) if filename else filename
+        else:
+            filename_for_display = filename
+
         stream_name, stream_title = format_stream_details(
-            filename, quality_str, size, file_id, certification=cert
+            filename_for_display, quality_str, size, file_id, certification=cert, is_split=_is_split
         )
 
         if file_id.startswith(("http://", "https://")) and "/api/sunucu/indir" in file_id:

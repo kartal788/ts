@@ -10,6 +10,7 @@ from Backend.config import Telegram
 import Backend
 from Backend.logger import LOGGER
 from Backend.helper.encrypt import encode_string
+from Backend.helper.split_files import parse_split_info
 from deep_translator import GoogleTranslator
 
 # ----------------- Configuration -----------------
@@ -617,8 +618,12 @@ async def metadata(filename: str, channel: int, msg_id, override_id: str = None)
         LOGGER.info(f"Skipping {filename}: contains 'combined'")
         return None
 
-    # Skip split/multipart files
-    # if Telegram.SKIP_MULTIPART:
+    # Split dosya tespiti (.mkv.001 / .mkv.01 tarzı)
+    split_info = parse_split_info(filename)
+    part_number = split_info[1] if split_info else None
+
+    # part/cd/disc/disk formatındaki bölünmüş dosyaları atla
+    # (.mkv.001 formatı split_info ile handle ediliyor, bunlar farklı)
     multipart_pattern = compile(r'(?:part|cd|disc|disk)[s._-]*\d+(?=\.\w+$)', IGNORECASE)
     if multipart_pattern.search(filename):
         LOGGER.info(f"Skipping {filename}: seems to be a split/multipart file")
@@ -697,6 +702,10 @@ async def metadata(filename: str, channel: int, msg_id, override_id: str = None)
     except Exception:
         encoded_string = None
 
+    group_key = None
+    if split_info:
+        group_key = f"{channel}:{quality}:{split_info[0]}"
+
     try:
         # Determine whether this is a TV or movie entry.
         # Priority: explicit TMDb URL type > season/episode presence in filename.
@@ -711,10 +720,15 @@ async def metadata(filename: str, channel: int, msg_id, override_id: str = None)
                 LOGGER.warning(f"URL says TV but no season/episode parsed for {filename} ({parsed})")
                 return None
             LOGGER.info(f"Fetching TV metadata: {title} S{season}E{episode}")
-            return await fetch_tv_metadata(title, season, episode, encoded_string, year, quality, default_id)
+            result = await fetch_tv_metadata(title, season, episode, encoded_string, year, quality, default_id)
         else:
             LOGGER.info(f"Fetching Movie metadata: {title} ({year})")
-            return await fetch_movie_metadata(title, encoded_string, year, quality, default_id)
+            result = await fetch_movie_metadata(title, encoded_string, year, quality, default_id)
+
+        if result is not None:
+            result["group_key"] = group_key
+            result["part_number"] = part_number
+        return result
     except Exception as e:
         LOGGER.error(f"Error while fetching metadata for {filename}: {e}\n{traceback.format_exc()}")
         return None

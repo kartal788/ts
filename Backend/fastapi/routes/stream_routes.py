@@ -15,6 +15,7 @@ from Backend import db
 from Backend.helper.encrypt import decode_string
 from Backend.helper.exceptions import InvalidHash
 from Backend.helper.custom_dl import ByteStreamer, ACTIVE_STREAMS, RECENT_STREAMS, get_adaptive_chunk_size
+from Backend.helper.virtual_dl import resolve_virtual_parts, virtual_stream_generator
 from Backend.pyrofork.bot import StreamBot, work_loads, multi_clients, client_dc_map, client_failures, client_avg_mbps
 from Backend.config import Telegram
 from Backend.logger import LOGGER
@@ -24,6 +25,24 @@ import asyncio
 
 
 router = APIRouter(tags=["Streaming"])
+
+
+def safe_content_disposition(fname: str, disposition: str = "inline") -> str:
+    """
+    RFC 5987 uyumlu Content-Disposition üretir.
+    ASCII-dışı (Türkçe vb.) karakterler latin-1'e encode edilemediği için
+    HTTP header'larında doğrudan kullanılamaz (UnicodeEncodeError'a yol açar).
+    Böyle durumlarda filename* parametresiyle UTF-8 olarak gönderilir,
+    ayrıca eski istemciler için ASCII'ye indirgenmiş bir filename de eklenir.
+    """
+    try:
+        fname.encode("latin-1")
+        return f'{disposition}; filename="{fname}"'
+    except UnicodeEncodeError:
+        from urllib.parse import quote as _urlquote
+        ascii_fallback = fname.encode("ascii", "ignore").decode("ascii") or "file"
+        encoded = _urlquote(fname, safe="")
+        return f"{disposition}; filename=\"{ascii_fallback}\"; filename*=UTF-8''{encoded}"
 
 _streamer_by_client: Dict = {}
 
@@ -365,6 +384,22 @@ async def stream_handler(
 
     msg_id = decoded.get("msg_id")
 
+    # ── Split (virtual) dosya — parts payload ────────────────────────────────
+    if "parts" in decoded:
+        from Backend.helper.stream_token import media_token_manager as _mtm_v
+        if not _mtm_v.verify(gecicitoken, token, id):
+            raise HTTPException(
+                status_code=403,
+                detail="Geçersiz veya süresi dolmuş link. Tekrar izlemek/indirmek için sayfayı yenileyin.",
+            )
+        return await virtual_media_streamer(
+            request=request,
+            parts_payload=decoded["parts"],
+            token=token,
+            token_data=token_data,
+            stream_id_hash=id,
+        )
+
     # ── Yerel dosya (ZipModu) ──────────────────────────────────────────────
     # Yerel dosyalar için gecici token zorunlu — Telegram için atlanır.
     # Nedeni: media_token_manager memory'de tutulduğundan bot restart veya
@@ -446,6 +481,96 @@ async def stream_handler(
         force_download=bool(dl),
     )
 
+
+async def virtual_media_streamer(
+    request: Request,
+    parts_payload: list,
+    token: str,
+    token_data: dict = None,
+    stream_id_hash: str = None,
+):
+    """Split (parçalanmış) Telegram dosyalarını tek bir sanal akış olarak sunar.
+    parts_payload: [{"chat_id": ..., "msg_id": ..., "part_number": ...}, ...]
+    """
+    import math as _math
+    import secrets as _sec
+    import mimetypes as _mt
+    from urllib.parse import unquote as _unquote
+    from fastapi.responses import Response as _PlainResp
+
+    index = select_best_client(0)
+    tg_client = multi_clients[index]
+    if tg_client not in _streamer_by_client:
+        _streamer_by_client[tg_client] = ByteStreamer(tg_client, index)
+    streamer: ByteStreamer = _streamer_by_client[tg_client]
+
+    parts, file_size = await resolve_virtual_parts(parts_payload, streamer)
+    if not parts or file_size <= 0:
+        raise HTTPException(status_code=404, detail="Split media parts not found")
+
+    range_header = request.headers.get("Range", "")
+    start, end = parse_range_header(range_header, file_size)
+    req_length = end - start + 1
+    chunk_size = 1024 * 1024
+    stream_id = _sec.token_hex(8)
+    decoded_name = _unquote(request.path_params.get("name", ""))
+
+    db_title = None
+    if stream_id_hash:
+        db_title = await db.get_title_by_stream_id(stream_id_hash)
+    final_title = db_title if db_title else decoded_name
+
+    meta = {
+        "request_path": str(request.url.path),
+        "client_host": request.client.host if request.client else None,
+        "title": final_title,
+        "user_name": token_data.get("name", "Unknown") if token_data else "Unknown",
+        "user_token": token,
+        "split_parts": len(parts),
+    }
+
+    prefetch_count = Telegram.PARALLEL
+    parallelism = Telegram.PRE_FETCH
+
+    if token and token_data:
+        asyncio.create_task(track_usage_from_stats(stream_id, token, token_data))
+
+    if token:
+        await db.add_device_session(token, stream_id)
+
+    first_file_id = parts[0]["file_id"]
+    file_name = first_file_id.file_name or f"{_sec.token_hex(4)}.bin"
+    mime_type = first_file_id.mime_type or _mt.guess_type(file_name)[0] or "application/octet-stream"
+    if "." not in file_name and "/" in mime_type:
+        file_name = f"{file_name}.{mime_type.split('/')[1]}"
+
+    common_headers = {
+        "Content-Type": mime_type,
+        "Content-Disposition": safe_content_disposition(file_name, "inline"),
+        "Accept-Ranges": "bytes",
+        "Content-Length": str(req_length),
+        "Cache-Control": "public, max-age=3600",
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Expose-Headers": "Content-Length, Content-Range, Accept-Ranges",
+    }
+    if range_header:
+        common_headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
+        status = 206
+    else:
+        status = 200
+
+    if request.method == "HEAD":
+        if token:
+            await db.remove_device_session(token, stream_id)
+        return _PlainResp(status_code=status, headers=common_headers)
+
+    body_gen = virtual_stream_generator(
+        parts=parts, start=start, end=end, chunk_size=chunk_size,
+        streamer=streamer, client_index=index, request=request, meta=meta,
+        stream_id=stream_id, parallelism=parallelism, prefetch_count=prefetch_count,
+    )
+
+    return StreamingResponse(body_gen, headers=common_headers, status_code=status, media_type=mime_type)
 
 
 async def gdrive_streamer(request: Request, gdrive_file_id: str, token_data: dict = None, token: str = None, force_download: bool = False):
@@ -546,7 +671,7 @@ async def gdrive_streamer(request: Request, gdrive_file_id: str, token_data: dic
         headers = {
             "Content-Type": mime_type,
             "Content-Length": str(req_length),
-            "Content-Disposition": f'inline; filename="{file_name}"',
+            "Content-Disposition": safe_content_disposition(file_name, "inline"),
             "Accept-Ranges": "bytes",
             "Cache-Control": "public, max-age=3600",
             "Access-Control-Allow-Origin": "*",
@@ -650,7 +775,7 @@ async def gdrive_streamer(request: Request, gdrive_file_id: str, token_data: dic
     headers = {
         "Content-Type": mime_type,
         "Content-Length": str(req_length),
-        "Content-Disposition": f'{"attachment" if force_download else "inline"}; filename="{file_name}"',
+        "Content-Disposition": safe_content_disposition(file_name, "attachment" if force_download else "inline"),
         "Accept-Ranges": "bytes",
         "Cache-Control": "no-cache",
         "Access-Control-Allow-Origin": "*",
@@ -783,7 +908,7 @@ async def rclone_streamer(
         headers = {
             "Content-Type": mime_type,
             "Content-Length": str(req_length),
-            "Content-Disposition": f'inline; filename="{file_name}"',
+            "Content-Disposition": safe_content_disposition(file_name, "inline"),
             "Accept-Ranges": "bytes",
             "Cache-Control": "public, max-age=3600",
             "Access-Control-Allow-Origin": "*",
@@ -879,7 +1004,7 @@ async def rclone_streamer(
     headers = {
         "Content-Type": mime_type,
         "Content-Length": str(req_length),
-        "Content-Disposition": f'{"attachment" if force_download else "inline"}; filename="{file_name}"',
+        "Content-Disposition": safe_content_disposition(file_name, "attachment" if force_download else "inline"),
         "Accept-Ranges": "bytes",
         "Cache-Control": "no-cache",
         "Access-Control-Allow-Origin": "*",

@@ -637,9 +637,48 @@ def _strip_admin_fields(items: list) -> list:
 
 
 def _safe_qualities(telegram: list) -> list:
-    """QualityDetail'den sadece güvenli alanları döndür."""
+    """QualityDetail'den sadece güvenli alanları döndür.
+
+    Split (çok parçalı) dosyalar DB'de tek bir kalite girdisi olarak,
+    içinde bir `parts` listesiyle ([{chat_id, msg_id, part_number}, ...])
+    saklanır. Üstteki `id`/`name` alanları yalnızca ilk yüklenen parçaya
+    aittir (örn. ".002" parçası önce yüklendiyse onu gösterir) — bu yüzden
+    `id` doğrudan kullanılırsa indirme sadece o tek parçayı getirir.
+    Stremio tarafı (stremio_routes.py) bunu `parts` alanından sanal
+    (virtual) bir indirme id'si üreterek çözüyor; aynı mantığı burada da
+    uygulayıp tüm parçaları birleştiren tek bir indirme linki üretiyoruz.
+    """
     result = []
     for q in (telegram or []):
+        parts_list = q.get("parts")
+        if parts_list and not q.get("is_archive", False):
+            # ── Split video: tüm parçaları birleştiren sanal id üret ──────────
+            from Backend.helper.encrypt import _encode_sync
+            from Backend.helper.split_files import strip_part_suffix
+
+            sorted_parts = sorted(parts_list, key=lambda p: p.get("part_number", 0))
+            parts_payload = [
+                {
+                    "chat_id":     p.get("chat_id"),
+                    "msg_id":      p.get("msg_id"),
+                    "part_number": p.get("part_number"),
+                }
+                for p in sorted_parts
+            ]
+            try:
+                qid = _encode_sync({"parts": parts_payload})
+            except Exception:
+                qid = q.get("id", "")  # encode başarısız olursa tek parça id'sine düş
+            clean_name = strip_part_suffix(q.get("name") or "") or q.get("name")
+            result.append({
+                "quality": q.get("quality"),
+                "name":    clean_name,
+                "size":    q.get("size"),
+                "id":      qid,
+                "source":  "telegram",
+            })
+            continue
+
         qid = q.get("id", "")
         # Kaynak tespiti: encoded_string'i senkron olarak kontrol et
         source = "telegram"

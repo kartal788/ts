@@ -3,6 +3,16 @@ from typing import List, Optional
 from pydantic import BaseModel, Field
 
 # ---------------------------
+# Quality Part Schema (split-file streaming)
+# ---------------------------
+class QualityPart(BaseModel):
+    part_number: int
+    chat_id: int
+    msg_id: int
+    size_bytes: int
+
+
+# ---------------------------
 # Quality Detail Schema
 # ---------------------------
 class QualityDetail(BaseModel):
@@ -11,6 +21,8 @@ class QualityDetail(BaseModel):
     name: str
     size: str
     is_archive: bool = False  # True → ZIP/7Z arşiv; Stremio'da gösterilmez, sadece member catalog'da
+    group_key: Optional[str] = None          # split dosya grubu anahtarı
+    parts: Optional[List["QualityPart"]] = None  # sıralı parça listesi
 
 
 # ---------------------------

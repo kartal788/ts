@@ -38,7 +38,7 @@ from Backend.logger import LOGGER
 from Backend.config import Telegram
 import re
 from Backend.helper.encrypt import decode_string
-from Backend.helper.modal import Episode, MovieSchema, QualityDetail, Season, TVShowSchema
+from Backend.helper.modal import Episode, MovieSchema, QualityDetail, QualityPart, Season, TVShowSchema
 from Backend.helper.task_manager import delete_message
 
 
@@ -276,7 +276,7 @@ class Database:
             {"_id": user_id},
             {
                 "$set": set_fields,
-                "$unset": {"pending_payment": "", "reminder_sent": ""}
+                "$unset": {"pending_payment": "", "reminder_sent": "", "expiry_notified": ""}
             }
         )
 
@@ -361,6 +361,23 @@ class Database:
         await self.dbs["tracking"]["users"].update_one(
             {"_id": user_id},
             {"$set": {"subscription_status": "expired"}}
+        )
+
+    async def get_expired_today_unnotified(self) -> List[dict]:
+        """Aboneliği sona ermiş ve henüz sona erme bildirimi gönderilmemiş
+        kullanıcıları döndürür. expiry-notify zamanlayıcısı tarafından
+        günlük olarak (UTC+3 00:05) çağrılır."""
+        cursor = self.dbs["tracking"]["users"].find({
+            "subscription_expiry": {"$lt": datetime.utcnow()},
+            "subscription_status": "active",
+            "expiry_notified": {"$ne": True},
+        })
+        return await cursor.to_list(None)
+
+    async def mark_expiry_notified(self, user_id: int):
+        await self.dbs["tracking"]["users"].update_one(
+            {"_id": user_id},
+            {"$set": {"expiry_notified": True, "subscription_status": "expired"}}
         )
 
     async def get_expiring_users(self, hours: int = 24) -> List[dict]:
@@ -590,6 +607,7 @@ class Database:
                     "subscription_expiry": new_expiry,
                     "subscription_status": "active",
                 },
+                "$unset": {"reminder_sent": "", "expiry_notified": ""},
                 "$setOnInsert": {
                     "_id": user_id,
                     "first_name": f"User {user_id}",
@@ -703,9 +721,9 @@ class Database:
 
     async def insert_media(
         self, metadata_info: dict,
-        channel: int, msg_id: int, size: str, name: str
+        channel: int, msg_id: int, size: str, name: str, size_bytes: int = 0
     ) -> Optional[ObjectId]:
-        result = await self._insert_media_internal(metadata_info, channel, msg_id, size, name)
+        result = await self._insert_media_internal(metadata_info, channel, msg_id, size, name, size_bytes)
         if result is not None:
             try:
                 from Backend.helper.tmdb_catalog import notify_new_content
@@ -716,7 +734,7 @@ class Database:
 
     async def _insert_media_internal(
         self, metadata_info: dict,
-        channel: int, msg_id: int, size: str, name: str
+        channel: int, msg_id: int, size: str, name: str, size_bytes: int = 0
     ) -> Optional[ObjectId]:
 
         if metadata_info['media_type'] == "movie":
@@ -757,11 +775,18 @@ class Database:
                     id=metadata_info['encoded_string'],
                     name=name,
                     size=size,
-                    is_archive=bool(metadata_info.get('_is_archive', False))
+                    is_archive=bool(metadata_info.get('_is_archive', False)),
+                    group_key=metadata_info.get('group_key'),
+                    parts=[QualityPart(
+                        part_number=metadata_info['part_number'],
+                        chat_id=channel,
+                        msg_id=msg_id,
+                        size_bytes=size_bytes,
+                    )] if metadata_info.get('group_key') and metadata_info.get('part_number') else None,
                 )]
             )
             return await self.update_movie(media)
-        else:
+        elif metadata_info["media_type"] in ("tv", "tv_show"):
             tv_show = TVShowSchema(
                 tmdb_id=metadata_info['tmdb_id'],
                 imdb_id=metadata_info['imdb_id'],
@@ -811,7 +836,14 @@ class Database:
                             id=metadata_info['encoded_string'],
                             name=name,
                             size=size,
-                            is_archive=bool(metadata_info.get('_is_archive', False))
+                            is_archive=bool(metadata_info.get('_is_archive', False)),
+                            group_key=metadata_info.get('group_key'),
+                            parts=[QualityPart(
+                                part_number=metadata_info['part_number'],
+                                chat_id=channel,
+                                msg_id=msg_id,
+                                size_bytes=size_bytes,
+                            )] if metadata_info.get('group_key') and metadata_info.get('part_number') else None,
                         )]
                     )]
                 )]
@@ -876,8 +908,35 @@ class Database:
         movie_id = existing_movie["_id"]
         existing_qualities = existing_movie.get("telegram", [])
 
-        if Telegram.REPLACE_MODE:
-            to_delete = [q for q in existing_qualities if q.get("quality") == target_quality]
+        incoming_group_key = quality_to_update.get("group_key")
+
+        if incoming_group_key:
+            # ── Split dosya: aynı group_key'e ait kaliteye parça olarak ekle ──
+            group_entry = next(
+                (q for q in existing_qualities if q.get("group_key") == incoming_group_key),
+                None
+            )
+            if group_entry is None:
+                # Grup yok → ilk parça, yeni giriş oluştur
+                existing_qualities.append(quality_to_update)
+            else:
+                # Gruba yeni parça ekle/güncelle
+                parts = group_entry.setdefault("parts", [])
+                incoming_parts = quality_to_update.get("parts") or []
+                for new_part in incoming_parts:
+                    pn = new_part.get("part_number")
+                    existing_part = next((p for p in parts if p.get("part_number") == pn), None)
+                    if existing_part:
+                        existing_part.update(new_part)
+                    else:
+                        parts.append(new_part)
+                parts.sort(key=lambda p: p.get("part_number", 0))
+                # Toplam boyutu yeniden hesapla
+                total = sum(p.get("size_bytes", 0) for p in parts)
+                group_entry["size"] = f"{round(total / (1024**3), 2)} GB" if total > 1024**3 else f"{round(total / (1024**2), 0):.0f} MB"
+
+        elif Telegram.REPLACE_MODE:
+            to_delete = [q for q in existing_qualities if q.get("quality") == target_quality and not q.get("group_key")]
 
             for q in to_delete:
                 try:
@@ -891,7 +950,7 @@ class Database:
                     LOGGER.error(f"Failed to delete old quality: {e}")
 
             existing_qualities = [
-                q for q in existing_qualities if q.get("quality") != target_quality
+                q for q in existing_qualities if not (q.get("quality") == target_quality and not q.get("group_key"))
             ]
             existing_qualities.append(quality_to_update)
 
@@ -1005,11 +1064,34 @@ class Database:
 
                 for quality in episode["telegram"]:
                     target_quality = quality.get("quality")
+                    incoming_group_key = quality.get("group_key")
 
-                    if Telegram.REPLACE_MODE:
+                    if incoming_group_key:
+                        # ── Split dosya: aynı group_key'e parça olarak ekle ──
+                        group_entry = next(
+                            (q for q in existing_episode["telegram"] if q.get("group_key") == incoming_group_key),
+                            None
+                        )
+                        if group_entry is None:
+                            existing_episode["telegram"].append(quality)
+                        else:
+                            parts = group_entry.setdefault("parts", [])
+                            incoming_parts = quality.get("parts") or []
+                            for new_part in incoming_parts:
+                                pn = new_part.get("part_number")
+                                existing_part = next((p for p in parts if p.get("part_number") == pn), None)
+                                if existing_part:
+                                    existing_part.update(new_part)
+                                else:
+                                    parts.append(new_part)
+                            parts.sort(key=lambda p: p.get("part_number", 0))
+                            total = sum(p.get("size_bytes", 0) for p in parts)
+                            group_entry["size"] = f"{round(total / (1024**3), 2)} GB" if total > 1024**3 else f"{round(total / (1024**2), 0):.0f} MB"
+
+                    elif Telegram.REPLACE_MODE:
                         to_delete = [
                             q for q in existing_episode["telegram"]
-                            if q.get("quality") == target_quality
+                            if q.get("quality") == target_quality and not q.get("group_key")
                         ]
 
                         for q in to_delete:
@@ -1025,7 +1107,7 @@ class Database:
 
                         existing_episode["telegram"] = [
                             q for q in existing_episode["telegram"]
-                            if q.get("quality") != target_quality
+                            if not (q.get("quality") == target_quality and not q.get("group_key"))
                         ]
                         existing_episode["telegram"].append(quality)
 

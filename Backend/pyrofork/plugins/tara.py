@@ -31,6 +31,7 @@ from Backend.config import Telegram
 from Backend.helper.custom_filter import CustomFilters
 from Backend.helper.metadata import metadata, extract_default_id
 from Backend.helper.pyro import clean_filename, get_readable_file_size, remove_urls
+from Backend.helper.split_files import parse_split_info
 from Backend.helper.encrypt import encode_string, decode_string
 from Backend.logger import LOGGER
 from Backend import db
@@ -291,6 +292,28 @@ async def _scan_channel(client: Client, chat_id: int):
             except Exception as _oe:
                 LOGGER.warning(f"[/tara] override_id çıkarma hatası msg {msg_id}: {_oe}")
 
+            # Gerçek video split dosyası mı? (örn. ...mkv.001, ...mp4.002)
+            # Bazı istemciler bu parçaları "application/zip" mime tipiyle
+            # gönderiyor (parça mkv header'ı içermediği için video olarak
+            # algılanamıyor); bu durumda yukarıdaki mime/uzantı bazlı
+            # is_archive tespiti yanlış pozitif veriyor ve dosya adına
+            # sahte bir ".zip" ekleniyor. Bu da split_info eşleşmesini
+            # bozarak indirme/birleştirme mantığının devre dışı kalmasına
+            # (tek parça inip birleştirme yapmamasına) neden oluyor.
+            # Adın gerçekten "<video_uzantısı>.<parça_no>" ile bittiğini
+            # doğrulayıp böyle bir durumda is_archive'ı zorla kapatıyoruz.
+            _VIDEO_SPLIT_TAIL_RE = re.compile(
+                r'\.(mkv|mp4|avi|ts|m4v|mov|wmv|webm|flv)\.\d{2,3}$', re.IGNORECASE
+            )
+            if is_archive and _VIDEO_SPLIT_TAIL_RE.search((title or "").strip()):
+                is_archive = False
+
+            # title = caption varsa caption, yoksa Telegram dosya adı (yukarıda
+            # zaten "message.caption or file.file_name" ile seçildi). Split
+            # dosyalarda group_key/part_number bu adımdan çıkarılmalı —
+            # reciever.py'deki canlı alım mantığıyla aynı davranış.
+            split_info_raw = parse_split_info(title)
+
             # Metadata
             try:
                 metadata_info = await metadata(
@@ -311,16 +334,31 @@ async def _scan_channel(client: Client, chat_id: int):
                 await _push_progress()
                 continue
 
+            # split dosya ise group_key ve part_number'ı metadata'ya enjekte et
+            if split_info_raw:
+                quality = metadata_info.get("quality", "")
+                metadata_info["group_key"] = f"{channel_int}:{quality}:{split_info_raw[0]}"
+                metadata_info["part_number"] = split_info_raw[1]
+                LOGGER.info(
+                    f"[/tara] Split dosya tespit edildi: part={split_info_raw[1]} "
+                    f"group_key={metadata_info['group_key']}"
+                )
+
             # Arşiv bayrağını metadata_info'ya taşı (insert_media bunu _is_archive ile okur)
-            if is_archive:
+            # — split video parçaları (.mkv.001 vb.) gerçek arşiv DEĞİLDİR.
+            if is_archive and not split_info_raw:
                 metadata_info["_is_archive"] = True
 
             title_clean = remove_urls(title)
-            if is_archive:
+            if is_archive and not split_info_raw:
                 # Arşiv dosyasının orijinal uzantısını koru
                 if not any(title_clean.lower().endswith(ext) for ext in
                            (".zip", ".7z", ".rar", ".z01")):
                     title_clean += ".zip"
+            elif split_info_raw:
+                # Split video parçası: sahte ".mkv" eklemek yerine adı
+                # olduğu gibi bırak (örn. "...H.264-TURG.mkv.001").
+                pass
             elif not title_clean.endswith(('.mkv', '.mp4')):
                 title_clean += '.mkv'
 
@@ -332,6 +370,7 @@ async def _scan_channel(client: Client, chat_id: int):
                     msg_id=msg_id,
                     size=size,
                     name=title_clean,
+                    size_bytes=file.file_size if file and file.file_size else 0,
                 )
                 if updated_id:
                     s.indexed += 1
