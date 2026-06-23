@@ -1578,15 +1578,30 @@ class Database:
 
         for q in movie["telegram"]:
             if q.get("id") == id:
-                try:
-                    old_id = q.get("id")
-                    if old_id:
-                        decoded_data = await decode_string(old_id)
-                        chat_id = int(f"-100{decoded_data['chat_id']}")
-                        msg_id = int(decoded_data['msg_id'])
-                        create_task(delete_message(chat_id, msg_id))
-                except Exception as e:
-                    LOGGER.error(f"Failed to queue file for deletion: {e}")
+                # Ana mesajı sil (parts yoksa veya parts listesi boşsa)
+                parts = q.get("parts") or []
+                if parts:
+                    # Tüm parçaları (split dosyaları) Telegram'dan sil
+                    for part in parts:
+                        try:
+                            part_chat_id = part.get("chat_id")
+                            part_msg_id = part.get("msg_id")
+                            if part_chat_id and part_msg_id:
+                                chat_id = int(f"-100{part_chat_id}")
+                                create_task(delete_message(chat_id, int(part_msg_id)))
+                        except Exception as e:
+                            LOGGER.error(f"Failed to queue split part for deletion: {e}")
+                else:
+                    # Parts yoksa ana id'den decode et ve sil
+                    try:
+                        old_id = q.get("id")
+                        if old_id:
+                            decoded_data = await decode_string(old_id)
+                            chat_id = int(f"-100{decoded_data['chat_id']}")
+                            msg_id = int(decoded_data['msg_id'])
+                            create_task(delete_message(chat_id, msg_id))
+                    except Exception as e:
+                        LOGGER.error(f"Failed to queue file for deletion: {e}")
                 break
         
         original_len = len(movie["telegram"])
@@ -1612,15 +1627,27 @@ class Database:
                 for ep in season["episodes"]:
                     if ep.get("episode_number") == episode_number:
                         for quality in ep.get("telegram", []):
-                            try:
-                                old_id = quality.get("id")
-                                if old_id:
-                                    decoded_data = await decode_string(old_id)
-                                    chat_id = int(f"-100{decoded_data['chat_id']}")
-                                    msg_id = int(decoded_data['msg_id'])
-                                    create_task(delete_message(chat_id, msg_id))
-                            except Exception as e:
-                                LOGGER.error(f"Failed to queue file for deletion: {e}")
+                            parts = quality.get("parts") or []
+                            if parts:
+                                for part in parts:
+                                    try:
+                                        part_chat_id = part.get("chat_id")
+                                        part_msg_id = part.get("msg_id")
+                                        if part_chat_id and part_msg_id:
+                                            chat_id = int(f"-100{part_chat_id}")
+                                            create_task(delete_message(chat_id, int(part_msg_id)))
+                                    except Exception as e:
+                                        LOGGER.error(f"Failed to queue split part for deletion: {e}")
+                            else:
+                                try:
+                                    old_id = quality.get("id")
+                                    if old_id:
+                                        decoded_data = await decode_string(old_id)
+                                        chat_id = int(f"-100{decoded_data['chat_id']}")
+                                        msg_id = int(decoded_data['msg_id'])
+                                        create_task(delete_message(chat_id, msg_id))
+                                except Exception as e:
+                                    LOGGER.error(f"Failed to queue file for deletion: {e}")
                         break
                 
                 original_len = len(season["episodes"])
@@ -1646,15 +1673,27 @@ class Database:
             if season.get("season_number") == season_number:
                 for episode in season.get("episodes", []):
                     for quality in episode.get("telegram", []):
-                        try:
-                            old_id = quality.get("id")
-                            if old_id:
-                                decoded_data = await decode_string(old_id)
-                                chat_id = int(f"-100{decoded_data['chat_id']}")
-                                msg_id = int(decoded_data['msg_id'])
-                                create_task(delete_message(chat_id, msg_id))
-                        except Exception as e:
-                            LOGGER.error(f"Failed to queue file for deletion: {e}")
+                        parts = quality.get("parts") or []
+                        if parts:
+                            for part in parts:
+                                try:
+                                    part_chat_id = part.get("chat_id")
+                                    part_msg_id = part.get("msg_id")
+                                    if part_chat_id and part_msg_id:
+                                        chat_id = int(f"-100{part_chat_id}")
+                                        create_task(delete_message(chat_id, int(part_msg_id)))
+                                except Exception as e:
+                                    LOGGER.error(f"Failed to queue split part for deletion: {e}")
+                        else:
+                            try:
+                                old_id = quality.get("id")
+                                if old_id:
+                                    decoded_data = await decode_string(old_id)
+                                    chat_id = int(f"-100{decoded_data['chat_id']}")
+                                    msg_id = int(decoded_data['msg_id'])
+                                    create_task(delete_message(chat_id, msg_id))
+                            except Exception as e:
+                                LOGGER.error(f"Failed to queue file for deletion: {e}")
                 break
         
         original_len = len(tv["seasons"])
@@ -1681,15 +1720,28 @@ class Database:
                     if episode.get("episode_number") == episode_number and "telegram" in episode:
                         for q in episode["telegram"]:
                             if q.get("id") == id:
-                                try:
-                                    old_id = q.get("id")
-                                    if old_id:
-                                        decoded_data = await decode_string(old_id)
-                                        chat_id = int(f"-100{decoded_data['chat_id']}")
-                                        msg_id = int(decoded_data['msg_id'])
-                                        create_task(delete_message(chat_id, msg_id))
-                                except Exception as e:
-                                    LOGGER.error(f"Failed to queue file for deletion: {e}")
+                                parts = q.get("parts") or []
+                                if parts:
+                                    # Tüm parçaları (split dosyaları) Telegram'dan sil
+                                    for part in parts:
+                                        try:
+                                            part_chat_id = part.get("chat_id")
+                                            part_msg_id = part.get("msg_id")
+                                            if part_chat_id and part_msg_id:
+                                                chat_id = int(f"-100{part_chat_id}")
+                                                create_task(delete_message(chat_id, int(part_msg_id)))
+                                        except Exception as e:
+                                            LOGGER.error(f"Failed to queue split part for deletion: {e}")
+                                else:
+                                    try:
+                                        old_id = q.get("id")
+                                        if old_id:
+                                            decoded_data = await decode_string(old_id)
+                                            chat_id = int(f"-100{decoded_data['chat_id']}")
+                                            msg_id = int(decoded_data['msg_id'])
+                                            create_task(delete_message(chat_id, msg_id))
+                                    except Exception as e:
+                                        LOGGER.error(f"Failed to queue file for deletion: {e}")
                                 break
                         
                         original_len = len(episode["telegram"])
