@@ -70,6 +70,11 @@ async def start_services():
         await db.connect()
         await asleep(1.2)
 
+        # Ayarlar sistemini başlat (DB'den yükle / yoksa config.env'den tohumla)
+        from Backend.helper.settings_manager import SettingsManager
+        await SettingsManager.initialize(db)
+        await asleep(0.3)
+
         # Bot başlarken kalıcı dosyaları MongoDB'den geri yükle
         await _restore_persistent_files()
         

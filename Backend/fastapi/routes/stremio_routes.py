@@ -419,6 +419,22 @@ def _channel_badge(audio: str) -> str:
     return m.group(1) if m else ""
 
 
+def _clean_encoder(encoder: str) -> str:
+    """
+    PTN'nin 'encoder' alanı bazen gruptan önceki fazlalık metni de
+    (dil/kaynak etiketleri vb.) beraberinde döndürür, örn:
+    'TR.Yerli.Filmbol-Butche89' -> asıl grup adı yalnızca 'Butche89'.
+    Gerçek grup adı her zaman son '-' işaretinden sonra gelir; varsa
+    onu ayıklayıp döndürür, yoksa değeri olduğu gibi bırakır.
+    """
+    if not encoder:
+        return encoder
+    enc = str(encoder).strip()
+    if "-" in enc:
+        enc = enc.rsplit("-", 1)[-1].strip()
+    return enc
+
+
 def _hdr_badge(parsed: dict, filename: str) -> str:
     """HDR tipini döndürür: HDR10+, HDR10, DV, HDR."""
     hdr = parsed.get("hdr")
@@ -463,7 +479,7 @@ def format_stream_details(filename: str, quality: str, size: str, file_id: str, 
     audio        = parsed.get("audio", "")
     codec        = parsed.get("codec", "")
     bit_depth    = parsed.get("bitDepth", "")
-    encoder      = parsed.get("encoder", "")
+    encoder      = _clean_encoder(parsed.get("encoder", ""))
     subtitles    = parsed.get("subtitles", "")
     extended     = parsed.get("extended", False)
     proper       = parsed.get("proper", False)

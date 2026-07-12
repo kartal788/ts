@@ -168,7 +168,7 @@ async def restart_notification():
                 await StreamBot.edit_message_text(
                     chat_id=chat_id,
                     message_id=msg_id,
-                    text=f"Başarıyla Yeniden Başlatıldı \n\nTarih: {now.strftime('%d/%m/%y')}\nSaat: {now.strftime('%I:%M:%S %p')}\nZaman Dilimi: {timezone.zone}\nVersiyon: {__version__}",
+                    text=f"{Telegram.ISIM or 'Bot'} Yeniden Başlatıldı \n\nTarih: {now.strftime('%d/%m/%y')}\nSaat: {now.strftime('%I:%M:%S %p')}\nZaman Dilimi: {timezone.zone}\nVersiyon: {__version__}",
                     parse_mode=enums.ParseMode.HTML
                 )
             except Exception as e:

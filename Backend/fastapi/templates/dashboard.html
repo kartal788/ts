@@ -3,264 +3,303 @@
 {% block title %}Kontrol Paneli{% endblock %}
 
 {% block content %}
+<style>
+    .shadow-glow {
+        filter: drop-shadow(0 0 8px color-mix(in srgb, var(--primary) 45%, transparent));
+    }
+
+    .stream-card {
+        background: color-mix(in srgb, var(--card) 55%, transparent);
+        border: 1px solid var(--border);
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.16);
+    }
+
+    .stream-badge-live {
+        background: color-mix(in srgb, var(--primary) 18%, transparent);
+        color: var(--primary);
+    }
+
+    .stream-badge-recent {
+        background: color-mix(in srgb, var(--accent) 16%, transparent);
+        color: var(--accent);
+    }
+</style>
 <div class="min-h-screen">
-    <!-- Header with just status pill -->
-    <header class="theme-card shadow-lg mb-8">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-            <div class="flex items-center justify-between">
-                <div class="flex items-center space-x-4">
-                    <h1 class="text-3xl font-bold text-primary">Kontrol Paneli</h1>
-                </div>
-                <button onclick="refreshSystemStats(); updateActiveStreams();"
-                    class="flex items-center space-x-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-all shadow-md active:scale-95 group focus:outline-none"
-                    title="Sistem Verilerini Yenile">
-                    <svg id="refresh-icon" xmlns="http://www.w3.org/2000/svg"
-                        class="w-5 h-5 group-hover:rotate-180 transition-transform duration-500" fill="none"
-                        viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                            d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                    <span class="font-medium">Verileri Yenile</span>
-                </button>
+    <!-- System Overview Header -->
+    <header class="mb-8 sm:mb-10">
+        <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+                <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-primary to-accent">
+                    Kontrol Paneli
+                </h1>
+                <p class="text-text-secondary text-xs sm:text-sm mt-1">Gerçek zamanlı performans, canlı yayın etkinliği ve token erişim yönetimi</p>
             </div>
+
+            <button onclick="refreshSystemStats(); updateActiveStreams();"
+                class="w-full md:w-auto flex items-center justify-center space-x-2 px-6 py-3 rounded-2xl bg-primary/10 border border-primary/20 hover:bg-primary hover:text-background transition-all group active:scale-95"
+                title="Sistem Verilerini Yenile">
+                <i id="refresh-icon" class="fa-solid fa-arrows-rotate group-hover:rotate-180 transition-transform duration-700"></i>
+                <span class="font-bold text-sm uppercase tracking-wider">Verileri Yenile</span>
+            </button>
         </div>
     </header>
 
     <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-12">
-        <!-- System Status Section -->
-        <div class="mb-8">
-            <div class="grid lg:grid-cols-2 gap-8">
-                <!-- System Status Card -->
-                <div class="theme-card rounded-xl p-8 shadow-xl">
-                    <div class="flex items-center mb-6">
-                        <div
-                            class="w-12 h-12 theme-primary rounded-lg flex items-center justify-center mr-4 bg-opacity-20 text-primary">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" fill="none" viewBox="0 0 24 24"
-                                stroke="white">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z">
-                                </path>
-                            </svg>
-                        </div>
-                        <h3 class="text-2xl font-semibold">Sistem Durumu</h3>
-                    </div>
-
-                    <div class="space-y-4">
-                        <div class="flex justify-between items-center py-3 px-4 bg-gray-50 rounded-lg">
-                            <span class="font-medium theme-text-secondary">Çalışma süresi</span>
-                            <span id="sys-uptime" class="text-primary font-semibold">{{ system_stats.uptime or 'N/A'
-                                }}</span>
-                        </div>
-                        <div class="flex justify-between items-center py-3 px-4 bg-gray-50 rounded-lg">
-                            <span class="font-medium theme-text-secondary">Telegram Bot</span>
-                            <span id="sys-bot-name" class="text-primary font-semibold">{{ system_stats.telegram_bot or
-                                '@StreamBot'
-                                }}</span>
-                        </div>
-                        <div class="flex justify-between items-center py-3 px-4 bg-gray-50 rounded-lg">
-                            <span class="font-medium theme-text-secondary">Bağlı Botlar</span>
-                            <span id="sys-bots-count" class="text-primary font-semibold">{{
-                                system_stats.connected_bots|default(0) }}</span>
-                        </div>
-                        <div class="flex justify-between items-center py-3 px-4 bg-gray-50 rounded-lg">
-                            <span class="font-medium theme-text-secondary">Uygulama Sürümü</span>
-                            <span id="sys-version" class="text-primary font-semibold">v{{ system_stats.version or
-                                '1.0.0' }}</span>
-                        </div>
-                    </div>
+        <!-- Stat Overview -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+            <div class="glass-panel p-5 rounded-[2rem] flex items-center gap-4">
+                <div class="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary shadow-glow">
+                    <i class="fa-solid fa-clock"></i>
                 </div>
+                <div>
+                    <p class="text-[10px] uppercase font-bold text-text-secondary tracking-widest">Çalışma Süresi</p>
+                    <p id="sys-uptime" class="text-lg font-bold text-text">{{ system_stats.uptime or 'N/A' }}</p>
+                </div>
+            </div>
 
-                <!-- Live Streaming Status Card (REDESIGNED TO MATCH SYSTEM STATUS) -->
-                <div class="streams-container">
-                    <div class="theme-card rounded-xl p-8 shadow-xl h-full">
-                        <!-- Header matching System Status -->
-                        <div class="flex items-center justify-between mb-6">
-                            <div class="flex items-center">
-                                <div class="w-12 h-12 theme-primary rounded-lg flex items-center justify-center mr-4 bg-opacity-20 text-primary">
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="white">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                                    </svg>
-                                </div>
-                                <h3 class="text-2xl font-semibold">Canlı Yayın Durumu</h3>
+            <div class="glass-panel p-5 rounded-[2rem] flex items-center gap-4">
+                <div class="w-12 h-12 rounded-2xl bg-accent/10 flex items-center justify-center text-accent shadow-[0_0_15px_color-mix(in_srgb,var(--accent)_35%,transparent)]">
+                    <i class="fa-solid fa-robot"></i>
+                </div>
+                <div>
+                    <p class="text-[10px] uppercase font-bold text-text-secondary tracking-widest">Bağlı Botlar</p>
+                    <p id="sys-bots-count" class="text-lg font-bold text-text">{{ system_stats.connected_bots|default(0) }} Bot</p>
+                </div>
+            </div>
+
+            <div class="glass-panel p-5 rounded-[2rem] flex items-center gap-4">
+                <div class="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary shadow-glow">
+                    <i class="fa-solid fa-tower-broadcast"></i>
+                </div>
+                <div>
+                    <p class="text-[10px] uppercase font-bold text-text-secondary tracking-widest">Canlı Yayınlar</p>
+                    <p id="sys-live-streams" class="text-lg font-bold text-text">{{ system_stats.active_streams|length if system_stats.active_streams else 0 }} Aktif</p>
+                </div>
+            </div>
+
+            <div class="glass-panel p-5 rounded-[2rem] flex items-center gap-4">
+                <div class="w-12 h-12 rounded-2xl bg-surface flex items-center justify-center text-text-secondary">
+                    <i class="fa-solid fa-code-branch"></i>
+                </div>
+                <div>
+                    <p class="text-[10px] uppercase font-bold text-text-secondary tracking-widest">Sürüm</p>
+                    <p id="sys-version" class="text-lg font-bold text-text">v{{ system_stats.version or '1.0.0' }}</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid lg:grid-cols-3 gap-8">
+            <div class="lg:col-span-2 space-y-8">
+                <!-- Veritabanı -->
+                <section>
+                    <h3 class="flex items-center gap-2 text-lg font-bold mb-4 ml-2">
+                        <i class="fa-solid fa-database text-primary"></i> Veritabanı
+                    </h3>
+
+                    <div class="grid md:grid-cols-2 gap-4">
+                        {% if system_stats.databases %}
+                        {% for db_stat in system_stats.databases %}
+                        <div class="glass-panel p-6 rounded-[2rem] border-hairline bg-card/10">
+                            <div class="flex justify-between items-start mb-6">
+                                <h4 class="font-bold text-text">{{ db_stat.db_name.replace("storage_", "Veritabanı ") }}</h4>
+                                <span class="text-[10px] bg-primary/10 text-primary px-2 py-1 rounded-lg font-bold uppercase">Aktif</span>
                             </div>
-                            <div class="flex items-center gap-2">
-                                <span class="relative flex h-3 w-3">
-                                    <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                                    <span class="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
-                                </span>
-                                <span id="active-streams-badge" class="text-sm font-bold text-red-600">{{ system_stats.active_streams | length if system_stats.active_streams else 0 }} Aktif</span>
+
+                            <div class="space-y-4">
+                                <div class="flex justify-between text-sm">
+                                    <span class="text-text-secondary">Film / Dizi</span>
+                                    <span class="font-bold text-text"><span id="db-movies-{{ loop.index0 }}">{{ "{:,}".format(db_stat.movie_count) }}</span> / <span id="db-tv-{{ loop.index0 }}">{{ "{:,}".format(db_stat.tv_count) }}</span></span>
+                                </div>
+
+                                <div class="space-y-2">
+                                    <div class="flex justify-between text-xs font-bold uppercase tracking-widest">
+                                        <span class="text-text-secondary">Kullanılan Depolama</span>
+                                        <span id="db-storage-{{ loop.index0 }}" class="text-primary">{{ "%.1f"|format(db_stat.storageSize / 1024 / 1024) }} MB</span>
+                                    </div>
+                                    <div class="w-full h-1.5 bg-surface rounded-full overflow-hidden">
+                                        {% set storage_percent = (db_stat.storageSize / (500 * 1024 * 1024) * 100) | round %}
+                                        <div class="h-full bg-gradient-to-r from-primary to-accent transition-all duration-1000" style="width: {{ storage_percent }}%"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                        {% else %}
+                        <div class="col-span-full text-center text-text-secondary py-8">Veritabanı istatistikleri mevcut değil.</div>
+                        {% endif %}
+                    </div>
+                </section>
+
+                <!-- Filmleri Yönet / Dizileri Yönetin -->
+                <section class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <a href="/media/manage?media_type=movie" class="glass-panel p-6 rounded-[2rem] hover:bg-primary/5 transition-all group border border-hairline">
+                        <div class="flex items-center gap-4">
+                            <div class="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center text-primary group-hover:scale-110 transition-transform">
+                                <i class="fa-solid fa-film text-2xl"></i>
+                            </div>
+                            <div>
+                                <h4 class="font-bold text-text">Filmleri Yönet</h4>
+                                <p class="text-xs text-text-secondary">{{ system_stats.movies|default(0) }} film</p>
+                            </div>
+                            <i class="fa-solid fa-chevron-right ml-auto text-muted group-hover:text-primary group-hover:translate-x-1 transition-all"></i>
+                        </div>
+                    </a>
+
+                    <a href="/media/manage?media_type=tv" class="glass-panel p-6 rounded-[2rem] hover:bg-accent/5 transition-all group border border-hairline">
+                        <div class="flex items-center gap-4">
+                            <div class="w-14 h-14 rounded-2xl bg-accent/10 flex items-center justify-center text-accent group-hover:scale-110 transition-transform">
+                                <i class="fa-solid fa-tv text-2xl"></i>
+                            </div>
+                            <div>
+                                <h4 class="font-bold text-text">Dizileri Yönetin</h4>
+                                <p class="text-xs text-text-secondary">{{ system_stats.tv_shows|default(0) }} dizi</p>
+                            </div>
+                            <i class="fa-solid fa-chevron-right ml-auto text-muted group-hover:text-accent group-hover:translate-x-1 transition-all"></i>
+                        </div>
+                    </a>
+                </section>
+
+                <!-- Hızlı Erişim -->
+                <section>
+                    <h3 class="flex items-center gap-2 text-lg font-bold mb-4 ml-2">
+                        <i class="fa-solid fa-bolt text-primary"></i> Hızlı Erişim
+                    </h3>
+                    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                        <a href="/link-ekle" class="glass-panel p-5 rounded-[2rem] hover:bg-primary/5 transition-all group border border-hairline flex flex-col items-center text-center gap-3">
+                            <div class="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary group-hover:scale-110 transition-transform">
+                                <i class="fa-solid fa-link"></i>
+                            </div>
+                            <div>
+                                <h4 class="font-bold text-sm text-text">Link Ekle</h4>
+                                <p class="text-[11px] text-text-secondary mt-0.5">Yeni içerik linki ekleyin</p>
+                            </div>
+                        </a>
+
+                        <a href="/admin/uyeler" class="glass-panel p-5 rounded-[2rem] hover:bg-accent/5 transition-all group border border-hairline flex flex-col items-center text-center gap-3">
+                            <div class="w-12 h-12 rounded-2xl bg-accent/10 flex items-center justify-center text-accent group-hover:scale-110 transition-transform">
+                                <i class="fa-solid fa-users"></i>
+                            </div>
+                            <div>
+                                <h4 class="font-bold text-sm text-text">Üyeler</h4>
+                                <p class="text-[11px] text-text-secondary mt-0.5">Kayıtlı üyeleri yönetin</p>
+                            </div>
+                        </a>
+
+                        <a href="/admin/sunucu" class="glass-panel p-5 rounded-[2rem] hover:bg-primary/5 transition-all group border border-hairline flex flex-col items-center text-center gap-3">
+                            <div class="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary group-hover:scale-110 transition-transform">
+                                <i class="fa-solid fa-server"></i>
+                            </div>
+                            <div>
+                                <h4 class="font-bold text-sm text-text">Sunucu</h4>
+                                <p class="text-[11px] text-text-secondary mt-0.5">Sunucu ayarlarını yönetin</p>
+                            </div>
+                        </a>
+
+                        <a href="/istatistik" class="glass-panel p-5 rounded-[2rem] hover:bg-accent/5 transition-all group border border-hairline flex flex-col items-center text-center gap-3">
+                            <div class="w-12 h-12 rounded-2xl bg-accent/10 flex items-center justify-center text-accent group-hover:scale-110 transition-transform">
+                                <i class="fa-solid fa-chart-line"></i>
+                            </div>
+                            <div>
+                                <h4 class="font-bold text-sm text-text">İstatistik</h4>
+                                <p class="text-[11px] text-text-secondary mt-0.5">Kullanım istatistiklerini görün</p>
+                            </div>
+                        </a>
+                    </div>
+                </section>
+            </div>
+
+            <!-- Canlı Yayın Durumu -->
+            <div class="lg:col-span-1">
+                <div class="glass-panel rounded-[2.5rem] overflow-hidden h-full">
+                    <div class="p-6 border-b border-hairline">
+                        <div class="flex items-center justify-between gap-3 mb-2">
+                            <h3 class="flex items-center gap-2 text-lg font-bold">
+                                <i class="fa-solid fa-circle-play text-red-500 animate-pulse"></i> Canlı Yayın Durumu
+                            </h3>
+                            <span id="live-stream-count" class="text-[10px] font-bold uppercase tracking-[0.2em] text-primary bg-primary/10 px-3 py-1 rounded-full">
+                                {{ system_stats.active_streams|length if system_stats.active_streams else 0 }} Aktif
+                            </span>
+                        </div>
+                        <p class="text-sm text-text-secondary">Sadece aktif oturumlar</p>
+                    </div>
+
+                    <div class="p-6 space-y-6">
+                        <div class="grid grid-cols-2 gap-3">
+                            <div class="glass-panel p-4 rounded-2xl">
+                                <p class="text-[10px] uppercase font-bold tracking-widest text-text-secondary">Şu An Canlı</p>
+                                <p id="live-now-count" class="text-2xl font-extrabold mt-1 text-text">{{ system_stats.active_streams|length if system_stats.active_streams else 0 }}</p>
+                            </div>
+                            <div class="glass-panel p-4 rounded-2xl">
+                                <p class="text-[10px] uppercase font-bold tracking-widest text-text-secondary">Son</p>
+                                <p id="recent-stream-count" class="text-2xl font-extrabold mt-1 text-text">0</p>
                             </div>
                         </div>
 
-                        <!-- Stream List -->
-                        <div id="active-streams-container" class="space-y-4">
-                            {% if system_stats.active_streams and system_stats.active_streams|length > 0 %}
-                            {% for stream in system_stats.active_streams if stream.total_bytes and stream.total_bytes > 0 %}
-                            <div data-stream-card="{{ loop.index0 }}" class="stream-card bg-gray-50 rounded-lg p-4 border border-gray-100">
-                                <div class="flex justify-between items-start mb-3">
-                                    <div class="min-w-0 flex-1">
-                                        <div class="flex items-center gap-2">
-                                            <span class="font-bold text-primary truncate text-base">
-                                                {{ stream.meta.get('user_name') or 'Bilinmeyen Kullanıcı' }}
-                                            </span>
-                                            <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase
-                                                {% if stream.status == 'active' %}bg-green-100 text-green-700{% elif stream.status == 'cancelled' %}bg-yellow-100 text-yellow-700{% else %}bg-red-100 text-red-700{% endif %}">
+                        <div>
+                            <div class="flex items-center justify-between mb-3">
+                                <h4 class="text-sm font-bold text-text">Aktif Yayınlar</h4>
+                                <span class="text-[10px] uppercase tracking-widest text-text-secondary">Gerçek zamanlı</span>
+                            </div>
+                            <div id="active-streams-container" class="space-y-4">
+                                {% if system_stats.active_streams and system_stats.active_streams|length > 0 %}
+                                    {% for stream in system_stats.active_streams if stream.total_bytes and stream.total_bytes > 0 %}
+                                    <div class="stream-card rounded-[2rem] p-5">
+                                        <div class="flex justify-between items-start gap-3">
+                                            <div class="min-w-0 pr-2">
+                                                <h5 class="font-bold text-sm text-text truncate">{{ stream.meta.get('user_name') or stream.meta.get('title') or 'Bilinmeyen Yayın' }}</h5>
+                                                <div class="mt-1 flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-widest text-text-secondary">
+                                                    <span>Bot {{ (stream.client_index or 0) + 1 }}</span>
+                                                    <span>•</span>
+                                                    <span>DC {{ stream.dc_id or '-' }}</span>
+                                                </div>
+                                            </div>
+                                            <span class="text-[10px] font-bold px-2 py-1 rounded-lg uppercase whitespace-nowrap
+                                                {% if stream.status == 'active' %}stream-badge-live{% elif stream.status == 'cancelled' %}bg-yellow-500/15 text-yellow-300{% else %}stream-badge-recent{% endif %}">
                                                 {{ stream.status }}
                                             </span>
                                         </div>
-                                        <p class="text-xs theme-text-secondary truncate mt-0.5" title="{{ stream.meta.get('title') }}">
-                                            {{ stream.meta.get('title') or 'Bilinmeyen İçerik' }}
-                                        </p>
 
+                                        <div class="grid grid-cols-2 gap-3 mt-4 pt-4 border-t border-hairline">
+                                            <div class="text-center">
+                                                <p class="text-[9px] text-text-secondary uppercase tracking-widest font-bold">Hız</p>
+                                                <p class="text-xs font-bold text-text">{{ "%.3f"|format(stream.avg_mbps or 0) }} MB/s</p>
+                                            </div>
+                                            <div class="text-center">
+                                                <p class="text-[9px] text-text-secondary uppercase tracking-widest font-bold">Toplam</p>
+                                                <p class="text-xs font-bold text-text">{{ "%.1f"|format((stream.total_bytes or 0) / 1024 / 1024) }} MB</p>
+                                            </div>
+                                            <div class="text-center">
+                                                <p class="text-[9px] text-text-secondary uppercase tracking-widest font-bold">Süre</p>
+                                                <p class="text-xs font-bold text-text">{{ stream.duration or 0 }}s</p>
+                                            </div>
+                                            <div class="text-center">
+                                                <p class="text-[9px] text-text-secondary uppercase tracking-widest font-bold">Durum</p>
+                                                <p class="text-xs font-bold text-text">{{ stream.status or 'active' }}</p>
+                                            </div>
+                                        </div>
+
+                                        <div class="mt-4 pt-4 border-t border-hairline">
+                                            <div class="flex items-center justify-between text-xs gap-3">
+                                                <span class="text-text-secondary">İçerik</span>
+                                                <span class="text-text text-right truncate max-w-[65%]">{{ stream.meta.get('title') or 'Bilinmeyen İçerik' }}</span>
+                                            </div>
+                                        </div>
                                     </div>
-                                    <div class="text-right shrink-0 ml-4">
-                                        <span class="text-[10px] font-mono bg-white px-2 py-1 rounded border border-gray-200 theme-text-secondary">
-                                            Bot{{ stream.client_index + 1 }} / DC{{ stream.dc_id }}
-                                        </span>
+                                    {% endfor %}
+                                {% else %}
+                                    <div class="glass-panel p-8 rounded-[2rem] text-center border-dashed border-hairline">
+                                        <i class="fa-solid fa-satellite-dish text-4xl text-muted mb-3"></i>
+                                        <p class="text-sm text-text-secondary font-medium">Aktif yayın yok</p>
+                                        <p class="text-xs text-text-secondary mt-1">İzleme başladığında burada görünecektir.</p>
                                     </div>
-                                </div>
-
-                                <div class="grid grid-cols-3 gap-2">
-                                    <div class="bg-white p-2 rounded border border-gray-100 text-center">
-                                        <div class="text-[9px] uppercase text-gray-400">Veri</div>
-                                        <div class="text-xs font-bold">{{ "%.2f"|format(stream.total_bytes / 1024 / 1024) }} MB</div>
-                                    </div>
-                                    <div class="bg-white p-2 rounded border border-gray-100 text-center">
-                                        <div class="text-[9px] uppercase text-gray-400">Hız</div>
-                                        <div class="text-xs font-bold text-green-600">{{ stream.avg_mbps }} MB/s</div>
-                                    </div>
-                                    <div class="bg-white p-2 rounded border border-gray-100 text-center">
-                                        <div class="text-[9px] uppercase text-gray-400">Süre</div>
-                                        <div class="text-xs font-bold">{{ stream.duration }}s</div>
-                                    </div>
-                                </div>
-                            </div>
-                            {% endfor %}
-                            {% else %}
-                            <div class="flex flex-col items-center justify-center py-12 text-center bg-gray-50 rounded-xl border border-dashed border-gray-300">
-                                <p class="text-gray-500 font-medium">Aktif yayın yok</p>
-                                <p class="text-gray-400 text-xs mt-1">İzleme başladığında burada görünecektir</p>
-                            </div>
-                            {% endif %}
-                        </div>
-
-                        <!-- Pagination controls -->
-                        <div id="streams-pagination" class="hidden mt-6 flex items-center justify-between pt-4 border-t border-gray-100">
-                            <button id="streams-prev-btn" onclick="streamsChangePage(-1)"
-                                class="px-3 py-1.5 text-xs font-medium theme-text-secondary hover:text-primary disabled:opacity-30">
-                                ← Önceki
-                            </button>
-                            <span id="streams-page-info" class="text-[11px] font-bold theme-text-secondary uppercase tracking-wider"></span>
-                            <button id="streams-next-btn" onclick="streamsChangePage(1)"
-                                class="px-3 py-1.5 text-xs font-medium theme-text-secondary hover:text-primary disabled:opacity-30">
-                                Sonraki →
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Database Statistics Section -->
-        <div class="mb-8 mt-4">
-            <h2 class="text-2xl font-bold mb-6 text-center">Veritabanı</h2>
-            <div class="grid lg:grid-cols-2 gap-6">
-                {% if system_stats.databases %}
-                {% for db_stat in system_stats.databases %}
-                <div class="theme-card rounded-xl p-8 shadow-xl w-full flex flex-col h-full">
-                    <div class="flex items-center justify-between mb-6">
-                        <h3 class="text-xl font-semibold">{{ db_stat.db_name.replace("storage_", "Veritabanı ") }}</h3>
-                        <div
-                            class="w-12 h-12 theme-primary rounded-lg flex items-center justify-center bg-opacity-20 text-primary">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" fill="none" viewBox="0 0 24 24"
-                                stroke="white">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4">
-                                </path>
-                            </svg>
-                        </div>
-                    </div>
-
-                    <div class="space-y-4 flex-grow">
-                        <div class="flex justify-between items-center py-3 px-4 bg-gray-50 rounded-lg">
-                            <span class="font-medium theme-text-secondary">Filmler</span>
-                            <span id="db-movies-{{ loop.index0 }}" class="text-primary font-semibold">{{
-                                "{:,}".format(db_stat.movie_count) }}</span>
-                        </div>
-                        <div class="flex justify-between items-center py-3 px-4 bg-gray-50 rounded-lg">
-                            <span class="font-medium theme-text-secondary">Diziler</span>
-                            <span id="db-tv-{{ loop.index0 }}" class="text-primary font-semibold">{{
-                                "{:,}".format(db_stat.tv_count) }}</span>
-                        </div>
-
-                        <div class="py-3 px-4 bg-gray-50 rounded-lg">
-                            <div class="flex justify-between items-center mb-2">
-                                <span class="font-medium theme-text-secondary">Kullanılan depolama</span>
-                                <span id="db-storage-{{ loop.index0 }}" class="text-primary font-semibold text-sm">{{
-                                    "%.1f"|format(db_stat.storageSize /
-                                    1024 / 1024) }} MB</span>
-                            </div>
-                            {% set storage_percent = (db_stat.storageSize / (500 * 1024 * 1024) * 100) | round %}
-                            <div class="w-full bg-gray-200 rounded-full h-2.5">
-                                <div class="theme-primary h-2.5 rounded-full" style="width: {{ storage_percent }}%">
-                                </div>
+                                {% endif %}
                             </div>
                         </div>
                     </div>
                 </div>
-                {% endfor %}
-                {% else %}
-                <div class="col-span-full text-center theme-text-secondary py-8">Veritabanı istatistikleri mevcut değil.</div>
-                {% endif %} 
             </div>
         </div>
 
-        <!-- Media Management Section -->
-        <div class="mb-8">
-            <div class="grid lg:grid-cols-2 gap-6">
-                <a href="/media/manage?media_type=movie"
-                    class="block theme-card rounded-xl p-8 shadow-xl hover:shadow-2xl transition-all group w-full">
-                    <div class="flex items-center">
-                        <div
-                            class="w-16 h-16 theme-primary rounded-lg flex items-center justify-center mr-6 group-hover:scale-110 transition-transform bg-opacity-20 text-primary">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="w-8 h-8" fill="none" viewBox="0 0 24 24"
-                                stroke="white">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M7 4V2a1 1 0 011-1h8a1 1 0 011 1v2h4a1 1 0 110 2h-1v12a2 2 0 01-2-2V6H3a1 1 0 110-2h4zM9 6v10h6V6H9z">
-                                </path>
-                            </svg>
-                        </div>
-                        <div>
-                            <h3 class="text-xl font-semibold mb-2">Filmleri Yönet</h3>
-                            <p class="theme-text-secondary">Film koleksiyonlarını düzenleyin ve organize edin.</p>
-                            <div class="mt-2 text-primary font-semibold text-sm">{{ system_stats.movies|default(0) }}
-                                film</div>
-                        </div>
-                    </div>
-                </a>
-
-                <a href="/media/manage?media_type=tv"
-                    class="block theme-card rounded-xl p-8 shadow-xl hover:shadow-2xl transition-all group w-full">
-                    <div class="flex items-center">
-                        <div
-                            class="w-16 h-16 theme-primary rounded-lg flex items-center justify-center mr-6 group-hover:scale-110 transition-transform bg-opacity-20 text-primary">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="w-8 h-8" fill="none" viewBox="0 0 24 24"
-                                stroke="white">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z">
-                                </path>
-                            </svg>
-                        </div>
-                        <div>
-                            <h3 class="text-xl font-semibold mb-2">Dizileri Yönetin</h3>
-                            <p class="theme-text-secondary">TV dizilerini düzenleyin ve organize edin.</p>
-                            <div class="mt-2 text-primary font-semibold text-sm">{{ system_stats.tv_shows|default(0) }}
-                                dizi</div>
-                        </div>
-                    </div>
-                </a>
-            </div>
-        </div>
 
         <!-- Access Management Section -->
         <div class="theme-card rounded-xl p-8 shadow-xl mb-8">
@@ -742,9 +781,128 @@
 
 <!-- System Stats Auto-Refresh -->
 <script>
+    function escapeHtmlLocal(unsafe) {
+        if (!unsafe) return '';
+        return unsafe.toString().replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+    }
+
+    function formatBytesLocal(bytes) {
+        if (!bytes || bytes === 0) return '0 MB';
+        return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+    }
+
+    function getStreamStatusBadge(status) {
+        const normalized = String(status || '').toLowerCase();
+        if (normalized === 'active') return { className: 'stream-badge-live', text: 'active' };
+        if (normalized === 'cancelled') return { className: 'bg-yellow-500/15 text-yellow-300', text: 'cancelled' };
+        return { className: 'stream-badge-recent', text: normalized || 'active' };
+    }
+
+    function renderStreamCard(stream) {
+        const status = getStreamStatusBadge(stream.status);
+        const userName = escapeHtmlLocal((stream.meta && stream.meta.user_name) || (stream.meta && stream.meta.title) || 'Bilinmeyen Yayın');
+        const titleStr = escapeHtmlLocal((stream.meta && stream.meta.title) || 'Bilinmeyen İçerik');
+        const clientIndex = (stream.client_index || 0) + 1;
+        const dcId = stream.dc_id || '-';
+        const speed = (stream.avg_mbps || 0);
+        const totalMb = ((stream.total_bytes || 0) / 1024 / 1024).toFixed(1);
+        const duration = stream.duration || 0;
+
+        return `
+            <div class="stream-card rounded-[2rem] p-5">
+                <div class="flex justify-between items-start gap-3">
+                    <div class="min-w-0 pr-2">
+                        <h5 class="font-bold text-sm text-text truncate">${userName}</h5>
+                        <div class="mt-1 flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-widest text-text-secondary">
+                            <span>Bot ${clientIndex}</span>
+                            <span>•</span>
+                            <span>DC ${dcId}</span>
+                        </div>
+                    </div>
+                    <span class="text-[10px] font-bold px-2 py-1 rounded-lg uppercase whitespace-nowrap ${status.className}">
+                        ${escapeHtmlLocal(status.text)}
+                    </span>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3 mt-4 pt-4 border-t border-hairline">
+                    <div class="text-center">
+                        <p class="text-[9px] text-text-secondary uppercase tracking-widest font-bold">Hız</p>
+                        <p class="text-xs font-bold text-text">${speed.toFixed ? speed.toFixed(3) : speed} MB/s</p>
+                    </div>
+                    <div class="text-center">
+                        <p class="text-[9px] text-text-secondary uppercase tracking-widest font-bold">Toplam</p>
+                        <p class="text-xs font-bold text-text">${totalMb} MB</p>
+                    </div>
+                    <div class="text-center">
+                        <p class="text-[9px] text-text-secondary uppercase tracking-widest font-bold">Süre</p>
+                        <p class="text-xs font-bold text-text">${duration}s</p>
+                    </div>
+                    <div class="text-center">
+                        <p class="text-[9px] text-text-secondary uppercase tracking-widest font-bold">Durum</p>
+                        <p class="text-xs font-bold text-text">${escapeHtmlLocal(stream.status || 'active')}</p>
+                    </div>
+                </div>
+
+                <div class="mt-4 pt-4 border-t border-hairline">
+                    <div class="flex items-center justify-between text-xs gap-3">
+                        <span class="text-text-secondary">İçerik</span>
+                        <span class="text-text text-right truncate max-w-[65%]">${titleStr}</span>
+                    </div>
+                </div>
+            </div>`;
+    }
+
+    function renderStreamsEmptyState() {
+        return `
+            <div class="glass-panel p-8 rounded-[2rem] text-center border-dashed border-hairline">
+                <i class="fa-solid fa-satellite-dish text-4xl text-muted mb-3"></i>
+                <p class="text-sm text-text-secondary font-medium">Aktif yayın yok</p>
+                <p class="text-xs text-text-secondary mt-1">İzleme başladığında burada görünecektir.</p>
+            </div>`;
+    }
+
+    async function updateActiveStreams() {
+        const container = document.getElementById('active-streams-container');
+        const liveCount = document.getElementById('live-stream-count');
+        const liveNowCount = document.getElementById('live-now-count');
+        const recentCount = document.getElementById('recent-stream-count');
+        const sysLiveStreams = document.getElementById('sys-live-streams');
+
+        try {
+            const response = await fetch('/stream/stats');
+            if (response.ok) {
+                const data = await response.json();
+                // Backend zaten active + total_bytes > 0 filtresi uyguluyor
+                const activeStreams = data.active_streams || [];
+                const recentStreams = data.recent_streams || [];
+
+                if (liveCount) liveCount.textContent = activeStreams.length + ' Aktif';
+                if (liveNowCount) liveNowCount.textContent = String(activeStreams.length);
+                if (recentCount) recentCount.textContent = String(recentStreams.length);
+                if (sysLiveStreams) sysLiveStreams.textContent = activeStreams.length + ' Aktif';
+
+                if (container) {
+                    container.innerHTML = activeStreams.length
+                        ? activeStreams.map(renderStreamCard).join('')
+                        : renderStreamsEmptyState();
+                }
+            }
+        } catch (error) {
+            console.error("Failed to update active streams:", error);
+            if (container) {
+                container.innerHTML = `
+                    <div class="glass-panel p-8 rounded-[2rem] text-center border-dashed border-hairline">
+                        <i class="fa-solid fa-triangle-exclamation text-4xl text-muted mb-3"></i>
+                        <p class="text-sm text-text-secondary font-medium">Canlı yayın verileri alınamadı</p>
+                        <p class="text-xs text-text-secondary mt-1">Lütfen sayfayı yenilemeyi deneyin.</p>
+                    </div>`;
+            }
+        }
+    }
+
     async function refreshSystemStats() {
         const icon = document.getElementById('refresh-icon');
-        if (icon) icon.classList.add('animate-spin'); // Add tailwind spin class
+        if (icon) icon.classList.add('animate-spin');
 
         try {
             const response = await fetch('/api/system/stats');
@@ -755,11 +913,8 @@
                 const elUptime = document.getElementById('sys-uptime');
                 if (elUptime) elUptime.innerText = stats.uptime;
 
-                const elBotName = document.getElementById('sys-bot-name');
-                if (elBotName) elBotName.innerText = stats.telegram_bot;
-
                 const elBotCount = document.getElementById('sys-bots-count');
-                if (elBotCount) elBotCount.innerText = stats.connected_bots;
+                if (elBotCount) elBotCount.innerText = (stats.connected_bots ?? 0) + ' Bot';
 
                 const elVersion = document.getElementById('sys-version');
                 if (elVersion) elVersion.innerText = 'v' + stats.version;
@@ -806,9 +961,6 @@
                         }
                     });
                 }
-
-                // Update Bot Workloads
-                // await updateBotWorkloads(); // Bu fonksiyon mevcut değilse hata verebilir, yoruma alındı.
             }
         } catch (error) {
             console.error("Failed to refresh system stats:", error);
@@ -817,125 +969,6 @@
             setTimeout(() => {
                 if (icon) icon.classList.remove('animate-spin');
             }, 500);
-        }
-    }
-
-    // ── Canlı Yayın Sayfalama (REDESIGNED RENDERER) ───────────────────
-    const STREAMS_PER_PAGE = 2;
-    let streamsCurrentPage = 0;   
-    let streamsData = [];          
-
-    function streamsRenderPage() {
-        const container = document.getElementById('active-streams-container');
-        const pagination = document.getElementById('streams-pagination');
-        const prevBtn   = document.getElementById('streams-prev-btn');
-        const nextBtn   = document.getElementById('streams-next-btn');
-        const pageInfo  = document.getElementById('streams-page-info');
-
-        if (streamsData.length === 0) {
-            container.innerHTML = `
-            <div class="flex flex-col items-center justify-center py-12 text-center bg-gray-50 rounded-xl border border-dashed border-gray-300">
-                <p class="text-gray-500 font-medium">Aktif yayın yok</p>
-                <p class="text-gray-400 text-xs mt-1">İzleme başladığında burada görünecektir</p>
-            </div>`;
-            pagination.classList.add('hidden');
-            return;
-        }
-
-        const totalPages = Math.ceil(streamsData.length / STREAMS_PER_PAGE);
-        if (streamsCurrentPage >= totalPages) streamsCurrentPage = totalPages - 1;
-
-        const start = streamsCurrentPage * STREAMS_PER_PAGE;
-        const pageItems = streamsData.slice(start, start + STREAMS_PER_PAGE);
-
-        const escapeHtml = (unsafe) => {
-            if (!unsafe) return '';
-            return unsafe.toString().replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
-        };
-
-        const formatBytes = (bytes) => {
-            if (!bytes || bytes === 0) return '0 MB';
-            return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
-        };
-
-        container.innerHTML = pageItems.map(stream => {
-            const statusBadgeClass = stream.status === 'active' ? 'bg-green-100 text-green-700' : stream.status === 'cancelled' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700';
-            const userName = (stream.meta && stream.meta.user_name) ? stream.meta.user_name : 'Bilinmeyen Kullanıcı';
-            const titleStr = (stream.meta && stream.meta.title) ? stream.meta.title : (stream.title || 'Bilinmeyen İçerik');
-            return `
-            <div class="stream-card bg-gray-50 rounded-lg p-4 border border-gray-100">
-                <div class="flex justify-between items-start mb-3">
-                    <div class="min-w-0 flex-1">
-                        <div class="flex items-center gap-2">
-                            <span class="font-bold text-primary truncate text-base">${escapeHtml(userName)}</span>
-                            <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase ${statusBadgeClass}">${stream.status}</span>
-                        </div>
-                        <p class="text-xs theme-text-secondary truncate mt-0.5" title="${escapeHtml(titleStr)}">${escapeHtml(titleStr)}</p>
-                    </div>
-                    <div class="text-right shrink-0 ml-4">
-                        <span class="text-[10px] font-mono bg-white px-2 py-1 rounded border border-gray-200 theme-text-secondary">
-                            Bot${(stream.client_index || 0) + 1} / DC${stream.dc_id || '-'}
-                        </span>
-                    </div>
-                </div>
-                <div class="grid grid-cols-3 gap-2">
-                    <div class="bg-white p-2 rounded border border-gray-100 text-center">
-                        <div class="text-[9px] uppercase text-gray-400">Veri</div>
-                        <div class="text-xs font-bold">${formatBytes(stream.total_bytes)}</div>
-                    </div>
-                    <div class="bg-white p-2 rounded border border-gray-100 text-center">
-                        <div class="text-[9px] uppercase text-gray-400">Hız</div>
-                        <div class="text-xs font-bold text-green-600">${stream.avg_mbps || 0} MB/s</div>
-                    </div>
-                    <div class="bg-white p-2 rounded border border-gray-100 text-center">
-                        <div class="text-[9px] uppercase text-gray-400">Süre</div>
-                        <div class="text-xs font-bold">${stream.duration || 0}s</div>
-                    </div>
-                </div>
-            </div>`;
-        }).join('');
-
-        if (totalPages > 1) {
-            pagination.classList.remove('hidden');
-            pageInfo.textContent = `SAYFA ${streamsCurrentPage + 1} / ${totalPages}`;
-            prevBtn.disabled = streamsCurrentPage === 0;
-            nextBtn.disabled = streamsCurrentPage >= totalPages - 1;
-        } else {
-            pagination.classList.add('hidden');
-        }
-    }
-
-    function streamsChangePage(delta) {
-        if (window._staticStreamCards && window._staticStreamCards.length > 0 && window._showStaticStreamPage && streamsData.length === 0) {
-            const totalPages = Math.ceil(window._staticStreamCards.length / STREAMS_PER_PAGE);
-            streamsCurrentPage = Math.max(0, Math.min(streamsCurrentPage + delta, totalPages - 1));
-            window._showStaticStreamPage(streamsCurrentPage);
-            return;
-        }
-        const totalPages = Math.ceil(streamsData.length / STREAMS_PER_PAGE);
-        streamsCurrentPage = Math.max(0, Math.min(streamsCurrentPage + delta, totalPages - 1));
-        streamsRenderPage();
-    }
-
-    async function updateActiveStreams() {
-        try {
-            const response = await fetch('/stream/stats');
-            if (response.ok) {
-                const data = await response.json();
-                // Backend zaten active + total_bytes > 0 filtresi uyguluyor
-                streamsData = data.active_streams || [];
-
-                window._staticStreamCards = [];
-                window._showStaticStreamPage = null;
-
-                const badge = document.getElementById('active-streams-badge');
-                if (badge) badge.textContent = streamsData.length + ' Aktif';
-
-                streamsCurrentPage = 0;
-                streamsRenderPage();
-            }
-        } catch (error) {
-            console.error("Failed to update active streams:", error);
         }
     }
 
@@ -952,34 +985,6 @@
     setInterval(() => {
         refreshSystemStats();
     }, 30000);
-
-    (function initStreamsPagination() {
-        const container = document.getElementById('active-streams-container');
-        if (!container) return;
-        const cards = Array.from(container.querySelectorAll('.stream-card'));
-        if (cards.length === 0) return;
-        if (cards.length <= STREAMS_PER_PAGE) return;
-
-        function showStaticPage(page) {
-            const totalPages = Math.ceil(cards.length / STREAMS_PER_PAGE);
-            cards.forEach((card, i) => {
-                card.style.display = (i >= page * STREAMS_PER_PAGE && i < (page + 1) * STREAMS_PER_PAGE) ? '' : 'none';
-            });
-            const pagination = document.getElementById('streams-pagination');
-            const prevBtn   = document.getElementById('streams-prev-btn');
-            const nextBtn   = document.getElementById('streams-next-btn');
-            const pageInfo  = document.getElementById('streams-page-info');
-            pagination.classList.remove('hidden');
-            pageInfo.textContent = 'SAYFA ' + (page + 1) + ' / ' + totalPages;
-            prevBtn.disabled = page === 0;
-            nextBtn.disabled = page >= totalPages - 1;
-            streamsCurrentPage = page;
-        }
-
-        window._staticStreamCards = cards;
-        window._showStaticStreamPage = showStaticPage;
-        showStaticPage(0);
-    })();
 </script>
 
 <script>

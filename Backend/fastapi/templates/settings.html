@@ -1,0 +1,762 @@
+{% extends "base.html" %}
+{% block title %}Ayarlar — {{ app_name }}{% endblock %}
+{% block content %}
+<div class="container mx-auto px-4 py-8 pb-28 max-w-5xl">
+
+    <!-- Başlık -->
+    <div class="mb-6">
+        <h2 class="text-3xl font-bold text-primary">⚙️ Ayarlar</h2>
+        <p class="text-sm text-text opacity-60 mt-1">Uygulama genelindeki yapılandırmayı buradan yönetin. Değişiklikler kaydedildiği anda devreye girer, yeniden başlatma gerekmez.</p>
+    </div>
+
+    <div id="save-status" class="hidden mb-5 rounded-xl px-4 py-3 text-sm font-semibold"></div>
+
+    <!-- Sabit (floating) Kaydet butonu — kaydırınca ekrandan gitmez, mobil ve masaüstünde görünür -->
+    <button onclick="saveSettings()" id="save-btn-fab"
+        class="btn-primary fixed bottom-5 right-5 md:bottom-8 md:right-8 z-[9999] px-5 py-3.5 md:px-6 md:py-4 rounded-full text-sm font-bold flex items-center gap-2 shadow-2xl">
+        <i class="fa-solid fa-floppy-disk"></i>
+        <span class="hidden sm:inline">Kaydet</span>
+    </button>
+
+    <div class="grid grid-cols-1 gap-5">
+
+        <!-- Sistem & Bakım -->
+        <div class="theme-card rounded-2xl p-5">
+            <h3 class="text-xs font-extrabold uppercase tracking-wider text-primary mb-4 flex items-center gap-2">
+                <i class="fa-solid fa-server"></i> Sistem &amp; Bakım
+            </h3>
+
+            <!-- Veritabanı & sistem istatistikleri -->
+            <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+                <label class="s-label" style="margin-bottom:0">Veritabanı &amp; Sistem İstatistikleri</label>
+                <button class="add-btn" type="button" onclick="loadDbStats(this)">
+                    <i class="fa-solid fa-rotate"></i> Yenile
+                </button>
+            </div>
+            <div class="sm-stat-grid" id="stats-grid">
+                <div class="sm-hint" style="grid-column:1/-1"><i class="fa-solid fa-spinner fa-spin"></i> İstatistikler yükleniyor…</div>
+            </div>
+
+            <hr class="sm-divider">
+
+            <!-- Canlı loglar -->
+            <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+                <label class="s-label" style="margin-bottom:0">Loglar</label>
+                <div class="flex items-center gap-3 flex-wrap">
+                    <label class="sm-anime-check" title="Logu her 2 saniyede bir otomatik yenile">
+                        <input type="checkbox" id="log-live-toggle" onchange="toggleLiveLogs()">
+                        <span>Canlı</span>
+                    </label>
+                    <button class="add-btn" type="button" onclick="loadLogs(this)">
+                        <i class="fa-solid fa-rotate"></i> Yenile
+                    </button>
+                    <button class="add-btn" type="button" onclick="window.open('/api/admin/logs/download','_blank')">
+                        <i class="fa-solid fa-download"></i> İndir
+                    </button>
+                </div>
+            </div>
+            <pre id="log-view" style="background:color-mix(in srgb,var(--bg) 80%,#000);border:1px solid var(--hairline);
+                border-radius:0.75rem;padding:1rem;font-family:'JetBrains Mono',monospace;font-size:0.75rem;
+                line-height:1.5;color:var(--text);max-height:340px;overflow:auto;white-space:pre-wrap;
+                word-break:break-word;margin:0">Loglar yükleniyor…</pre>
+        </div>
+
+        <!-- Genel -->
+
+        <div class="theme-card rounded-2xl p-5">
+            <h3 class="text-xs font-extrabold uppercase tracking-wider text-primary mb-4 flex items-center gap-2">
+                <i class="fa-solid fa-sliders"></i> Genel
+            </h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label class="s-label">Uygulama Adı</label>
+                    <input class="s-input" id="s-isim" value="{{ settings.isim }}">
+                </div>
+                <div>
+                    <label class="s-label">Site URL (BASE_URL)</label>
+                    <input class="s-input" id="s-base_url" placeholder="https://example.com" value="{{ settings.base_url }}">
+                </div>
+                <div class="md:col-span-2">
+                    <label class="s-label">Eklenti Açıklaması</label>
+                    <input class="s-input" id="s-eklenti_aciklamasi" value="{{ settings.eklenti_aciklamasi }}">
+                </div>
+                <div>
+                    <label class="s-label">Eklenti Logosu (URL)</label>
+                    <input class="s-input" id="s-eklenti_logosu" value="{{ settings.eklenti_logosu }}">
+                </div>
+                <div>
+                    <label class="s-label">Bölüm Resmi (URL)</label>
+                    <input class="s-input" id="s-bolum_resimi" value="{{ settings.bolum_resimi }}">
+                </div>
+                <div>
+                    <label class="s-label">TMDB API Anahtarı</label>
+                    <input class="s-input" id="s-tmdb_api" value="{{ settings.tmdb_api }}">
+                </div>
+                <div class="flex flex-col justify-end gap-3">
+                    <label class="toggle-wrap">
+                        <input type="checkbox" class="toggle-input" id="s-replace_mode" {% if settings.replace_mode %}checked{% endif %}>
+                        <span class="toggle-track"></span>
+                        <span class="toggle-label">Değiştirme Modu (Replace Mode)</span>
+                    </label>
+                    <label class="toggle-wrap">
+                        <input type="checkbox" class="toggle-input" id="s-hide_catalog" {% if settings.hide_catalog %}checked{% endif %}>
+                        <span class="toggle-track"></span>
+                        <span class="toggle-label">Kataloğu Gizle</span>
+                    </label>
+                    <label class="toggle-wrap">
+                        <input type="checkbox" class="toggle-input" id="s-websitesi" {% if settings.websitesi %}checked{% endif %}>
+                        <span class="toggle-track"></span>
+                        <span class="toggle-label">Site Aktif (kapalıysa bakım modu)</span>
+                    </label>
+                </div>
+            </div>
+        </div>
+
+        <!-- Yetkilendirme Kanalları -->
+        <div class="theme-card rounded-2xl p-5">
+            <h3 class="text-xs font-extrabold uppercase tracking-wider text-primary mb-4 flex items-center gap-2">
+                <i class="fa-solid fa-shield-halved"></i> Yetkilendirme Kanalları
+            </h3>
+            <p class="text-xs text-text opacity-60 mb-3">Botu kullanabilmek için kullanıcının üye olması gereken Telegram kanal/grup ID'leri veya kullanıcı adları.</p>
+            <div class="multi-list-items" id="list-auth_channels"></div>
+            <div class="add-row">
+                <input class="s-input" id="add-auth_channels" placeholder="@kanal_adi veya -100xxxxxxxxxx">
+                <button class="add-btn" onclick="addItem('auth_channels')"><i class="fa-solid fa-plus"></i> Ekle</button>
+            </div>
+        </div>
+
+        <!-- Yeni İçerik Duyuruları -->
+        <div class="theme-card rounded-2xl p-5">
+            <h3 class="text-xs font-extrabold uppercase tracking-wider text-primary mb-4 flex items-center gap-2">
+                <i class="fa-solid fa-bullhorn"></i> Yeni İçerik Duyuruları
+            </h3>
+
+            <label class="toggle-wrap mb-4">
+                <input type="checkbox" class="toggle-input" id="s-announce_new_content"
+                    {% if settings.announce_new_content %}checked{% endif %}
+                    onchange="toggleAnnouncementFields()">
+                <span class="toggle-track"></span>
+                <span class="toggle-label">
+                    Yeni Başlıkları Duyur
+                    <span style="color:var(--text-sec);font-size:0.78rem;display:block;font-weight:400;text-transform:none;letter-spacing:0">
+                        Yeni bir film/dizi eklendiğinde veya eski bir diziye yeni bölüm geldiğinde,
+                        Telegram'daki bir kanala/gruba otomatik olarak Türkçe bir duyuru gönderilir.
+                        Aynı başlık için en fazla 18 saatte bir duyuru yapılır; süre dolduktan sonra
+                        yeni içerik eklenirse tekrar duyurulur. Hedef konu kapalıysa bot geçici olarak
+                        açıp mesajı gönderdikten sonra tekrar kapatır (botun "Konuları Yönet" yetkisi olmalı).
+                    </span>
+                </span>
+            </label>
+
+            <div id="announcement-fields" {% if not settings.announce_new_content %}style="display:none"{% endif %}>
+                <hr class="sm-divider">
+                <label class="s-label">Duyuru Kanalı / Grup Konusu</label>
+                <p class="text-xs text-text opacity-60 mb-2">
+                    <i class="fa-solid fa-circle-info"></i>
+                    Aşağıdaki biçimlerden biri girilebilir. Botun hedef kanalda/grupta
+                    <strong>admin</strong> olması gerekir.
+                </p>
+                <ul class="text-xs text-text opacity-60 mb-3" style="list-style:disc;padding-left:1.1rem;line-height:1.6">
+                    <li><code>-1001234567890</code> — kanal veya grup ID'si</li>
+                    <li><code>@kanaladi</code> — kullanıcı adı</li>
+                    <li><code>https://t.me/c/1234567890/2</code> — grup içindeki <strong>2 numaralı konuya</strong> (topic) gönderir</li>
+                    <li><code>https://t.me/c/1234567890/2/15</code> — aynısı; sondaki mesaj numarası (15) dikkate alınmaz, yalnızca 2 numaralı konu kullanılır</li>
+                </ul>
+                <input type="text" id="s-announcement_channel" class="s-input"
+                    value="{{ settings.announcement_channel }}"
+                    placeholder="-100xxxxxxxxxx, @kanal veya https://t.me/c/xxxxxxxxxx/2">
+            </div>
+        </div>
+
+        <!-- Abonelik -->
+        <div class="theme-card rounded-2xl p-5">
+            <h3 class="text-xs font-extrabold uppercase tracking-wider text-primary mb-4 flex items-center gap-2">
+                <i class="fa-solid fa-credit-card"></i> Abonelik
+            </h3>
+            <label class="toggle-wrap mb-4">
+                <input type="checkbox" class="toggle-input" id="s-subscription" {% if settings.subscription %}checked{% endif %}>
+                <span class="toggle-track"></span>
+                <span class="toggle-label">Abonelik Sistemi Aktif</span>
+            </label>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <div>
+                    <label class="s-label">Onay Grubu ID (Subscription Group ID)</label>
+                    <input class="s-input" id="s-subscription_group_id" value="{{ settings.subscription_group_id }}">
+                </div>
+                <div>
+                    <label class="s-label">Ödeme / Abonelik Linki</label>
+                    <input class="s-input" id="s-subscription_url" value="{{ settings.subscription_url }}">
+                </div>
+            </div>
+            <label class="s-label">Onaylayıcı Kullanıcı ID'leri (Approver IDs)</label>
+            <div class="multi-list-items" id="list-approver_ids"></div>
+            <div class="add-row">
+                <input class="s-input" id="add-approver_ids" placeholder="Telegram kullanıcı ID">
+                <button class="add-btn" onclick="addItem('approver_ids')"><i class="fa-solid fa-plus"></i> Ekle</button>
+            </div>
+            <p class="text-xs text-text opacity-50 mt-3">Not: Abonelik planları ve üyeler ayrıca <a href="/admin/subscriptions" class="text-primary underline">Abonelikler</a> sayfasından yönetilir.</p>
+        </div>
+
+        <!-- Cihaz ve Hız Limitleri -->
+        <div class="theme-card rounded-2xl p-5">
+            <h3 class="text-xs font-extrabold uppercase tracking-wider text-primary mb-4 flex items-center gap-2">
+                <i class="fa-solid fa-gauge-high"></i> Cihaz ve Hız Limitleri
+            </h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label class="s-label">Token Yenileme Süresi (saat)</label>
+                    <input class="s-input" id="s-yenileme" placeholder="boş = 6 saat" value="{{ settings.yenileme }}">
+                </div>
+                <div>
+                    <label class="s-label">Global Hız Limiti (Mbit/sn)</label>
+                    <input class="s-input" id="s-hiz_limiti" placeholder="boş = limitsiz" value="{{ settings.hiz_limiti }}">
+                </div>
+                <div>
+                    <label class="s-label">Günlük Limit Sıfırlama Saati (UTC, SS:DD)</label>
+                    <input class="s-input" id="s-limit_sifirlama" placeholder="boş = 00:00" value="{{ settings.limit_sifirlama }}">
+                </div>
+                <div>
+                    <label class="s-label">Varsayılan Cihaz Limiti</label>
+                    <input class="s-input" id="s-default_device_limit" value="{{ settings.default_device_limit }}">
+                </div>
+                <div>
+                    <label class="s-label">Maks. Eşzamanlı İndirme</label>
+                    <input class="s-input" id="s-max_concurrent_downloads" value="{{ settings.max_concurrent_downloads }}">
+                </div>
+                <div>
+                    <label class="s-label">Maks. Eşzamanlı Yükleme</label>
+                    <input class="s-input" id="s-max_concurrent_uploads" value="{{ settings.max_concurrent_uploads }}">
+                </div>
+            </div>
+        </div>
+
+        <!-- Proxy -->
+        <div class="theme-card rounded-2xl p-5">
+            <h3 class="text-xs font-extrabold uppercase tracking-wider text-primary mb-4 flex items-center gap-2">
+                <i class="fa-solid fa-network-wired"></i> Proxy Ayarları
+            </h3>
+            <label class="toggle-wrap mb-4">
+                <input type="checkbox" class="toggle-input" id="s-proxy" {% if settings.proxy %}checked{% endif %}>
+                <span class="toggle-track"></span>
+                <span class="toggle-label">Proxy Aktif</span>
+            </label>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                    <label class="s-label">Proxy Türü</label>
+                    <select class="s-input" id="s-proxy_type">
+                        <option value="HTTPS" {% if settings.proxy_type=='HTTPS' %}selected{% endif %}>HTTPS</option>
+                        <option value="HTTP" {% if settings.proxy_type=='HTTP' %}selected{% endif %}>HTTP</option>
+                    </select>
+                </div>
+                <div class="md:col-span-2">
+                    <label class="s-label">Proxy URL</label>
+                    <input class="s-input" id="s-http_proxy_url" placeholder="https://PROXYURL/?url=" value="{{ settings.http_proxy_url }}">
+                </div>
+                <div class="md:col-span-3">
+                    <label class="s-label">Proxy Modu</label>
+                    <select class="s-input" id="s-proxy_mode">
+                        <option value="1" {% if settings.proxy_mode==1 %}selected{% endif %}>Sadece Normal (proxy yok)</option>
+                        <option value="2" {% if settings.proxy_mode==2 %}selected{% endif %}>Hem Proxy Hem Normal</option>
+                        <option value="3" {% if settings.proxy_mode==3 %}selected{% endif %}>Sadece Proxy</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <!-- Brute-force Koruması -->
+        <div class="theme-card rounded-2xl p-5">
+            <h3 class="text-xs font-extrabold uppercase tracking-wider text-primary mb-4 flex items-center gap-2">
+                <i class="fa-solid fa-user-shield"></i> Kaba Kuvvet (Brute-Force) Koruması
+            </h3>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                    <label class="s-label">Pencere Süresi (sn)</label>
+                    <input class="s-input" id="s-brute_window" value="{{ settings.brute_window }}">
+                </div>
+                <div>
+                    <label class="s-label">Maks. Hatalı Giriş</label>
+                    <input class="s-input" id="s-brute_max" value="{{ settings.brute_max }}">
+                </div>
+                <div>
+                    <label class="s-label">Ban Süresi (sn)</label>
+                    <input class="s-input" id="s-brute_ban" value="{{ settings.brute_ban }}">
+                </div>
+            </div>
+        </div>
+
+        <!-- Veritabanları -->
+        <div class="theme-card rounded-2xl p-5">
+            <h3 class="text-xs font-extrabold uppercase tracking-wider text-primary mb-4 flex items-center gap-2">
+                <i class="fa-solid fa-database"></i> Veritabanları
+            </h3>
+            <div id="db-list" class="flex flex-col gap-2 mb-4"></div>
+            <p class="text-xs text-text opacity-60 mb-2">İlk iki veritabanı (tracking + storage_1) config.env'den gelir ve buradan değiştirilemez. Yeni depolama veritabanları yalnızca sona eklenebilir.</p>
+            <label class="s-label">Ek Depolama Veritabanı URI'leri</label>
+            <div class="multi-list-items" id="list-extra_databases"></div>
+            <div class="add-row">
+                <input class="s-input" id="add-extra_databases" placeholder="mongodb+srv://kullanici:sifre@cluster/...">
+                <button class="add-btn" onclick="addItem('extra_databases')"><i class="fa-solid fa-plus"></i> Ekle</button>
+            </div>
+        </div>
+
+        <!-- Çoklu Token İstemcileri -->
+        <div class="theme-card rounded-2xl p-5">
+            <h3 class="text-xs font-extrabold uppercase tracking-wider text-primary mb-4 flex items-center gap-2">
+                <i class="fa-brands fa-telegram"></i> Çoklu Token İstemcileri
+            </h3>
+            <p class="text-xs text-text opacity-60 mb-3">Yüksek yük altında dosya aktarımını birden fazla bot arasında dağıtmak için ek bot token'ları ekleyin (BotFather'dan alınır). config.env'deki MULTI_TOKEN_x değişkenleri de otomatik dahil edilir.</p>
+            <div id="env-multi-tokens" class="flex flex-col gap-2 mb-3"></div>
+            <div class="multi-list-items" id="list-multi_tokens"></div>
+            <div class="add-row">
+                <input class="s-input" id="add-multi_tokens" placeholder="123456:ABC-DEF... (bot token)" type="password">
+                <button class="add-btn" onclick="addItem('multi_tokens')"><i class="fa-solid fa-plus"></i> Ekle</button>
+            </div>
+        </div>
+
+        <!-- Yönetici Oturumu -->
+        <div class="theme-card rounded-2xl p-5">
+            <h3 class="text-xs font-extrabold uppercase tracking-wider text-primary mb-4 flex items-center gap-2">
+                <i class="fa-solid fa-user-shield"></i> Yönetici Oturumu
+            </h3>
+            <p class="text-xs text-text opacity-60 mb-4">Bu uygulamada sabit bir yönetici şifresi yoktur — giriş bilgileri, sahibin (OWNER_ID) botta <code>/start</code> komutunu her çalıştırışında tek kullanımlık olarak üretilir. Aşağıdaki buton mevcut tüm oturumları anında geçersiz kılar.</p>
+            <button onclick="invalidateSessions()" class="bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white px-4 py-2.5 rounded-xl text-sm font-bold transition-all">
+                <i class="fa-solid fa-right-from-bracket mr-1"></i> Tüm Oturumları Sonlandır
+            </button>
+        </div>
+
+        <!-- Yedekleme & Geri Yükleme -->
+        <div class="theme-card rounded-2xl p-5">
+            <h3 class="text-xs font-extrabold uppercase tracking-wider text-primary mb-4 flex items-center gap-2">
+                <i class="fa-solid fa-box-archive"></i> Yedekleme &amp; Geri Yükleme
+            </h3>
+            <p class="text-xs text-text opacity-60 mb-4">Tüm ayarları bir JSON dosyası olarak indirin veya daha önce aldığınız bir yedeği geri yükleyin. Medya/içerik verilerini kapsamaz, sadece bu sayfadaki ayarları içerir.</p>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <a href="/api/admin/settings/backup" class="bk-btn bk-export">
+                    <span class="bk-ic"><i class="fa-solid fa-download"></i></span>
+                    <span class="bk-txt"><b>Yedeği İndir</b><small>Ayarları JSON olarak dışa aktar</small></span>
+                </a>
+                <label class="bk-btn bk-import" style="cursor:pointer;">
+                    <span class="bk-ic"><i class="fa-solid fa-upload"></i></span>
+                    <span class="bk-txt"><b>Yedek Yükle</b><small>Bir JSON yedeğini geri yükle</small></span>
+                    <input type="file" accept=".json" style="display:none" onchange="restoreBackup(this)">
+                </label>
+            </div>
+            <p class="bk-warn"><i class="fa-solid fa-triangle-exclamation"></i> Geri yükleme, mevcut tüm ayarların üzerine yazar.</p>
+        </div>
+
+    </div>
+</div>
+
+<style>
+.s-input {
+    width: 100%;
+    background: color-mix(in srgb, var(--bg) 70%, transparent);
+    border: 1px solid var(--hairline);
+    color: var(--text);
+    border-radius: 0.75rem;
+    padding: 0.6rem 1rem;
+    font-size: 0.88rem;
+    outline: none;
+    transition: border-color 0.2s;
+}
+.s-input:focus { border-color: var(--primary); }
+.s-label {
+    display: block; font-size: 0.72rem; font-weight: 700;
+    color: var(--text-sec); text-transform: uppercase;
+    letter-spacing: 0.04em; margin-bottom: 0.35rem;
+}
+.toggle-wrap { display: flex; align-items: center; gap: 0.75rem; cursor: pointer; }
+.toggle-input { position: absolute; opacity: 0; width: 0; height: 0; }
+.toggle-track {
+    display: inline-block; width: 3rem; height: 1.625rem;
+    border-radius: 9999px; background: var(--hairline);
+    position: relative; transition: background 0.2s ease; flex-shrink: 0;
+}
+.toggle-track::after {
+    content: ''; position: absolute; top: 3px; left: 3px;
+    width: 20px; height: 20px; border-radius: 50%; background: white;
+    transition: transform 0.2s ease; box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+}
+.toggle-input:checked + .toggle-track { background: var(--primary); }
+.toggle-input:checked + .toggle-track::after { transform: translateX(1.375rem); }
+.toggle-label { font-size: 0.88rem; color: var(--text); user-select: none; }
+
+.multi-list-items { display: flex; flex-direction: column; gap: 0.4rem; margin-bottom: 0.6rem; }
+.multi-item { display: flex; align-items: center; gap: 0.5rem; }
+.multi-item .s-input { flex: 1; }
+.remove-btn {
+    width: 2rem; height: 2rem; flex-shrink: 0;
+    background: rgba(239,68,68,0.12); border: 1px solid rgba(239,68,68,0.25);
+    color: #ef4444; border-radius: 0.5rem; font-size: 1rem; line-height: 1;
+    cursor: pointer; transition: background 0.15s;
+    display: flex; align-items: center; justify-content: center;
+}
+.remove-btn:hover { background: rgba(239,68,68,0.25); }
+.add-row { display: flex; gap: 0.5rem; }
+.add-btn {
+    flex-shrink: 0; padding: 0.6rem 1rem;
+    background: color-mix(in srgb, var(--primary) 15%, transparent);
+    border: 1px solid color-mix(in srgb, var(--primary) 40%, transparent);
+    color: var(--primary); border-radius: 0.75rem;
+    font-size: 0.8rem; font-weight: 700; cursor: pointer;
+    transition: background 0.15s; white-space: nowrap;
+}
+.add-btn:hover { background: color-mix(in srgb, var(--primary) 28%, transparent); }
+
+.db-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 0.75rem;
+    padding: 0.6rem 0.9rem; border-radius: 0.75rem;
+    border: 1px solid var(--hairline); font-size: 0.8rem;
+}
+.db-row .db-badge {
+    font-size: 0.65rem; font-weight: 800; text-transform: uppercase;
+    padding: 0.15rem 0.5rem; border-radius: 999px;
+    background: color-mix(in srgb, var(--primary) 16%, transparent); color: var(--primary);
+}
+
+.bk-actions, .bk-btn { }
+.bk-btn {
+    display: flex; align-items: center; gap: 0.85rem; padding: 0.9rem 1.1rem; border-radius: 0.9rem;
+    text-decoration: none; text-align: left; transition: all .15s;
+    border: 1px solid var(--hairline); background: color-mix(in srgb, var(--card) 92%, var(--bg));
+}
+.bk-btn:hover { transform: translateY(-1px); border-color: var(--primary); }
+.bk-ic { width: 2.5rem; height: 2.5rem; border-radius: 0.7rem; display: flex; align-items: center; justify-content: center; font-size: 1.05rem; flex-shrink: 0; }
+.bk-export .bk-ic { background: color-mix(in srgb, var(--primary) 18%, transparent); color: var(--primary); }
+.bk-import .bk-ic { background: #22c55e22; color: #22c55e; }
+.bk-txt { display: flex; flex-direction: column; line-height: 1.25; }
+.bk-txt b { font-size: 0.92rem; color: var(--text); }
+.bk-txt small { font-size: 0.73rem; color: var(--text-sec); }
+.bk-warn { color: var(--text-sec); font-size: 0.76rem; margin-top: 0.85rem; }
+.bk-warn i { color: #f59e0b; }
+
+.sm-divider { border: none; border-top: 1px solid var(--hairline); margin: 1.25rem 0; }
+.sm-stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px,1fr)); gap: 0.75rem; }
+.sm-stat-box {
+    background: color-mix(in srgb, var(--bg) 55%, transparent);
+    border: 1px solid var(--hairline); border-radius: 0.9rem;
+    padding: 0.75rem 0.9rem;
+}
+.sm-stat-box .v { font-size: 1.3rem; font-weight: 800; color: var(--text); }
+.sm-stat-box .l { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-sec); }
+.sm-hint { font-size: 0.78rem; color: var(--text-sec); }
+.sm-anime-check {
+    display: inline-flex; align-items: center; gap: 0.35rem; flex-shrink: 0;
+    cursor: pointer; user-select: none; white-space: nowrap;
+    padding: 0.4rem 0.6rem; border-radius: 0.6rem;
+    border: 1px solid var(--hairline); background: transparent;
+    font-size: 0.7rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.03em; color: var(--text-sec); transition: all 0.15s;
+}
+.sm-anime-check input { width: 0.95rem; height: 0.95rem; accent-color: var(--primary); cursor: pointer; margin: 0; }
+.sm-anime-check:hover { border-color: color-mix(in srgb, var(--primary) 35%, transparent); }
+</style>
+
+<script>
+const LIST_KEYS = ['auth_channels', 'approver_ids', 'extra_databases', 'multi_tokens'];
+let currentSettings = {{ settings | tojson }};
+
+function escapeHtmlAttr(str) {
+    return String(str ?? '').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+}
+
+function rowHTML(listKey, value, isSecret) {
+    const type = isSecret ? 'password' : 'text';
+    return `<div class="multi-item">
+        <input class="s-input" type="${type}" value="${escapeHtmlAttr(value)}" data-list="${listKey}">
+        <button class="remove-btn" onclick="this.parentElement.remove()"><i class="fa-solid fa-xmark"></i></button>
+    </div>`;
+}
+
+function renderList(listKey, values, isSecret) {
+    const container = document.getElementById('list-' + listKey);
+    if (!container) return;
+    container.innerHTML = (values || []).map(v => rowHTML(listKey, v, isSecret)).join('');
+}
+
+function addItem(listKey) {
+    const input = document.getElementById('add-' + listKey);
+    const value = (input.value || '').trim();
+    if (!value) return;
+    const container = document.getElementById('list-' + listKey);
+    container.insertAdjacentHTML('beforeend', rowHTML(listKey, value, input.type === 'password'));
+    input.value = '';
+}
+
+function collectList(listKey) {
+    return Array.from(document.querySelectorAll(`#list-${listKey} input[data-list="${listKey}"]`))
+        .map(i => i.value.trim())
+        .filter(Boolean);
+}
+
+function toggleAnnouncementFields() {
+    const enabled = document.getElementById('s-announce_new_content').checked;
+    document.getElementById('announcement-fields').style.display = enabled ? '' : 'none';
+}
+
+function renderDbList(dbList) {
+    const box = document.getElementById('db-list');
+    if (!box) return;
+    if (!dbList || !dbList.length) {
+        box.innerHTML = `<p class="text-xs text-text opacity-50">Veritabanı bilgisi yüklenemedi.</p>`;
+        return;
+    }
+    box.innerHTML = dbList.map(d => `
+        <div class="db-row">
+            <div class="flex items-center gap-2 min-w-0">
+                <span class="db-badge">${d.type === 'tracking' ? 'Takip' : 'Depolama'}</span>
+                <span class="truncate opacity-80">${escapeHtmlAttr(d.uri_masked)}</span>
+            </div>
+            <span class="text-[10px] font-bold uppercase ${d.connected ? 'text-green-500' : 'text-red-400'}">
+                ${d.connected ? '● Bağlı' : '○ Bağlı Değil'}
+            </span>
+        </div>
+    `).join('');
+}
+
+function renderEnvTokens(envTokens) {
+    const box = document.getElementById('env-multi-tokens');
+    if (!box) return;
+    if (!envTokens || !envTokens.length) {
+        box.innerHTML = '';
+        return;
+    }
+    box.innerHTML = envTokens.map(t => `
+        <div class="multi-item" style="opacity:0.65">
+            <input class="s-input" type="text" value="${escapeHtmlAttr(t.name + ' = ' + t.masked)}" disabled>
+            <span class="text-[10px] font-bold uppercase text-text-sec" style="white-space:nowrap;padding:0 0.4rem">config.env</span>
+        </div>
+    `).join('');
+}
+
+function renderSettings(s) {
+    currentSettings = s;
+    document.getElementById('s-isim').value = s.isim || '';
+    document.getElementById('s-base_url').value = s.base_url || '';
+    document.getElementById('s-eklenti_aciklamasi').value = s.eklenti_aciklamasi || '';
+    document.getElementById('s-eklenti_logosu').value = s.eklenti_logosu || '';
+    document.getElementById('s-bolum_resimi').value = s.bolum_resimi || '';
+    document.getElementById('s-tmdb_api').value = s.tmdb_api || '';
+    document.getElementById('s-replace_mode').checked = !!s.replace_mode;
+    document.getElementById('s-hide_catalog').checked = !!s.hide_catalog;
+    document.getElementById('s-websitesi').checked = !!s.websitesi;
+
+    document.getElementById('s-announce_new_content').checked = !!s.announce_new_content;
+    document.getElementById('s-announcement_channel').value = s.announcement_channel || '';
+    toggleAnnouncementFields();
+
+    document.getElementById('s-subscription').checked = !!s.subscription;
+    document.getElementById('s-subscription_group_id').value = s.subscription_group_id ?? '';
+    document.getElementById('s-subscription_url').value = s.subscription_url || '';
+
+    document.getElementById('s-yenileme').value = s.yenileme || '';
+    document.getElementById('s-hiz_limiti').value = s.hiz_limiti || '';
+    document.getElementById('s-limit_sifirlama').value = s.limit_sifirlama || '';
+    document.getElementById('s-default_device_limit').value = s.default_device_limit ?? '';
+    document.getElementById('s-max_concurrent_downloads').value = s.max_concurrent_downloads || '';
+    document.getElementById('s-max_concurrent_uploads').value = s.max_concurrent_uploads || '';
+
+    document.getElementById('s-proxy').checked = !!s.proxy;
+    document.getElementById('s-proxy_type').value = s.proxy_type || 'HTTPS';
+    document.getElementById('s-http_proxy_url').value = s.http_proxy_url || '';
+    document.getElementById('s-proxy_mode').value = String(s.proxy_mode ?? 1);
+
+    document.getElementById('s-brute_window').value = s.brute_window ?? '';
+    document.getElementById('s-brute_max').value = s.brute_max ?? '';
+    document.getElementById('s-brute_ban').value = s.brute_ban ?? '';
+
+    renderList('auth_channels', s.auth_channels, false);
+    renderList('approver_ids', s.approver_ids, false);
+    renderList('extra_databases', s.extra_databases, true);
+    renderList('multi_tokens', s.multi_tokens, true);
+    renderEnvTokens(s.env_multi_tokens);
+    renderDbList(s.database_list);
+}
+
+function showStatus(msg, ok) {
+    const el = document.getElementById('save-status');
+    el.classList.remove('hidden');
+    el.textContent = msg;
+    el.style.background = ok ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.12)';
+    el.style.color = ok ? '#22c55e' : '#ef4444';
+    el.style.border = `1px solid ${ok ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)'}`;
+    setTimeout(() => el.classList.add('hidden'), 6000);
+}
+
+function toInt(id, fallback) {
+    const v = parseInt(document.getElementById(id).value, 10);
+    return Number.isFinite(v) ? v : fallback;
+}
+
+function buildPayload() {
+    return {
+        isim: document.getElementById('s-isim').value.trim(),
+        base_url: document.getElementById('s-base_url').value.trim(),
+        eklenti_aciklamasi: document.getElementById('s-eklenti_aciklamasi').value.trim(),
+        eklenti_logosu: document.getElementById('s-eklenti_logosu').value.trim(),
+        bolum_resimi: document.getElementById('s-bolum_resimi').value.trim(),
+        tmdb_api: document.getElementById('s-tmdb_api').value.trim(),
+        replace_mode: document.getElementById('s-replace_mode').checked,
+        hide_catalog: document.getElementById('s-hide_catalog').checked,
+        websitesi: document.getElementById('s-websitesi').checked,
+
+        auth_channels: collectList('auth_channels'),
+
+        announce_new_content: document.getElementById('s-announce_new_content').checked,
+        announcement_channel: document.getElementById('s-announcement_channel').value.trim(),
+
+        subscription: document.getElementById('s-subscription').checked,
+        subscription_group_id: toInt('s-subscription_group_id', 0),
+        subscription_url: document.getElementById('s-subscription_url').value.trim(),
+        approver_ids: collectList('approver_ids').map(x => parseInt(x, 10)).filter(Number.isFinite),
+
+        yenileme: document.getElementById('s-yenileme').value.trim(),
+        hiz_limiti: document.getElementById('s-hiz_limiti').value.trim(),
+        limit_sifirlama: document.getElementById('s-limit_sifirlama').value.trim(),
+        default_device_limit: toInt('s-default_device_limit', 0),
+        max_concurrent_downloads: document.getElementById('s-max_concurrent_downloads').value.trim(),
+        max_concurrent_uploads: document.getElementById('s-max_concurrent_uploads').value.trim(),
+
+        proxy: document.getElementById('s-proxy').checked,
+        proxy_type: document.getElementById('s-proxy_type').value,
+        http_proxy_url: document.getElementById('s-http_proxy_url').value.trim(),
+        proxy_mode: toInt('s-proxy_mode', 1),
+
+        brute_window: toInt('s-brute_window', 60),
+        brute_max: toInt('s-brute_max', 5),
+        brute_ban: toInt('s-brute_ban', 1800),
+
+        extra_databases: collectList('extra_databases'),
+        multi_tokens: collectList('multi_tokens'),
+    };
+}
+
+async function saveSettings() {
+    const fab = document.getElementById('save-btn-fab');
+    const originalFab = fab.innerHTML;
+    fab.disabled = true;
+    fab.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span class="hidden sm:inline">Kaydediliyor...</span>';
+    try {
+        const res = await fetch('/api/admin/settings', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(buildPayload())
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+            let extra = '';
+            if (data.details && Object.keys(data.details).length) {
+                extra = ' — ' + Object.values(data.details).join(', ');
+            }
+            showStatus('✅ Ayarlar kaydedildi.' + extra, true);
+            if (data.settings) renderSettings(data.settings);
+        } else {
+            showStatus('❌ ' + (data.detail || 'Ayarlar kaydedilemedi.'), false);
+        }
+    } catch (err) {
+        showStatus('❌ Hata: ' + err.message, false);
+    } finally {
+        fab.disabled = false;
+        fab.innerHTML = originalFab;
+    }
+}
+
+async function restoreBackup(input) {
+    const file = input.files[0];
+    if (!file) return;
+    try {
+        const text = await file.text();
+        const parsed = JSON.parse(text);
+        const res = await fetch('/api/admin/settings/backup/import', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(parsed)
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+            showStatus('✅ Yedek geri yüklendi.', true);
+            if (data.settings) renderSettings(data.settings);
+        } else {
+            showStatus('❌ ' + (data.detail || 'Yedek geri yüklenemedi.'), false);
+        }
+    } catch (err) {
+        showStatus('❌ Geçersiz yedek dosyası: ' + err.message, false);
+    } finally {
+        input.value = '';
+    }
+}
+
+async function invalidateSessions() {
+    if (!confirm('Tüm yönetici oturumları sonlandırılsın mı? Herkes /start ile yeniden giriş yapmak zorunda kalacak.')) return;
+    try {
+        const res = await fetch('/api/admin/settings/invalidate-sessions', { method: 'POST' });
+        const data = await res.json();
+        showStatus(data.success ? '✅ ' + data.message : '❌ ' + (data.detail || 'İşlem başarısız.'), !!data.success);
+    } catch (err) {
+        showStatus('❌ Hata: ' + err.message, false);
+    }
+}
+
+/* ── Sistem & Bakım: DB/sistem istatistikleri + loglar ─────────────────── */
+const STAT_FIELDS = [
+    ['movies', 'Filmler'], ['tv_shows', 'Diziler'], ['episodes', 'Bölümler'],
+    ['streams', 'Yayınlar'], ['db_size', 'DB Boyutu'],
+    ['auth_channels', 'AUTH Kanalları'],
+];
+let logLiveTimer = null;
+
+/* Async işlem sürerken tıklanan yenile butonunun ikonunu döndür */
+function spinIcon(btn, on) {
+    const icon = btn && btn.querySelector('i');
+    if (icon) icon.classList.toggle('fa-spin', on);
+}
+
+async function loadDbStats(btn) {
+    const grid = document.getElementById('stats-grid');
+    spinIcon(btn, true);
+    try {
+        const res = await fetch('/api/admin/stats');
+        const data = await res.json();
+        if (data.status !== 'success') throw new Error(data.message || 'failed');
+        const s = data.data;
+        grid.innerHTML = STAT_FIELDS.map(([k, label]) =>
+            `<div class="sm-stat-box"><div class="v">${escapeHtml(String(s[k] ?? '—'))}</div><div class="l">${label}</div></div>`
+        ).join('');
+    } catch (e) {
+        grid.innerHTML = `<div class="sm-hint" style="grid-column:1/-1;color:#ef4444">İstatistikler yüklenemedi.</div>`;
+    } finally {
+        spinIcon(btn, false);
+    }
+}
+
+async function loadLogs(btn) {
+    const view = document.getElementById('log-view');
+    spinIcon(btn, true);
+    try {
+        const res = await fetch('/api/admin/logs');
+        const data = await res.json();
+        if (data.status === 'success') {
+            const atBottom = view.scrollHeight - view.scrollTop - view.clientHeight < 40;
+            view.textContent = data.log || '(log boş)';
+            if (atBottom) view.scrollTop = view.scrollHeight;
+        } else {
+            view.textContent = data.message || 'Log okunamadı.';
+        }
+    } catch (e) {
+        view.textContent = 'Log yüklenirken ağ hatası oluştu.';
+    } finally {
+        spinIcon(btn, false);
+    }
+}
+
+function toggleLiveLogs() {
+    const on = document.getElementById('log-live-toggle').checked;
+    if (logLiveTimer) { clearInterval(logLiveTimer); logLiveTimer = null; }
+    if (on) { loadLogs(); logLiveTimer = setInterval(loadLogs, 2000); }
+}
+
+document.addEventListener('DOMContentLoaded', () => renderSettings(currentSettings));
+document.addEventListener('DOMContentLoaded', () => loadDbStats());
+document.addEventListener('DOMContentLoaded', () => loadLogs());
+</script>
+{% endblock %}

@@ -822,6 +822,67 @@ def _content_requests_col():
     return db.dbs["tracking"]["content_requests"]
 
 
+# İstekler admin sayfası için basit poster/başlık önbelleği (tmdb_id bazlı).
+# add_content_request (bot /istek) poster/title kaydetmediğinden, eksik
+# olanlar burada TMDB'den tamamlanır.
+_ISTEKLER_TMDB_CACHE: dict[str, dict] = {}
+
+
+async def _fetch_tmdb_basic(media_type: str, tmdb_id: int) -> dict:
+    """tmdb_id için sadece poster ve başlığı çeker (hafif, tek API çağrısı)."""
+    if not tmdb_id or media_type not in ("movie", "tv"):
+        return {}
+
+    cache_key = f"{media_type}:{tmdb_id}"
+    if cache_key in _ISTEKLER_TMDB_CACHE:
+        return _ISTEKLER_TMDB_CACHE[cache_key]
+
+    try:
+        from Backend.helper.metadata import tmdb_tr, format_tmdb_image, API_SEMAPHORE
+        async with API_SEMAPHORE:
+            if media_type == "movie":
+                details = await tmdb_tr.movie(tmdb_id).details()
+                title = getattr(details, "title", "") or getattr(details, "original_title", "")
+            else:
+                details = await tmdb_tr.tv(tmdb_id).details()
+                title = getattr(details, "name", "") or getattr(details, "original_name", "")
+
+        poster_path = getattr(details, "poster_path", None)
+        info = {
+            "title": title or "",
+            "poster": format_tmdb_image(poster_path) if poster_path else "",
+        }
+    except Exception as e:
+        _logger.warning("TMDB detay çekilemedi (tmdb_id=%s, type=%s): %s", tmdb_id, media_type, e)
+        info = {}
+
+    if info.get("poster") or info.get("title"):
+        _ISTEKLER_TMDB_CACHE[cache_key] = info
+    return info
+
+
+def _extract_imdb_id_from_link(link: str) -> str:
+    """Bir içerik talebindeki linkten IMDB ID'yi (varsa) çıkarır."""
+    if not link:
+        return ""
+    m = _IMDB_RE_W.search(link)
+    return m.group(1) if m else ""
+
+
+def _imdb_fallback_poster(imdb_id: str) -> str:
+    """
+    tmdb_id çözülemeyen eski talepler için Metahub üzerinden anında poster
+    URL'i üretir (ekstra API çağrısı gerekmez).
+    """
+    if not imdb_id:
+        return ""
+    try:
+        from Backend.helper.metadata import format_imdb_images
+        return format_imdb_images(imdb_id).get("poster", "")
+    except Exception:
+        return ""
+
+
 # ── POST /api/uye/icerik-iste ────────────────────────────────────────────────
 
 async def submit_content_request(request: Request):
@@ -943,18 +1004,29 @@ async def submit_content_request(request: Request):
         _StreamBot = None
         _logger.warning("StreamBot import edilemedi, istek bildirimi gönderilemedi.")
 
+    admin_messages = []
     if _StreamBot:
         for approver_id in approver_ids:
             try:
-                await _StreamBot.send_message(
+                sent = await _StreamBot.send_message(
                     approver_id,
                     admin_text,
                     reply_markup=keyboard,
                     parse_mode=enums.ParseMode.HTML,
                     disable_web_page_preview=True,
                 )
+                admin_messages.append({"chat_id": approver_id, "message_id": sent.id})
             except Exception as e:
                 _logger.warning("İstek admin bildirimi gönderilemedi (%s): %s", approver_id, e)
+
+    if admin_messages:
+        try:
+            await _content_requests_col().update_one(
+                {"_id": _ObjectId(request_id)},
+                {"$set": {"admin_messages": admin_messages}},
+            )
+        except Exception as e:
+            _logger.warning("Admin mesaj id'leri kaydedilemedi (%s): %s", request_id, e)
 
     remaining = None
     if request_limit > 0:
@@ -1010,3 +1082,290 @@ async def my_content_requests(request: Request):
         "used_this_month": used_this_month,
         "remaining": remaining,               # None = sınırsız
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# YÖNETİCİ PANELİ — İçerik İstekleri (istekler.html)
+# ─────────────────────────────────────────────────────────────────────────────
+# GET  /api/admin/istekler                → tüm talepleri içerik bazında gruplayarak döner
+# POST /api/admin/istekler/aksiyon        → seçilen taleplerin tümünü onaylar/reddeder
+#      Body: { "request_ids": ["..."], "action": "approve" | "reject" }
+
+from bson import ObjectId as _ObjectId
+
+
+async def admin_list_content_requests() -> dict:
+    """
+    Tüm içerik taleplerini (bot + web kaynaklı) aynı içeriğe (tmdb_id/link) göre
+    gruplayarak döner. Aynı içeriği birden fazla üye istemişse hepsinin adı
+    tek bir grupta listelenir.
+    """
+    cursor = _content_requests_col().find({}).sort("created_at", -1).limit(2000)
+    docs = await cursor.to_list(length=2000)
+
+    # Talep sahiplerinin bilgilerini toplu çek (isim/kullanıcı adı için)
+    user_ids = {d.get("user_id") for d in docs if d.get("user_id")}
+    users_map: dict = {}
+    if user_ids:
+        try:
+            ucursor = db.dbs["tracking"]["users"].find(
+                {"_id": {"$in": list(user_ids)}},
+                {"_id": 1, "first_name": 1, "username": 1},
+            )
+            async for u in ucursor:
+                users_map[u["_id"]] = u
+        except Exception as e:
+            _logger.warning("Kullanıcı bilgileri çekilemedi: %s", e)
+
+    groups: dict = {}
+    order: list = []
+
+    for d in docs:
+        media_type = d.get("media_type") or "unknown"
+        tmdb_id = d.get("tmdb_id") or 0
+        link = d.get("link", "")
+        key = f"{media_type}:{tmdb_id}" if tmdb_id else f"link:{link}"
+
+        created_at = d.get("created_at")
+
+        if key not in groups:
+            groups[key] = {
+                "group_id": key,
+                "media_type": media_type,
+                "tmdb_id": tmdb_id,
+                "link": link,
+                "title": d.get("title", ""),
+                "poster": d.get("poster", ""),
+                "requesters": [],
+                "request_ids": [],
+                "statuses": set(),
+                "first_requested_at": created_at,
+                "last_requested_at": created_at,
+            }
+            order.append(key)
+
+        g = groups[key]
+        if not g["title"] and d.get("title"):
+            g["title"] = d["title"]
+        if not g["poster"] and d.get("poster"):
+            g["poster"] = d["poster"]
+
+        if created_at:
+            if not g["first_requested_at"] or created_at < g["first_requested_at"]:
+                g["first_requested_at"] = created_at
+            if not g["last_requested_at"] or created_at > g["last_requested_at"]:
+                g["last_requested_at"] = created_at
+
+        uid = d.get("user_id")
+        u = users_map.get(uid, {})
+        name = u.get("first_name") or u.get("username") or (f"Kullanıcı {uid}" if uid else "Bilinmeyen")
+        status = d.get("status", "pending")
+
+        # Aynı kullanıcı aynı içeriği birden fazla kez istediyse tekilleştir,
+        # en güncel talebi esas al.
+        existing_req = next((r for r in g["requesters"] if r["user_id"] == uid), None)
+        if existing_req:
+            if created_at and (not existing_req.get("_created_at") or created_at > existing_req["_created_at"]):
+                existing_req["status"] = status
+                existing_req["_created_at"] = created_at
+                existing_req["created_at"] = created_at.isoformat() if created_at else ""
+                existing_req["request_id"] = str(d["_id"])
+        else:
+            g["requesters"].append({
+                "user_id": uid,
+                "name": name,
+                "username": u.get("username", ""),
+                "status": status,
+                "request_id": str(d["_id"]),
+                "created_at": created_at.isoformat() if created_at else "",
+                "_created_at": created_at,
+            })
+
+        g["request_ids"].append(str(d["_id"]))
+        g["statuses"].add(status)
+
+    result = []
+    counts = {"all": 0, "pending": 0, "approved": 0, "rejected": 0}
+
+    for key in order:
+        g = groups[key]
+        statuses = g["statuses"]
+        if "pending" in statuses:
+            group_status = "pending"
+        elif "approved" in statuses:
+            group_status = "approved"
+        else:
+            group_status = "rejected" if statuses else "pending"
+
+        counts["all"] += 1
+        counts[group_status] = counts.get(group_status, 0) + 1
+
+        requesters = sorted(
+            g["requesters"], key=lambda r: r["_created_at"] or "", reverse=True
+        )
+        for r in requesters:
+            r.pop("_created_at", None)
+
+        result.append({
+            "group_id": g["group_id"],
+            "media_type": g["media_type"],
+            "tmdb_id": g["tmdb_id"],
+            "link": g["link"],
+            "title": g["title"],
+            "poster": g["poster"],
+            "status": group_status,
+            "requesters": requesters,
+            "request_ids": g["request_ids"],
+            "request_count": len(requesters),
+            "first_requested_at": g["first_requested_at"].isoformat() if g["first_requested_at"] else "",
+            "last_requested_at": g["last_requested_at"].isoformat() if g["last_requested_at"] else "",
+        })
+
+    result.sort(key=lambda g: g["last_requested_at"], reverse=True)
+
+    # Poster veya başlığı eksik olan gruplar için TMDB'den tamamla
+    # (bot /istek komutuyla gelen talepler poster/title kaydetmez).
+    fetch_targets = [g for g in result if g["tmdb_id"] and (not g["poster"] or not g["title"])]
+    if fetch_targets:
+        fetched = await asyncio.gather(
+            *[_fetch_tmdb_basic(g["media_type"], g["tmdb_id"]) for g in fetch_targets],
+            return_exceptions=True,
+        )
+        for g, info in zip(fetch_targets, fetched):
+            if isinstance(info, dict):
+                if not g["poster"] and info.get("poster"):
+                    g["poster"] = info["poster"]
+                if not g["title"] and info.get("title"):
+                    g["title"] = info["title"]
+
+    # tmdb_id hiç çözülememiş eski talepler (media_type "unknown", tmdb_id 0)
+    # için linkten IMDB ID çıkarıp Metahub posteri ile tamamla.
+    for g in result:
+        if not g["poster"]:
+            imdb_id = _extract_imdb_id_from_link(g["link"])
+            if imdb_id:
+                g["poster"] = _imdb_fallback_poster(imdb_id)
+
+    return {"groups": result, "counts": counts}
+
+
+async def _notify_requester(user_id: int, doc: dict, new_status: str) -> None:
+    """Talep sahibine onay/red durumunu Telegram üzerinden bildirir."""
+    type_label = {"movie": "🎬 Film", "tv": "📺 Dizi", "unknown": "🎥 Bilinmiyor"}.get(
+        doc.get("media_type", "unknown"), "?"
+    )
+    title_str = f"\n<b>📌 Başlık:</b> {_html.escape(doc.get('title',''))}" if doc.get("title") else ""
+    link = doc.get("link", "")
+
+    if new_status == "approved":
+        text = (
+            f"✅ <b>İçerik Talebiniz Onaylandı!</b>\n\n"
+            f"<b>📂 Tür:</b> {type_label}{title_str}\n"
+            f"<b>🔗 Link:</b> {link}\n\n"
+            "Talebiniz yönetici tarafından onaylandı. İçerik en kısa sürede platforma eklenecektir."
+        )
+    else:
+        text = (
+            f"❌ <b>İçerik Talebiniz Reddedildi</b>\n\n"
+            f"<b>📂 Tür:</b> {type_label}{title_str}\n"
+            f"<b>🔗 Link:</b> {link}\n\n"
+            "Maalesef talebiniz yönetici tarafından reddedildi."
+        )
+
+    try:
+        from Backend.pyrofork.bot import StreamBot as _StreamBot
+        if _StreamBot:
+            await _StreamBot.send_message(user_id, text, parse_mode=enums.ParseMode.HTML)
+    except Exception as e:
+        _logger.warning("Kullanıcıya bildirim gönderilemedi (%s): %s", user_id, e)
+
+
+async def admin_review_content_requests(request: Request) -> dict:
+    """
+    Yönetici panelinden toplu onay/red işlemi.
+    Body: { "request_ids": ["<id>", ...], "action": "approve" | "reject" }
+    Bir gruptaki tüm talepler (aynı içeriği isteyen tüm üyeler) tek seferde
+    onaylanır/reddedilir ve her üyeye Telegram bildirimi gönderilir.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Geçersiz JSON")
+
+    request_ids = body.get("request_ids") or []
+    action = body.get("action")
+    if action not in ("approve", "reject"):
+        raise HTTPException(status_code=400, detail="Geçersiz aksiyon")
+    if not request_ids:
+        raise HTTPException(status_code=400, detail="request_ids zorunlu")
+
+    new_status = "approved" if action == "approve" else "rejected"
+    label = "✅ Onaylandı" if new_status == "approved" else "❌ Reddedildi"
+    updated = 0
+    notified_users: set = set()
+
+    try:
+        from Backend.pyrofork.bot import StreamBot as _StreamBot
+    except Exception:
+        _StreamBot = None
+        _logger.warning("StreamBot import edilemedi, panel-onay bot senkronizasyonu atlanacak.")
+
+    for rid in request_ids:
+        try:
+            doc = await _content_requests_col().find_one({"_id": _ObjectId(rid)})
+        except Exception:
+            doc = None
+        if not doc:
+            continue
+        if doc.get("status") == new_status:
+            continue
+
+        await _content_requests_col().update_one(
+            {"_id": doc["_id"]},
+            {"$set": {"status": new_status, "updated_at": _datetime.utcnow()}},
+        )
+        updated += 1
+
+        user_id = doc.get("user_id")
+        if user_id and user_id not in notified_users:
+            notified_users.add(user_id)
+            await _notify_requester(user_id, doc, new_status)
+
+        # Bu talep için yöneticilere gönderilmiş bot mesajlarını güncelle:
+        # onayla/reddet butonlarını kaldır ve panelden alınan kararı göster.
+        # Bu adım olmadan talep panelden onaylansa/reddedilse bile botta
+        # "beklemede" görünmeye ve butonlar görünmeye devam eder.
+        admin_messages = doc.get("admin_messages") or []
+        if _StreamBot and admin_messages:
+            link = doc.get("link", "")
+            type_label = {"movie": "🎬 Film", "tv": "📺 Dizi", "unknown": "🎥 Bilinmiyor"}.get(
+                doc.get("media_type", "unknown"), "?"
+            )
+            status_section = (
+                f"\n\n{'─' * 30}\n"
+                f"<b>{label}</b> — 🌐 Web panelinden\n"
+                f"<b>📂 Tür:</b> {type_label}\n"
+                f"<b>🔗 Link:</b> {link}"
+            )
+            for am in admin_messages:
+                try:
+                    existing_msg = await _StreamBot.get_messages(am["chat_id"], am["message_id"])
+                    original_text = existing_msg.text or existing_msg.caption or ""
+                except Exception:
+                    original_text = ""
+                try:
+                    await _StreamBot.edit_message_text(
+                        chat_id=am["chat_id"],
+                        message_id=am["message_id"],
+                        text=f"{original_text}{status_section}" if original_text else status_section,
+                        parse_mode=enums.ParseMode.HTML,
+                        disable_web_page_preview=True,
+                        reply_markup=None,
+                    )
+                except Exception as e:
+                    _logger.warning(
+                        "Panel onayı sonrası admin mesajı güncellenemedi (%s/%s): %s",
+                        am.get("chat_id"), am.get("message_id"), e
+                    )
+
+    return {"ok": True, "updated": updated, "status": new_status}

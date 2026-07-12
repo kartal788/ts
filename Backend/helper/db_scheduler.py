@@ -15,6 +15,7 @@ import asyncio
 import logging
 import os
 import threading
+from concurrent.futures import TimeoutError as _FutureTimeoutError
 from datetime import datetime, timedelta
 
 logger = logging.getLogger("db_scheduler")
@@ -169,45 +170,89 @@ async def _refresh_similar_cache_async() -> None:
             return
 
         logger.info("[similar-cache] %d kullanıcı için cache yenileniyor…", len(tokens_to_refresh))
-        refreshed = 0
 
-        for token in tokens_to_refresh:
-            try:
-                # get_watch_history_rich dil bağımsız — döngü dışına alındı
-                history_rich = await _db.get_watch_history_rich(token, limit=40)
-                if not history_rich:
-                    continue
-                watched_ids = [r["imdb_id"] for r in history_rich]
-                last_watched_id = watched_ids[0] if watched_ids else None
-                for lang in ("tr", "en", "de"):
-                    items = await _db.get_similar_items(
-                        watched_imdb_ids=watched_ids,
-                        page=1,
-                        page_size=60,
-                        lang=lang,
-                        last_watched_id=last_watched_id,
-                        watch_history_rich=history_rich,
-                    )
-                    if items:
-                        _similar_cache_set(token, lang, items)
-                refreshed += 1
-            except Exception as e:
-                logger.warning("[similar-cache] Token %s yenilenemedi: %s", token[:8], e)
+        #----- Önceden tamamen sıralı (sequential) çalışıyordu: her kullanıcı için
+        #----- 3 dil x DB sorgusu birbiri ardına yapılıyordu. Kullanıcı sayısı
+        #----- arttıkça bu, 120 sn'lik zaman aşımını kolayca aşıyordu. Şimdi
+        #----- sınırlı eşzamanlılıkla (aynı anda en fazla 5 kullanıcı) paralel çalışır.
+        refresh_semaphore = asyncio.Semaphore(5)
+        refreshed_counter = {"n": 0}
+
+        async def _refresh_one(token: str) -> None:
+            async with refresh_semaphore:
+                try:
+                    # get_watch_history_rich dil bağımsız — döngü dışına alındı
+                    history_rich = await _db.get_watch_history_rich(token, limit=40)
+                    if not history_rich:
+                        return
+                    watched_ids = [r["imdb_id"] for r in history_rich]
+                    last_watched_id = watched_ids[0] if watched_ids else None
+                    for lang in ("tr", "en", "de"):
+                        items = await _db.get_similar_items(
+                            watched_imdb_ids=watched_ids,
+                            page=1,
+                            page_size=60,
+                            lang=lang,
+                            last_watched_id=last_watched_id,
+                            watch_history_rich=history_rich,
+                        )
+                        if items:
+                            _similar_cache_set(token, lang, items)
+                    refreshed_counter["n"] += 1
+                except Exception as e:
+                    logger.warning("[similar-cache] Token %s yenilenemedi: %s", token[:8], e)
+
+        await asyncio.gather(*(_refresh_one(token) for token in tokens_to_refresh))
+        refreshed = refreshed_counter["n"]
 
         logger.info("[similar-cache] %d/%d kullanıcı cache'i yenilendi.", refreshed, len(tokens_to_refresh))
     except Exception as e:
         logger.exception("[similar-cache] Cache yenileme hatası: %s", e)
 
 
+_similar_refresh_in_progress = False
+
+
+def _on_similar_refresh_done(future: "asyncio.Future") -> None:
+    """future.result(timeout=...) süresi dolduğunda bile arka planda çalışmaya
+    devam eden görev sonunda burada işaretlenir; böylece bir sonraki
+    zamanlanan tur, hâlâ süren bir yenilemenin üzerine binmez."""
+    global _similar_refresh_in_progress
+    _similar_refresh_in_progress = False
+    try:
+        exc = future.exception()
+        if exc:
+            logger.warning("[similar-cache] Arka planda geç tamamlanan yenileme hata ile bitti: %s", exc)
+    except Exception:
+        pass
+
+
 def _run_similar_refresh() -> None:
     """threading.Timer callback — async fonksiyonu ana loop'ta çalıştırır."""
+    global _similar_refresh_in_progress
     if not _running:
         return
+
+    if _similar_refresh_in_progress:
+        logger.warning("[similar-cache] Önceki yenileme hâlâ sürüyor, bu tur atlanıyor.")
+        _schedule_next_similar()
+        return
+
     loop = _main_loop
     if loop is not None and loop.is_running():
+        _similar_refresh_in_progress = True
         future = asyncio.run_coroutine_threadsafe(_refresh_similar_cache_async(), loop)
+        future.add_done_callback(_on_similar_refresh_done)
         try:
-            future.result(timeout=120)
+            future.result(timeout=180)
+        except _FutureTimeoutError:
+            # Görev iptal edilmedi — arka planda (ana loop'ta) çalışmaya devam
+            # ediyor ve bitince _on_similar_refresh_done bayrağı temizleyecek.
+            # Bu artık bir hata değil, sadece "beklenenden uzun sürdü" bilgisidir.
+            logger.warning(
+                "[similar-cache] Yenileme 180 sn içinde bitmedi, arka planda çalışmaya devam ediyor "
+                "(bir sonraki tur, bu bitene kadar atlanacak)."
+            )
         except Exception as e:
             logger.exception("[similar-cache] run_coroutine_threadsafe hatası: %s", e)
     else:

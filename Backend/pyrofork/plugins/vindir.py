@@ -2,6 +2,7 @@ from pyrogram import Client, filters
 from pyrogram.types import Message
 from Backend.helper.custom_filter import CustomFilters
 from pymongo import MongoClient
+import asyncio
 import os
 import json
 from time import time
@@ -15,17 +16,22 @@ db_urls = [u.strip() for u in DATABASE_URLS.split(",") if u.strip()]
 
 # ---------------- Koleksiyonları JSON'a Çekme ----------------
 def export_collections_to_json(url):
-    client = MongoClient(url)
-    db_name_list = client.list_database_names()
-    if not db_name_list:
-        return None
+    # serverSelectionTimeoutMS: bağlantı kurulamazsa sonsuza kadar beklemesin,
+    # en fazla 10 saniye sonra hata versin.
+    client = MongoClient(url, serverSelectionTimeoutMS=10000)
+    try:
+        db_name_list = client.list_database_names()
+        if not db_name_list:
+            return None
 
-    db = client[db_name_list[0]]
+        db = client[db_name_list[0]]
 
-    movie_data = list(db["movie"].find({}, {"_id": 0}))
-    tv_data = list(db["tv"].find({}, {"_id": 0}))
+        movie_data = list(db["movie"].find({}, {"_id": 0}))
+        tv_data = list(db["tv"].find({}, {"_id": 0}))
 
-    return {"movie": movie_data, "tv": tv_data}
+        return {"movie": movie_data, "tv": tv_data}
+    finally:
+        client.close()
 
 # ---------------- /vindir Komutu ----------------
 @Client.on_message(filters.command("vindir") & filters.private & CustomFilters.owner)
@@ -44,7 +50,12 @@ async def download_collections(client: Client, message: Message):
             await message.reply_text("⚠️ İkinci veritabanı bulunamadı.")
             return
 
-        combined_data = export_collections_to_json(db_urls[1])
+        # export_collections_to_json senkron (bloklayan) bir pymongo çağrısı.
+        # Doğrudan await'siz çağrılırsa, bot tek bir asyncio event loop
+        # üzerinde çalıştığından bu tüm loop'u bloke eder ve /vindir
+        # tamamlanana kadar bot HİÇBİR kullanıcıya cevap veremez hale gelir.
+        # Bu yüzden ayrı bir thread'de çalıştırılır.
+        combined_data = await asyncio.to_thread(export_collections_to_json, db_urls[1])
         if combined_data is None:
             await message.reply_text("⚠️ Koleksiyonlar boş veya bulunamadı.")
             return

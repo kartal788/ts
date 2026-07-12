@@ -1,0 +1,271 @@
+{% extends "base.html" %}
+{% block title %}İstekler – {{ app_name }}{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+  <!-- Başlık -->
+  <div class="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <div>
+      <h1 class="text-2xl sm:text-3xl font-bold flex items-center gap-3">
+        <span class="bg-primary/15 p-2 rounded-xl">
+          <i class="fas fa-inbox text-primary text-xl"></i>
+        </span>
+        İstekler
+      </h1>
+      <p class="mt-2 text-sm theme-text-secondary">Üyelerin bot veya web üzerinden gönderdiği dizi/film taleplerini onaylayın veya reddedin.</p>
+    </div>
+    <div class="flex items-center gap-3">
+      <button onclick="loadRequests()" id="refresh-btn"
+        class="flex items-center gap-2 px-4 py-2 bg-primary/10 hover:bg-primary/20 text-primary rounded-xl text-sm font-medium transition-all">
+        <i class="fas fa-sync-alt" id="refresh-icon"></i> Yenile
+      </button>
+    </div>
+  </div>
+
+  <!-- Durum Sekmeleri -->
+  <div class="flex flex-wrap gap-2 mb-6" id="status-tabs">
+    <button data-status="all" onclick="setStatusFilter('all')"
+      class="istek-tab active px-4 py-2 rounded-xl text-sm font-semibold border transition-all">
+      Tümü <span class="istek-tab-count" id="cnt-all">0</span>
+    </button>
+    <button data-status="pending" onclick="setStatusFilter('pending')"
+      class="istek-tab px-4 py-2 rounded-xl text-sm font-semibold border transition-all">
+      <i class="fas fa-clock text-yellow-400 mr-1"></i> Beklemede <span class="istek-tab-count" id="cnt-pending">0</span>
+    </button>
+    <button data-status="approved" onclick="setStatusFilter('approved')"
+      class="istek-tab px-4 py-2 rounded-xl text-sm font-semibold border transition-all">
+      <i class="fas fa-check-circle text-green-400 mr-1"></i> Onaylanan <span class="istek-tab-count" id="cnt-approved">0</span>
+    </button>
+    <button data-status="rejected" onclick="setStatusFilter('rejected')"
+      class="istek-tab px-4 py-2 rounded-xl text-sm font-semibold border transition-all">
+      <i class="fas fa-times-circle text-red-400 mr-1"></i> Reddedilen <span class="istek-tab-count" id="cnt-rejected">0</span>
+    </button>
+  </div>
+
+  <!-- Arama -->
+  <div class="relative mb-6 max-w-md">
+    <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-xs theme-text-secondary"></i>
+    <input id="search-input" type="text"
+      placeholder="Başlık, link veya kullanıcı adına göre ara..."
+      oninput="renderRequests()"
+      class="w-full pl-9 pr-4 py-2.5 rounded-xl border text-sm focus:outline-none focus:border-primary transition">
+  </div>
+
+  <!-- İstek Listesi -->
+  <div id="requests-list" class="grid gap-4">
+    <div class="theme-card rounded-2xl border p-10 text-center theme-text-secondary">
+      <i class="fas fa-spinner fa-spin text-primary text-xl mr-2"></i>
+      <span>İstekler yükleniyor...</span>
+    </div>
+  </div>
+
+</div>
+
+<style>
+  .istek-tab {
+    background: var(--surface);
+    color: var(--text-sec);
+    border-color: var(--hairline);
+  }
+  .istek-tab.active {
+    background: var(--primary);
+    color: var(--bg);
+    border-color: var(--primary);
+  }
+  .istek-tab-count {
+    display: inline-block;
+    min-width: 1.4rem;
+    padding: 0 0.3rem;
+    border-radius: 9999px;
+    background: color-mix(in srgb, currentColor 18%, transparent);
+    font-size: 0.7rem;
+    font-weight: 800;
+    margin-left: 0.15rem;
+  }
+</style>
+
+<script>
+  let ALL_GROUPS = [];
+  let CURRENT_FILTER = 'all';
+
+  function escHtml(s) {
+    return String(s || '').replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  }
+
+  function fmtDate(iso) {
+    if (!iso) return "—";
+    try {
+      return new Date(iso).toLocaleDateString("tr-TR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+    } catch { return "—"; }
+  }
+
+  function typeLabel(mediaType) {
+    if (mediaType === 'movie') return { icon: 'fa-film', text: 'Film' };
+    if (mediaType === 'tv')    return { icon: 'fa-tv', text: 'Dizi' };
+    return { icon: 'fa-question', text: 'Bilinmiyor' };
+  }
+
+  function statusBadge(status) {
+    if (status === 'approved') return `<span class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-green-500/15 text-green-400 font-semibold"><i class="fas fa-check-circle"></i> Onaylandı</span>`;
+    if (status === 'rejected') return `<span class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-red-500/15 text-red-400 font-semibold"><i class="fas fa-times-circle"></i> Reddedildi</span>`;
+    return `<span class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-yellow-500/15 text-yellow-400 font-semibold"><i class="fas fa-clock"></i> Beklemede</span>`;
+  }
+
+  function requesterNames(requesters) {
+    if (!requesters || requesters.length === 0) return "Bilinmeyen";
+    return requesters.map(r => escHtml(r.name)).join(", ");
+  }
+
+  function setStatusFilter(status) {
+    CURRENT_FILTER = status;
+    document.querySelectorAll('.istek-tab').forEach(btn => {
+      btn.classList.toggle('active', btn.getAttribute('data-status') === status);
+    });
+    renderRequests();
+  }
+
+  function updateCounts(counts) {
+    document.getElementById('cnt-all').textContent = counts.all || 0;
+    document.getElementById('cnt-pending').textContent = counts.pending || 0;
+    document.getElementById('cnt-approved').textContent = counts.approved || 0;
+    document.getElementById('cnt-rejected').textContent = counts.rejected || 0;
+  }
+
+  function renderRequests() {
+    const listEl = document.getElementById('requests-list');
+    const q = document.getElementById('search-input').value.trim().toLowerCase();
+
+    let groups = ALL_GROUPS.filter(g => CURRENT_FILTER === 'all' || g.status === CURRENT_FILTER);
+
+    if (q) {
+      groups = groups.filter(g => {
+        const inTitle = (g.title || '').toLowerCase().includes(q);
+        const inLink  = (g.link || '').toLowerCase().includes(q);
+        const inNames = (g.requesters || []).some(r => (r.name || '').toLowerCase().includes(q) || (r.username || '').toLowerCase().includes(q));
+        return inTitle || inLink || inNames;
+      });
+    }
+
+    if (groups.length === 0) {
+      listEl.innerHTML = `<div class="theme-card rounded-2xl border p-10 text-center theme-text-secondary">
+        <i class="fas fa-inbox text-3xl mb-2 block opacity-50"></i>
+        İstek bulunamadı.
+      </div>`;
+      return;
+    }
+
+    listEl.innerHTML = groups.map(g => {
+      const t = typeLabel(g.media_type);
+      const displayTitle = g.title || g.link || 'Bilinmeyen içerik';
+      const requesterCount = (g.requesters || []).length;
+      const multiRequester = requesterCount > 1;
+
+      const posterHtml = g.poster
+        ? `<img src="${escHtml(g.poster)}" alt="" class="w-16 h-24 object-cover rounded-lg flex-shrink-0 border" style="border-color:var(--hairline)" onerror="this.style.display='none'">`
+        : `<div class="w-16 h-24 rounded-lg flex-shrink-0 flex items-center justify-center bg-primary/10 text-primary"><i class="fas ${t.icon} text-xl"></i></div>`;
+
+      const requesterChips = (g.requesters || []).map(r => `
+        <span class="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-white/5 border" style="border-color:var(--hairline)">
+          <i class="fas fa-user text-[10px] theme-text-secondary"></i>
+          ${escHtml(r.name)}${r.username ? ` <span class="theme-text-secondary">@${escHtml(r.username)}</span>` : ''}
+        </span>
+      `).join('');
+
+      const actionsHtml = g.status === 'pending' ? `
+        <div class="flex items-center gap-2 mt-3">
+          <button onclick='reviewGroup(${JSON.stringify(g.group_id)}, "approve")'
+            class="flex items-center gap-1.5 px-3 py-1.5 bg-green-500/15 hover:bg-green-500/25 text-green-400 rounded-lg text-xs font-semibold transition-all">
+            <i class="fas fa-check"></i> Onayla
+          </button>
+          <button onclick='reviewGroup(${JSON.stringify(g.group_id)}, "reject")'
+            class="flex items-center gap-1.5 px-3 py-1.5 bg-red-500/15 hover:bg-red-500/25 text-red-400 rounded-lg text-xs font-semibold transition-all">
+            <i class="fas fa-times"></i> Reddet
+          </button>
+        </div>` : '';
+
+      return `<div class="theme-card rounded-2xl border p-5" data-group-id="${escHtml(g.group_id)}">
+        <div class="flex gap-4">
+          ${posterHtml}
+          <div class="flex-1 min-w-0">
+            <div class="flex flex-wrap items-center gap-2 mb-1">
+              <span class="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-primary/15 text-primary font-bold uppercase tracking-wide">
+                <i class="fas ${t.icon}"></i> ${t.text}
+              </span>
+              ${statusBadge(g.status)}
+              ${multiRequester ? `<span class="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-400 font-bold">
+                <i class="fas fa-users"></i> ${requesterCount} kişi istedi
+              </span>` : ''}
+            </div>
+            <h3 class="font-semibold text-text truncate" title="${escHtml(displayTitle)}">${escHtml(displayTitle)}</h3>
+            ${g.link ? `<a href="${escHtml(g.link)}" target="_blank" rel="noopener" class="text-xs text-primary hover:underline break-all">${escHtml(g.link)}</a>` : ''}
+
+            <div class="mt-2">
+              <div class="text-[11px] uppercase font-semibold theme-text-secondary mb-1">İsteyenler</div>
+              <div class="flex flex-wrap gap-1.5">${requesterChips}</div>
+            </div>
+
+            <div class="text-[11px] theme-text-secondary mt-2">
+              Son istek: ${fmtDate(g.last_requested_at)}${g.first_requested_at && g.first_requested_at !== g.last_requested_at ? ` • İlk istek: ${fmtDate(g.first_requested_at)}` : ''}
+            </div>
+
+            ${actionsHtml}
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  async function reviewGroup(groupId, action) {
+    const group = ALL_GROUPS.find(g => g.group_id === groupId);
+    if (!group) return;
+
+    const cardEl = document.querySelector(`[data-group-id="${CSS.escape(groupId)}"]`);
+    if (cardEl) cardEl.style.opacity = '0.5';
+
+    try {
+      const res = await fetch('/api/admin/istekler/aksiyon', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ request_ids: group.request_ids, action })
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || ('HTTP ' + res.status));
+      }
+      showToast(action === 'approve' ? 'İstek onaylandı ve üyelere bildirildi.' : 'İstek reddedildi ve üyelere bildirildi.', 'success');
+      await loadRequests();
+    } catch (e) {
+      console.error(e);
+      showToast('İşlem başarısız: ' + e.message, 'error');
+      if (cardEl) cardEl.style.opacity = '1';
+    }
+  }
+
+  async function loadRequests() {
+    const btn  = document.getElementById('refresh-btn');
+    const icon = document.getElementById('refresh-icon');
+    btn.disabled = true;
+    icon.classList.add('fa-spin');
+
+    try {
+      const res = await fetch('/api/admin/istekler');
+      if (!res.ok) throw new Error('API hatası: ' + res.status);
+      const data = await res.json();
+
+      ALL_GROUPS = data.groups || [];
+      updateCounts(data.counts || {});
+      renderRequests();
+    } catch (e) {
+      console.error(e);
+      document.getElementById('requests-list').innerHTML =
+        `<div class="theme-card rounded-2xl border p-10 text-center text-red-400"><i class="fas fa-exclamation-triangle mr-2"></i>Veriler yüklenemedi: ${escHtml(e.message)}</div>`;
+    } finally {
+      btn.disabled = false;
+      icon.classList.remove('fa-spin');
+    }
+  }
+
+  loadRequests();
+</script>
+{% endblock %}

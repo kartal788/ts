@@ -3,46 +3,48 @@
 {% block title %}Giriş Yap{% endblock %}
 
 {% block content %}
-<div class="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
-    <div class="max-w-md w-full space-y-8">
+<div class="min-h-[70vh] flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+    <div class="max-w-md w-full space-y-6">
         <div class="text-center">
-            <h2 class="text-3xl font-bold">Yönetici Girişi</h2>
+            <div class="w-14 h-14 mx-auto rounded-full bg-primary flex items-center justify-center shadow-[0_0_25px_var(--primary)] mb-4">
+                <i class="fa-solid fa-lock text-white text-lg"></i>
+            </div>
+            <h2 class="text-3xl font-extrabold tracking-tight">Yönetici Girişi</h2>
             <p class="mt-2 theme-text-secondary">Yönetici paneline erişmek için giriş yapın</p>
-
         </div>
 
         {% if error %}
-        <div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md">
-            {{ error }}
+        <div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl flex items-center gap-2">
+            <i class="fa-solid fa-triangle-exclamation"></i> {{ error }}
         </div>
         {% endif %}
 
-        <form method="post" class="theme-card p-6 sm:p-8 rounded-lg shadow-lg space-y-6">
+        <form method="post" class="glass-panel p-6 sm:p-8 rounded-3xl space-y-6">
             <div>
-                <label for="username" class="block text-sm font-medium mb-2">Kullanıcı Adı</label>
+                <label for="username" class="block text-sm font-semibold mb-2">Kullanıcı Adı</label>
                 <input type="text" id="username" name="username" required autocomplete="username"
-                    class="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent">
+                    class="field px-4 py-2.5">
             </div>
 
             <div>
-                <label for="password" class="block text-sm font-medium mb-2">Şifre</label>
+                <label for="password" class="block text-sm font-semibold mb-2">Şifre</label>
                 <input type="password" id="password" name="password" required autocomplete="current-password"
-                    class="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent">
+                    class="field px-4 py-2.5">
             </div>
 
             {% if captcha %}
             <div>
                 <p class="text-sm font-medium mb-3" id="captcha-label">
-                    Tüm <strong class="text-blue-600" id="captcha-cat-name">{{ captcha.target_i18n.tr }}</strong> resimlerini seçin
+                    Tüm <strong class="text-primary" id="captcha-cat-name">{{ captcha.target_i18n.tr }}</strong> resimlerini seçin
                     <span class="theme-text-secondary text-xs" id="captcha-count-label">({{ captcha.correct_count }} resim)</span>
                 </p>
                 <div id="captcha-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;">
                     {% for img in captcha.images %}
                     <div class="captcha-cell" data-index="{{ img.index }}"
                         onclick="toggleCaptcha(this)"
-                        style="cursor:pointer;border:2px solid var(--c-border);border-radius:8px;overflow:hidden;position:relative;aspect-ratio:1;">
+                        style="cursor:pointer;border:2px solid var(--border);border-radius:12px;overflow:hidden;position:relative;aspect-ratio:1;">
                         <img src="{{ img.b64 }}" alt="resim" style="width:100%;height:100%;display:block;object-fit:cover;pointer-events:none;">
-                        <div class="captcha-check" style="display:none;position:absolute;inset:0;background:rgba(37,99,235,0.35);align-items:center;justify-content:center;">
+                        <div class="captcha-check" style="display:none;position:absolute;inset:0;background:color-mix(in srgb, var(--primary) 45%, transparent);align-items:center;justify-content:center;">
                             <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
                         </div>
                     </div>
@@ -55,7 +57,7 @@
             {% endif %}
 
             <button type="submit" id="login-submit-btn"
-                class="w-full bg-blue-600 hover:bg-blue-700 text-white py-2.5 px-4 rounded-md transition-colors font-medium shadow-sm text-base">
+                class="btn-primary w-full py-2.5 px-4 text-base">
                 Giriş Yap
             </button>
         </form>
@@ -65,17 +67,17 @@
             // Çok dilli captcha metinleri
             var CAPTCHA_I18N = {
                 tr: {
-                    label: function(cat, n) { return 'Tüm <strong class="text-blue-600">' + cat + '</strong> resimlerini seçin'; },
+                    label: function(cat, n) { return 'Tüm <strong class="text-primary">' + cat + '</strong> resimlerini seçin'; },
                     count: function(n) { return '(' + n + ' resim)'; },
                     err: function(n) { return n + ' resim seçmelisiniz.'; }
                 },
                 en: {
-                    label: function(cat, n) { return 'Select all <strong class="text-blue-600">' + cat + '</strong> images'; },
+                    label: function(cat, n) { return 'Select all <strong class="text-primary">' + cat + '</strong> images'; },
                     count: function(n) { return '(' + n + ' images)'; },
                     err: function(n) { return 'You must select ' + n + ' images.'; }
                 },
                 de: {
-                    label: function(cat, n) { return 'Alle <strong class="text-blue-600">' + cat + '</strong>-Bilder auswählen'; },
+                    label: function(cat, n) { return 'Alle <strong class="text-primary">' + cat + '</strong>-Bilder auswählen'; },
                     count: function(n) { return '(' + n + ' Bilder)'; },
                     err: function(n) { return 'Bitte ' + n + ' Bilder auswählen.'; }
                 }

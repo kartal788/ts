@@ -114,16 +114,8 @@ async def istek_command(client: Client, message: Message):
     else:
         remaining = None  # sınırsız
 
-    # İsteği veritabanına kaydet
-    await db.update_user_interaction(user_id, first_name, username)
-    request_id = await db.add_content_request(
-        user_id=user_id,
-        link=link,
-        media_type=media_type,
-        tmdb_id=tmdb_id,
-    )
-
-    # Hatırlatma kur: TMDB veya IMDB link olsun, tmdb_id bulmaya çalış
+    # Hatırlatma kur ve doğru Tür etiketini gösterebilmek için: TMDB veya IMDB
+    # link olsun, DB'ye kaydetmeden ÖNCE tmdb_id / gerçek media_type'ı çözmeye çalış.
     reminder_set = False
     resolved_media_type = media_type  # IMDB linkinde "unknown" gelir, aşağıda güncellenir
 
@@ -153,6 +145,16 @@ async def istek_command(client: Client, message: Message):
                         break
             except Exception as _te:
                 print(f"[istek] TMDB find API hatası: {_te}")
+
+    # İsteği veritabanına kaydet — artık çözülmüş media_type/tmdb_id ile
+    # (IMDB linki başarıyla çözüldüyse "unknown" değil "movie"/"tv" olarak kaydedilir)
+    await db.update_user_interaction(user_id, first_name, username)
+    request_id = await db.add_content_request(
+        user_id=user_id,
+        link=link,
+        media_type=resolved_media_type,
+        tmdb_id=tmdb_id,
+    )
 
     if resolved_media_type in ("tv", "movie") and tmdb_id:
         try:
@@ -197,7 +199,7 @@ async def istek_command(client: Client, message: Message):
     # Yöneticiye bildirim gönder
     user_mention   = message.from_user.mention
     username_str   = f"@{username}" if username else "N/A"
-    type_label     = {"movie": "🎬 Film", "tv": "📺 Dizi", "unknown": "🎥 Bilinmiyor"}.get(media_type, "?")
+    type_label     = {"movie": "🎬 Film", "tv": "📺 Dizi", "unknown": "🎥 Bilinmiyor"}.get(resolved_media_type, "?")
 
     if request_limit > 0:
         used_now = await db.count_user_requests_this_month(user_id)
@@ -223,17 +225,25 @@ async def istek_command(client: Client, message: Message):
     ])
 
     approver_ids = Telegram.APPROVER_IDS if Telegram.APPROVER_IDS else [Telegram.OWNER_ID]
+    admin_messages = []
     for approver_id in approver_ids:
         try:
-            await client.send_message(
+            sent = await client.send_message(
                 approver_id,
                 admin_text,
                 reply_markup=keyboard,
                 parse_mode=enums.ParseMode.HTML,
                 disable_web_page_preview=True
             )
+            admin_messages.append({"chat_id": approver_id, "message_id": sent.id})
         except Exception as e:
             print(f"[istek] Admin bildirimi gönderilemedi ({approver_id}): {e}")
+
+    if admin_messages:
+        try:
+            await db.set_content_request_admin_messages(request_id, admin_messages)
+        except Exception as e:
+            print(f"[istek] Admin mesaj id'leri kaydedilemedi: {e}")
 
 
 @Client.on_callback_query(filters.regex(r"^open_yukselt$"))
@@ -382,12 +392,32 @@ async def istek_review(client: Client, callback_query: CallbackQuery):
             f"{link_line}"
         )
 
+        updated_text = f"{original}{status_section}"
+
         await callback_query.message.edit_text(
-            f"{original}{status_section}",
+            updated_text,
             parse_mode=enums.ParseMode.HTML,
             disable_web_page_preview=True,
             reply_markup=None
         )
+
+        # Aynı talebin diğer yöneticilere gönderilmiş kopyalarını da senkronize et,
+        # böylece herhangi bir yönetici onaylasa/reddetse diğerlerinde de
+        # onayla/reddet butonları kaybolur ve durum görünür olur.
+        acting_msg_id = callback_query.message.id
+        for am in (req_doc.get("admin_messages") or []) if req_doc else []:
+            if am.get("message_id") == acting_msg_id:
+                continue
+            try:
+                await client.edit_message_text(
+                    chat_id=am["chat_id"],
+                    message_id=am["message_id"],
+                    text=updated_text,
+                    parse_mode=enums.ParseMode.HTML,
+                    disable_web_page_preview=True,
+                )
+            except Exception:
+                pass
     except Exception:
         pass
 

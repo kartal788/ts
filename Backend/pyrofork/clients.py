@@ -8,16 +8,27 @@ from os import environ
 class TokenParser:
     @staticmethod
     def parse_from_env():
-        tokens = {
-            c + 1: t
-            for c, (_, t) in enumerate(
+        env_tokens = [
+            t for _, t in sorted(
                 filter(
                     lambda n: n[0].startswith("MULTI_TOKEN") and bool(n[1].strip()),
-                    sorted(environ.items())
+                    environ.items()
                 )
             )
-        }
-        return tokens
+        ]
+
+        #----- Ayarlar sayfasından eklenen ek token'lar (SettingsManager)
+        try:
+            from Backend.helper.settings_manager import SettingsManager
+            settings_tokens = [
+                t.strip() for t in (SettingsManager.current().multi_tokens or [])
+                if t and t.strip()
+            ]
+        except Exception:
+            settings_tokens = []
+
+        all_tokens = env_tokens + [t for t in settings_tokens if t not in env_tokens]
+        return {c + 1: t for c, t in enumerate(all_tokens)}
 
 async def start_client(client_id, token):
     try:
@@ -72,3 +83,54 @@ async def initialize_clients():
         LOGGER.info(f"DC Distribution: {client_dc_map}")
     else:
         LOGGER.info("No additional clients were initialized, using default client")
+
+async def stop_client(client_id: int) -> None:
+    """Tek bir ek bot istemcisini durdurur ve kayıtlarını temizler."""
+    client = multi_clients.pop(client_id, None)
+    work_loads.pop(client_id, None)
+    client_dc_map.pop(client_id, None)
+    if client:
+        try:
+            await client.stop()
+            LOGGER.info(f"Stopped Bot Client {client_id}")
+        except Exception as e:
+            LOGGER.warning(f"Error stopping Client {client_id}: {e}")
+
+
+async def reload_multi_token_clients() -> dict:
+    """Ayarlar sayfasından çoklu token listesi değiştiğinde çağrılır:
+    artık listede olmayan istemcileri durdurur, yeni eklenenleri başlatır."""
+    desired_tokens = TokenParser.parse_from_env()  # env + ayarlar birleşik liste
+
+    # Şu an çalışan ek istemciler (0 = ana StreamBot, o hariç tutulur)
+    current_ids = [cid for cid in multi_clients.keys() if cid != 0]
+
+    stopped = 0
+    started = 0
+
+    # Artık istenmeyen (id aralığı dışında kalan) istemcileri durdur
+    max_desired_id = max(desired_tokens.keys()) if desired_tokens else 0
+    for cid in list(current_ids):
+        if cid > max_desired_id:
+            await stop_client(cid)
+            stopped += 1
+
+    # Eksik olan istemcileri başlat
+    tasks = []
+    for cid, token in desired_tokens.items():
+        if cid not in multi_clients:
+            tasks.append(create_task(start_client(cid, token)))
+
+    if tasks:
+        results = await gather(*tasks)
+        for result in results:
+            if result is not None:
+                client_id, client = result
+                multi_clients[client_id] = client
+                started += 1
+
+    return {
+        "started": started,
+        "stopped": stopped,
+        "total_clients": len(multi_clients),
+    }

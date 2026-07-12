@@ -380,6 +380,36 @@ async def admin_access_page(request: Request, _: bool = Depends(require_auth)):
     })
 
 
+async def settings_page(request: Request, _: bool = Depends(require_auth)):
+    theme_name = request.session.get("theme", "purple_gradient")
+    theme = get_theme(theme_name)
+    current_user = get_current_user(request)
+    owner_name = await _get_owner_name()
+
+    from Backend.helper.settings_manager import SettingsManager, get_env_multi_tokens
+    settings = SettingsManager.current().to_dict()
+    try:
+        settings["database_list"] = db.get_database_list()
+    except Exception:
+        settings["database_list"] = []
+    try:
+        settings["env_multi_tokens"] = get_env_multi_tokens()
+    except Exception:
+        settings["env_multi_tokens"] = []
+
+    return templates.TemplateResponse("settings.html", {
+        "request": request,
+        "theme": theme,
+        "themes": get_all_themes(),
+        "current_theme": theme_name,
+        "app_name": Telegram.ISIM,
+        "current_user": current_user,
+        "owner_name": owner_name,
+        "settings": settings,
+        "version": __version__,
+    })
+
+
 async def canli_page(request: Request, _: bool = Depends(require_auth)):
     theme_name = request.session.get("theme", "purple_gradient")
     theme = get_theme(theme_name)
@@ -476,4 +506,21 @@ async def istatistik_page(request: Request, _: bool = Depends(require_auth)):
         "api_tokens": api_tokens,
         "ekle_items": ekle_items,
         "ekle_total": ekle_total,
+    })
+
+
+async def istekler_page(request: Request, _: bool = Depends(require_auth)):
+    theme_name = request.session.get("theme", "purple_gradient")
+    theme = get_theme(theme_name)
+    current_user = get_current_user(request)
+    owner_name = await _get_owner_name()
+
+    return templates.TemplateResponse("istekler.html", {
+        "request": request,
+        "theme": theme,
+        "themes": get_all_themes(),
+        "current_theme": theme_name,
+        "app_name": Telegram.ISIM,
+        "current_user": current_user,
+        "owner_name": owner_name,
     })

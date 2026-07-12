@@ -1,328 +1,721 @@
 <!DOCTYPE html>
 <html lang="tr" class="dark">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}{{ app_name }}{% endblock %}</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{% block title %}{{ app_name }}{% endblock %}</title>
 
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"/>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='{{ theme.colors.primary | replace('#','%23') }}'/%3E%3Cpath d='M12.5 9.5l10 6.5-10 6.5z' fill='white'/%3E%3C/svg%3E">
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='{{ theme.colors.primary | replace('#','%23') }}'/%3E%3Cpath d='M12.5 9.5l10 6.5-10 6.5z' fill='white'/%3E%3C/svg%3E">
 
-    <script>
-        tailwind.config = {
-            darkMode: 'class',
-            theme: {
-                extend: {
-                    colors: {
-                        primary: '{{ theme.colors.primary }}',
-                        secondary: '{{ theme.colors.secondary }}',
-                        accent: '{{ theme.colors.accent }}',
-                        background: '{{ theme.colors.background }}',
-                        card: '{{ theme.colors.card }}',
-                        text: '{{ theme.colors.text }}',
-                        'text-secondary': '{{ theme.colors.text_secondary }}'
-                    }
-                }
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"/>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+:root {
+    --primary:   {{ theme.colors.primary }};
+    --secondary: {{ theme.colors.secondary }};
+    --accent:    {{ theme.colors.accent }};
+    --bg:        {{ theme.colors.background }};
+    --card:      {{ theme.colors.card }};
+    --text:      {{ theme.colors.text }};
+    --text-sec:  {{ theme.colors.text_secondary }};
+
+    --border:         color-mix(in srgb, var(--text) 18%, var(--card));
+    --surface:        color-mix(in srgb, var(--text) 5%, transparent);
+    --surface-2:      color-mix(in srgb, var(--text) 9%, transparent);
+    --surface-3:      color-mix(in srgb, var(--text) 14%, transparent);
+    --hairline:       color-mix(in srgb, var(--text) 12%, transparent);
+    --hairline-strong: color-mix(in srgb, var(--text) 20%, transparent);
+    --muted:          color-mix(in srgb, var(--text) 42%, transparent);
+    --ring:           color-mix(in srgb, var(--primary) 35%, transparent);
+    --input-bg:       color-mix(in srgb, var(--bg) 60%, var(--card));
+    --shadow-color:   15,23,42;
+    --shadow-soft:    0 10px 30px rgba(var(--shadow-color), 0.10);
+    --shadow-strong:  0 24px 60px rgba(var(--shadow-color), 0.16);
+
+    /* Backward-compatible aliases for pages still referencing the old
+       --c-* variable names (e.g. login.html, uyeler.html, sunucu.html) */
+    --c-bg:       var(--bg);
+    --c-card:     var(--card);
+    --c-text:     var(--text);
+    --c-text2:    var(--text-sec);
+    --c-prim:     var(--primary);
+    --c-sec:      var(--secondary);
+    --c-acc:      var(--accent);
+    --c-border:   var(--border);
+    --c-input-bg: var(--input-bg);
+}
+
+html { scroll-behavior: smooth; }
+
+@media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after {
+        animation-duration: .001ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: .001ms !important;
+    }
+}
+
+body {
+    font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+    -webkit-font-smoothing: antialiased;
+    background-color: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background-image:
+        radial-gradient(circle at 15% 10%, color-mix(in srgb, var(--primary) 12%, transparent), transparent 40%),
+        radial-gradient(circle at 85% 80%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 40%),
+        radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--card) 40%, transparent), transparent 60%);
+}
+
+/* ── Glass building blocks ─────────────────────────────────────────────── */
+.glass-panel {
+    background: color-mix(in srgb, var(--card) 90%, var(--bg));
+    border: 1px solid var(--hairline);
+    box-shadow: var(--shadow-soft);
+}
+.glass-nav {
+    background: color-mix(in srgb, var(--card) 78%, transparent);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+}
+.glass-pill { border-radius: 9999px; }
+
+.surface-card {
+    background: color-mix(in srgb, var(--card) 92%, var(--bg));
+    border: 1px solid var(--hairline);
+    border-radius: 1.5rem;
+}
+
+.btn-primary {
+    background: var(--primary);
+    color: var(--bg);
+    font-weight: 700;
+    border-radius: 1rem;
+    transition: filter .2s ease, transform .12s ease, box-shadow .2s ease;
+    box-shadow: 0 8px 22px color-mix(in srgb, var(--primary) 30%, transparent);
+}
+.btn-primary:hover { filter: brightness(1.08); }
+.btn-primary:active { transform: scale(.97); }
+
+.btn-ghost {
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--hairline);
+    border-radius: 1rem;
+    font-weight: 700;
+    transition: background .2s ease, border-color .2s ease;
+}
+.btn-ghost:hover { background: var(--surface-2); border-color: var(--hairline-strong); }
+
+.badge {
+    display: inline-flex;
+    align-items: center;
+    gap: .35rem;
+    font-size: .65rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .12em;
+    padding: .25rem .6rem;
+    border-radius: 9999px;
+    background: color-mix(in srgb, var(--primary) 14%, transparent);
+    color: var(--primary);
+}
+
+.field {
+    width: 100%;
+    background: color-mix(in srgb, var(--card) 88%, var(--bg));
+    color: var(--text);
+    border: 1px solid var(--hairline);
+    border-radius: 1rem;
+    transition: border-color .2s ease, box-shadow .2s ease;
+}
+.field:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px var(--ring);
+}
+
+.tabular { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
+
+::selection { background: color-mix(in srgb, var(--primary) 30%, transparent); color: var(--text); }
+:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+* { scrollbar-width: thin; scrollbar-color: var(--hairline-strong) transparent; }
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-thumb { background: var(--hairline-strong); border-radius: 9999px; border: 2px solid transparent; background-clip: padding-box; }
+*::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+/* ── Floating pill nav ─────────────────────────────────────────────────── */
+.nav-link {
+    color: var(--text-sec);
+    border-radius: 9999px;
+    padding: 0.5rem clamp(0.5rem, 0.8vw, 1.1rem);
+    transition: color 0.3s ease;
+    position: relative;
+    z-index: 1;
+    white-space: nowrap;
+    font-weight: 600;
+    font-size: 0.83rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+.nav-link.pill-active { color: var(--bg) !important; }
+
+#active-pill {
+    position: absolute;
+    inset: auto;
+    background: var(--primary);
+    border-radius: 9999px;
+    pointer-events: none;
+    z-index: 0;
+    box-shadow: 0 0 15px color-mix(in srgb, var(--primary) 40%, transparent);
+    transition:
+        left 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+        top 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+        width 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+        height 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+#nav-container { scrollbar-width: none; -ms-overflow-style: none; }
+#nav-container::-webkit-scrollbar { display: none; }
+
+.nav-scrolled {
+    transform: translate(-50%, -5px) scale(0.97);
+    background: color-mix(in srgb, var(--card) 80%, transparent);
+}
+
+#overlay {
+    backdrop-filter: blur(8px);
+    background: rgba(0,0,0,0.4);
+    transition: opacity 0.3s ease;
+}
+
+#mobile-menu { will-change: max-height, opacity; }
+
+/* ── Toasts ─────────────────────────────────────────────────────────────── */
+.toast {
+    pointer-events: auto;
+    min-width: 260px;
+    max-width: 360px;
+    border: 1px solid var(--border);
+    background: color-mix(in srgb, var(--card) 88%, transparent);
+    color: var(--text);
+    box-shadow: 0 18px 40px rgba(0,0,0,0.2);
+    border-radius: 1rem;
+    padding: 0.9rem 1rem;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    backdrop-filter: blur(14px);
+    animation: toast-in 220ms ease-out;
+}
+.toast.success { border-color: color-mix(in srgb, #22c55e 35%, var(--border)); }
+.toast.error   { border-color: color-mix(in srgb, #ef4444 35%, var(--border)); }
+.toast.info    { border-color: color-mix(in srgb, var(--primary) 35%, var(--border)); }
+.toast-title   { font-weight: 800; font-size: 0.9rem; line-height: 1.2; }
+.toast-message { margin-top: 0.15rem; font-size: 0.82rem; color: var(--text-sec); line-height: 1.35; }
+@keyframes toast-in  { from { opacity: 0; transform: translateY(-10px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes toast-out { from { opacity: 1; transform: translateY(0) scale(1); } to { opacity: 0; transform: translateY(-8px) scale(0.98); } }
+@media (max-width: 640px) {
+    #toast-container { top: 5rem; left: 0.75rem; right: 0.75rem; }
+    .toast { max-width: none; width: 100%; }
+}
+
+/* ── Theme picker chips ────────────────────────────────────────────────── */
+.theme-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; max-height: 220px; overflow-y: auto; }
+.theme-chip {
+    --sw-bg: var(--bg);
+    --sw-primary: var(--primary);
+    --sw-accent: var(--accent);
+    --sw-text: var(--text);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.6rem;
+    border-radius: 0.85rem;
+    border: 1px solid color-mix(in srgb, var(--sw-text) 18%, transparent);
+    background: var(--sw-bg);
+    cursor: pointer;
+    position: relative;
+    overflow: hidden;
+    transition: transform 0.14s ease, box-shadow 0.14s ease, border-color 0.14s ease;
+}
+.theme-chip:hover { transform: translateY(-1px); border-color: var(--sw-primary); }
+.theme-chip.active { border-color: var(--sw-primary); box-shadow: 0 0 0 2px color-mix(in srgb, var(--sw-primary) 55%, transparent); }
+.theme-chip-dots { display: flex; gap: 3px; flex-shrink: 0; }
+.theme-chip-dots .dot { width: 0.7rem; height: 0.7rem; border-radius: 9999px; box-shadow: 0 0 6px color-mix(in srgb, var(--sw-primary) 70%, transparent); }
+.theme-chip-name { font-size: 0.7rem; font-weight: 700; color: var(--sw-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.1; }
+.theme-chip .chip-check { position: absolute; top: 0.3rem; right: 0.4rem; font-size: 0.6rem; color: var(--sw-primary); }
+
+/* ── Form elements ─────────────────────────────────────────────────────── */
+input, select, textarea, button { font-family: inherit; }
+input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=submit]):not([type=button]):not([type=reset]),
+textarea,
+select {
+    background-color: var(--input-bg) !important;
+    color: var(--text) !important;
+    border-color: var(--hairline) !important;
+}
+input::placeholder, textarea::placeholder { color: color-mix(in srgb, var(--text-sec) 78%, transparent); opacity: 1; }
+input:focus, textarea:focus, select:focus {
+    outline-color: var(--primary) !important;
+    border-color: var(--primary) !important;
+    box-shadow: 0 0 0 2px var(--ring) !important;
+}
+option { background-color: var(--card); color: var(--text); }
+input:-webkit-autofill, input:-webkit-autofill:hover, input:-webkit-autofill:focus, textarea:-webkit-autofill {
+    -webkit-text-fill-color: var(--text);
+    -webkit-box-shadow: 0 0 0 1000px color-mix(in srgb, var(--card) 92%, transparent) inset;
+    caret-color: var(--text);
+    transition: background-color 9999s ease-in-out 0s;
+}
+
+/* ── Legacy class compatibility (used across existing pages) ────────────── */
+.theme-card { background-color: color-mix(in srgb, var(--card) 92%, var(--bg)); color: var(--text); border-color: var(--hairline) !important; }
+.theme-primary { background-color: var(--primary); }
+.theme-secondary { background-color: var(--secondary); }
+.theme-accent { background-color: var(--accent); }
+.theme-text-secondary { color: var(--text-sec); }
+.theme-select { appearance: none; background: var(--bg); color: var(--text); border: 1px solid var(--hairline); border-radius: 999px; padding: 0.5rem 2rem 0.5rem 1rem; font-size: 0.875rem; cursor: pointer; }
+
+.border-gray-100, .border-gray-200, .border-gray-300, .border-gray-400 { border-color: var(--hairline) !important; }
+.bg-white, .bg-gray-50 { background-color: color-mix(in srgb, var(--card) 92%, var(--bg)) !important; color: var(--text) !important; }
+.bg-gray-100 { background-color: var(--surface) !important; color: var(--text) !important; }
+.text-gray-900, .text-gray-800, .text-gray-700 { color: var(--text) !important; }
+.text-gray-500, .text-gray-400 { color: var(--text-sec) !important; }
+.text-gray-600 { color: color-mix(in srgb, var(--text) 80%, var(--text-sec)) !important; }
+.bg-red-50 { background-color: color-mix(in srgb, #dc2626 15%, var(--card)) !important; }
+.border-red-200 { border-color: #f87171 !important; }
+.text-red-700 { color: #fca5a5 !important; }
+tr:hover { background-color: color-mix(in srgb, var(--primary) 8%, var(--card)) !important; }
+th { background-color: var(--surface) !important; color: var(--text-sec) !important; }
+.captcha-cell { border-color: var(--hairline) !important; }
+.captcha-cell:hover { border-color: var(--primary) !important; }
+.captcha-cell.selected { border-color: var(--primary) !important; }
+#mobile-menu.open { max-height: 900px !important; opacity: 1 !important; }
+</style>
+
+<script>
+tailwind.config = {
+    darkMode: 'class',
+    theme: {
+        extend: {
+            fontFamily: {
+                sans: ['Inter', 'system-ui', 'sans-serif'],
+                mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace']
+            },
+            colors: {
+                primary: 'var(--primary)',
+                secondary: 'var(--secondary)',
+                accent: 'var(--accent)',
+                background: 'var(--bg)',
+                card: 'var(--card)',
+                border: 'var(--border)',
+                text: 'var(--text)',
+                'text-secondary': 'var(--text-sec)',
+                surface: 'var(--surface)',
+                'surface-2': 'var(--surface-2)',
+                'surface-3': 'var(--surface-3)',
+                hairline: 'var(--hairline)',
+                'hairline-strong': 'var(--hairline-strong)',
+                muted: 'var(--muted)'
+            },
+            boxShadow: {
+                soft: 'var(--shadow-soft)',
+                strong: 'var(--shadow-strong)'
             }
         }
-    </script>
-
-    <style>
-        :root {
-            --c-bg:      {{ theme.colors.background }};
-            --c-card:    {{ theme.colors.card }};
-            --c-text:    {{ theme.colors.text }};
-            --c-text2:   {{ theme.colors.text_secondary }};
-            --c-prim:    {{ theme.colors.primary }};
-            --c-sec:     {{ theme.colors.secondary }};
-            --c-acc:     {{ theme.colors.accent }};
-            /* Derived border & input colours — slightly lighter/darker than card */
-            --c-border:  color-mix(in srgb, var(--c-text) 18%, var(--c-card));
-            --c-input-bg: color-mix(in srgb, var(--c-bg) 60%, var(--c-card));
-        }
-
-        body { background-color: var(--c-bg); color: var(--c-text); }
-        .theme-card { background-color: var(--c-card); color: var(--c-text); }
-        .theme-primary { background-color: var(--c-prim); }
-        .theme-secondary { background-color: var(--c-sec); }
-        .theme-accent { background-color: var(--c-acc); }
-        .theme-text-secondary { color: var(--c-text2); }
-
-        /* ── Global form element overrides ─────────────────────────────── */
-        /* Makes ALL inputs/selects/textareas inherit the current theme     */
-        input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=submit]):not([type=button]):not([type=reset]),
-        textarea,
-        select {
-            background-color: var(--c-input-bg) !important;
-            color: var(--c-text) !important;
-            border-color: var(--c-border) !important;
-        }
-        input::placeholder, textarea::placeholder {
-            color: var(--c-text2) !important;
-            opacity: 0.7;
-        }
-        input:focus, textarea:focus, select:focus {
-            outline-color: var(--c-prim) !important;
-            border-color: var(--c-prim) !important;
-            box-shadow: 0 0 0 2px color-mix(in srgb, var(--c-prim) 30%, transparent) !important;
-        }
-        /* Option elements inside selects */
-        option {
-            background-color: var(--c-card);
-            color: var(--c-text);
-        }
-
-        /* ── Border overrides for common Tailwind classes ────────────────── */
-        .border-gray-100, .border-gray-200, .border-gray-300, .border-gray-400 {
-            border-color: var(--c-border) !important;
-        }
-
-        /* ── Background overrides ────────────────────────────────────────── */
-        .bg-white, .bg-gray-50 {
-            background-color: var(--c-card) !important;
-            color: var(--c-text) !important;
-        }
-        .bg-gray-100 {
-            background-color: color-mix(in srgb, var(--c-bg) 70%, var(--c-card)) !important;
-            color: var(--c-text) !important;
-        }
-
-        /* ── Text overrides ──────────────────────────────────────────────── */
-        .text-gray-900, .text-gray-800, .text-gray-700 {
-            color: var(--c-text) !important;
-        }
-        .text-gray-500, .text-gray-400 {
-            color: var(--c-text2) !important;
-        }
-        .text-gray-600 {
-            color: color-mix(in srgb, var(--c-text) 80%, var(--c-text2)) !important;
-        }
-
-        /* ── Error / alert boxes ─────────────────────────────────────────── */
-        .bg-red-50 {
-            background-color: color-mix(in srgb, #dc2626 15%, var(--c-card)) !important;
-        }
-        .border-red-200 { border-color: #f87171 !important; }
-        .text-red-700   { color: #fca5a5 !important; }
-
-        /* ── Table rows ──────────────────────────────────────────────────── */
-        tr:hover { background-color: color-mix(in srgb, var(--c-prim) 8%, var(--c-card)) !important; }
-        th { background-color: color-mix(in srgb, var(--c-bg) 80%, var(--c-card)) !important;
-             color: var(--c-text2) !important; }
-
-        /* ── Captcha grid dark-mode fixes ────────────────────────────────── */
-        .captcha-cell { border-color: var(--c-border) !important; }
-        .captcha-cell:hover { border-color: var(--c-prim) !important; }
-        .captcha-cell.selected { border-color: var(--c-prim) !important; }
-
-        /* ── Mobile menu / misc ──────────────────────────────────────────── */
-        #mobile-menu { transition: max-height 0.3s ease, opacity 0.3s ease; max-height: 0; opacity: 0; overflow: hidden; }
-        #mobile-menu.open { max-height: 500px; opacity: 1; }
-    </style>
+    }
+}
+</script>
 </head>
 
-<body class="min-h-screen flex flex-col">
-    <nav class="theme-card shadow-lg border-b text-text">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex justify-between items-center h-16">
-                <div class="flex items-center space-x-4">
-                    <a href="/" class="text-2xl font-bold text-primary hover:opacity-80 transition-opacity">{{ app_name }}</a>
-                    {% if current_user %}
-                    <div class="hidden md:flex space-x-1">
-                        <a href="/" class="text-text hover:text-primary px-3 py-2 rounded-md transition-colors text-sm">Kontrol Paneli</a>
-                        <a href="/media/manage" class="text-text hover:text-primary px-3 py-2 rounded-md transition-colors text-sm">Medya</a>
-                        <a href="/admin/dashboard" class="text-text hover:text-primary px-3 py-2 rounded-md transition-colors text-sm">Yönetici</a>
-                        <a href="/admin/subscriptions" class="text-text hover:text-primary px-3 py-2 rounded-md transition-colors text-sm">Abonelikler</a>
-                        <a href="/admin/access" class="text-text hover:text-primary px-3 py-2 rounded-md transition-colors text-sm">Erişim</a>
-                        <a href="/admin/uyeler" class="text-text hover:text-primary px-3 py-2 rounded-md transition-colors text-sm flex items-center gap-1">
-                            <i class="fas fa-users w-3.5 text-center"></i>
-                            Üyeler
-                        </a>
-                        <a href="/canli" class="text-text hover:text-primary px-3 py-2 rounded-md transition-colors text-sm flex items-center gap-1">
-                            <span class="w-2 h-2 bg-red-500 rounded-full animate-pulse inline-block"></span>
-                            Canlı
-                        </a>
-                        <a href="/yayin" class="text-text hover:text-primary px-3 py-2 rounded-md transition-colors text-sm flex items-center gap-1">
-                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.069A1 1 0 0121 8.82v6.36a1 1 0 01-1.447.89L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
-                            Yayın
-                        </a>
-                        <a href="/link-ekle" class="text-text hover:text-primary px-3 py-2 rounded-md transition-colors text-sm flex items-center gap-1">
-                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg>
-                            Link Ekle
-                        </a>
-                        <a href="/admin/sunucu" class="text-text hover:text-primary px-3 py-2 rounded-md transition-colors text-sm flex items-center gap-1">
-                            <i class="fas fa-server text-xs opacity-60"></i>Sunucu
-                        </a>
-                        <a href="/istatistik" class="text-text hover:text-primary px-3 py-2 rounded-md transition-colors text-sm flex items-center gap-1">
-                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
-                            İstatistik
-                        </a>
-                    </div>
-                    {% endif %}
-                </div>
+<body class="pt-24 pb-12 antialiased">
 
-                <div class="flex items-center space-x-3">
-                    <div class="relative">
-                        <select id="theme-select" onchange="applyTheme(this.value)"
-                            class="theme-card border rounded-md px-2 py-1.5 text-sm">
-                            {% for theme_key, theme_data in themes.items() %}
-                            <option value="{{ theme_key }}" {% if current_theme==theme_key %}selected{% endif %}>
-                                {{ theme_data.name }}
-                            </option>
-                            {% endfor %}
-                        </select>
-                    </div>
+<div id="overlay" class="fixed inset-0 z-40 opacity-0 pointer-events-none"></div>
 
-                    {% if current_user %}
-                    <span class="hidden md:inline flex items-center gap-1.5 text-sm theme-text-secondary">
-                        <i class="fas fa-user-circle"></i>
-                        {% if owner_name %}{{ owner_name }}{% else %}{{ current_user.name }}{% endif %}
-                    </span>
-                    <a href="/logout" class="hidden md:inline bg-red-600 text-white px-3 py-1.5 rounded-md hover:bg-red-700 transition-colors text-sm">Çıkış</a>
-                    <button id="hamburger-btn" onclick="toggleMobileMenu()" class="md:hidden p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors" aria-label="Menü">
-                        <i class="fas fa-bars text-lg"></i>
-                    </button>
-                    {% else %}
-                    <a href="/login" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-md transition-colors text-sm">Giriş Yap</a>
-                    {% endif %}
-                </div>
-            </div>
+<nav id="navbar"
+  class="fixed top-4 left-1/2 -translate-x-1/2 w-[96%] max-w-7xl z-50
+  glass-panel glass-nav glass-pill px-4 sm:px-5 py-2.5
+  grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3
+  transition-all duration-300">
+    <a href="/" class="flex items-center gap-2.5 shrink-0">
+        <div class="w-8 h-8 rounded-full bg-primary flex items-center justify-center shadow-[0_0_15px_var(--primary)]">
+            <i class="fa-brands fa-telegram text-white text-sm"></i>
         </div>
+        <span class="inline text-lg font-extrabold tracking-wide text-transparent bg-clip-text bg-gradient-to-r from-primary to-accent truncate max-w-[40vw] sm:max-w-none">
+            {{ app_name }}
+        </span>
+    </a>
 
+    {% if current_user %}
+    <div id="nav-container" class="hidden md:flex relative isolate min-w-0 justify-self-center items-center gap-0.5 p-1 bg-black/10 rounded-full border border-hairline overflow-x-auto">
+        <div id="active-pill" class="pointer-events-none"></div>
+        <a href="/" class="nav-link"><i class="fa-solid fa-gauge text-[11px]"></i> Kontrol Paneli</a>
+        <a href="/media/manage" class="nav-link"><i class="fa-solid fa-film text-[11px]"></i> Medya</a>
+        <a href="/admin/dashboard" class="nav-link"><i class="fa-solid fa-user-shield text-[11px]"></i> Yönetici</a>
+        <a href="/admin/subscriptions" class="nav-link"><i class="fa-solid fa-credit-card text-[11px]"></i> Abonelikler</a>
+        <a href="/admin/access" class="nav-link"><i class="fa-solid fa-key text-[11px]"></i> Erişim</a>
+        <a href="/istekler" class="nav-link"><i class="fa-solid fa-inbox text-[11px]"></i> İstekler</a>
+        <a href="/canli" class="nav-link"><span class="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse inline-block"></span> Canlı</a>
+        <a href="/yayin" class="nav-link"><i class="fa-solid fa-satellite-dish text-[11px]"></i> Yayın</a>
+        <a href="/admin/settings" class="nav-link"><i class="fa-solid fa-gear text-[11px]"></i> Ayarlar</a>
+    </div>
+    {% endif %}
+
+    <div class="flex items-center gap-2.5 justify-self-end">
         {% if current_user %}
-        <div id="mobile-menu" class="md:hidden border-t theme-card">
-            <div class="px-4 py-3 space-y-1">
-                <a href="/" class="block text-text hover:text-primary px-3 py-2 rounded-md transition-colors text-sm"><i class="fas fa-tachometer-alt mr-2 w-4"></i>Kontrol Paneli</a>
-                <a href="/media/manage" class="block text-text hover:text-primary px-3 py-2 rounded-md transition-colors text-sm"><i class="fas fa-film mr-2 w-4"></i>Medya</a>
-                <a href="/admin/dashboard" class="block text-text hover:text-primary px-3 py-2 rounded-md transition-colors text-sm"><i class="fas fa-user-shield mr-2 w-4"></i>Yönetici</a>
-                <a href="/admin/subscriptions" class="block text-text hover:text-primary px-3 py-2 rounded-md transition-colors text-sm"><i class="fas fa-credit-card mr-2 w-4"></i>Abonelikler</a>
-                <a href="/admin/access" class="block text-text hover:text-primary px-3 py-2 rounded-md transition-colors text-sm"><i class="fas fa-key mr-2 w-4"></i>Erişim</a>
-                <a href="/admin/uyeler" class="block text-text hover:text-primary px-3 py-2 rounded-md transition-colors text-sm"><i class="fas fa-users mr-2 w-4"></i>Üyeler</a>
-                <a href="/canli" class="block text-text hover:text-primary px-3 py-2 rounded-md transition-colors text-sm flex items-center gap-2">
-                    <span class="w-2 h-2 bg-red-500 rounded-full animate-pulse inline-block"></span>Canlı
-                </a>
-                <a href="/yayin" class="block text-text hover:text-primary px-3 py-2 rounded-md transition-colors text-sm flex items-center gap-2">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.069A1 1 0 0121 8.82v6.36a1 1 0 01-1.447.89L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>Yayın
-                </a>
-                <a href="/link-ekle" class="block text-text hover:text-primary px-3 py-2 rounded-md transition-colors text-sm flex items-center gap-2"><i class="fas fa-link mr-2 w-4"></i>Link Ekle</a>
-                <a href="/admin/sunucu" class="block text-text hover:text-primary px-3 py-2 rounded-md transition-colors text-sm flex items-center gap-2"><i class="fas fa-server mr-2 w-4"></i>Sunucu</a>
-                <a href="/istatistik" class="block text-text hover:text-primary px-3 py-2 rounded-md transition-colors text-sm flex items-center gap-2"><i class="fas fa-chart-bar mr-2 w-4"></i>İstatistik</a>
-                <div class="border-t pt-2 mt-2 flex items-center justify-between">
-                    <span class="text-sm theme-text-secondary px-3 flex items-center gap-1.5">
-                        <i class="fas fa-user-circle"></i>
-                        {% if owner_name %}{{ owner_name }}{% else %}{{ current_user.name }}{% endif %}
-                    </span>
-                    <a href="/logout" class="bg-red-600 text-white px-3 py-1.5 rounded-md hover:bg-red-700 transition-colors text-sm">Çıkış Yap</a>
+            <button id="menu-btn" class="md:hidden w-9 h-9 flex items-center justify-center text-lg hover:bg-surface-2 rounded-full transition">
+                <i id="menu-icon" class="fa-solid fa-bars"></i>
+            </button>
+
+            <div class="relative">
+                <button id="user-btn" class="w-9 h-9 rounded-full bg-primary/20 hover:bg-primary/30 flex items-center justify-center text-primary transition border border-primary/30">
+                    <i class="fa-solid fa-user text-sm"></i>
+                </button>
+
+                <div id="user-dropdown" class="absolute right-0 top-12 w-72 glass-panel rounded-2xl p-4 opacity-0 scale-95 pointer-events-none transition-all duration-200 origin-top-right z-50">
+                    <div class="mb-3 border-b border-hairline pb-3">
+                        <p class="text-sm font-bold text-text flex items-center gap-1.5">
+                            <i class="fa-solid fa-user-circle"></i>
+                            {% if owner_name %}{{ owner_name }}{% else %}{{ current_user.name if current_user.name is defined else current_user }}{% endif %}
+                        </p>
+                        <p class="text-[10px] text-green-400 font-bold uppercase tracking-wider flex items-center gap-1 mt-1">
+                            <span class="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse"></span> Çevrimiçi
+                        </p>
+                    </div>
+
+                    <div class="mb-4">
+                        <label class="text-[10px] uppercase text-text-secondary font-bold mb-2 block ml-1">Tema</label>
+                        <div class="theme-grid">
+                            {% for theme_key, theme_data in themes.items() %}
+                            <button type="button"
+                                onclick="applyTheme('{{ theme_key }}')"
+                                class="theme-chip {% if current_theme==theme_key %}active{% endif %}"
+                                title="{{ theme_data.name }}"
+                                style="--sw-bg:{{ theme_data.colors.background }};--sw-primary:{{ theme_data.colors.primary }};--sw-accent:{{ theme_data.colors.accent }};--sw-text:{{ theme_data.colors.text }}">
+                                <span class="theme-chip-dots">
+                                    <span class="dot" style="background:{{ theme_data.colors.primary }}"></span>
+                                    <span class="dot" style="background:{{ theme_data.colors.accent }}"></span>
+                                </span>
+                                <span class="theme-chip-name">{{ theme_data.name }}</span>
+                                {% if current_theme==theme_key %}<i class="fa-solid fa-check chip-check"></i>{% endif %}
+                            </button>
+                            {% endfor %}
+                        </div>
+                    </div>
+
+                    <a href="/logout" class="block text-center bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white px-4 py-2.5 rounded-xl text-sm font-bold transition-all">
+                        <i class="fa-solid fa-arrow-right-from-bracket mr-1"></i> Çıkış Yap
+                    </a>
                 </div>
             </div>
-        </div>
+        {% else %}
+            <a href="/login" class="btn-primary px-5 py-2 text-sm inline-block">
+                Giriş Yap
+            </a>
         {% endif %}
-    </nav>
+    </div>
 
-    <main class="flex-1">
-        {% block content %}{% endblock %}
-    </main>
-
-    <footer class="theme-card border-t mt-auto text-text">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-            <div class="flex justify-center items-center">
-                <p class="theme-text-secondary text-sm">© 2026 {{ app_name }}.</p>
+    {% if current_user %}
+    <div id="mobile-menu" class="absolute top-[calc(100%+12px)] left-0 w-full overflow-hidden max-h-0 opacity-0 transition-all duration-300 ease-in-out md:hidden z-40">
+        <div class="glass-panel mx-2 rounded-3xl p-4 flex flex-col gap-1 max-h-[70vh] overflow-y-auto">
+            <a href="/" class="px-4 py-3 rounded-xl hover:bg-primary hover:text-background transition flex items-center gap-3 font-semibold text-sm"><i class="fa-solid fa-gauge w-4"></i> Kontrol Paneli</a>
+            <a href="/media/manage" class="px-4 py-3 rounded-xl hover:bg-primary hover:text-background transition flex items-center gap-3 font-semibold text-sm"><i class="fa-solid fa-film w-4"></i> Medya</a>
+            <a href="/admin/dashboard" class="px-4 py-3 rounded-xl hover:bg-primary hover:text-background transition flex items-center gap-3 font-semibold text-sm"><i class="fa-solid fa-user-shield w-4"></i> Yönetici</a>
+            <a href="/admin/subscriptions" class="px-4 py-3 rounded-xl hover:bg-primary hover:text-background transition flex items-center gap-3 font-semibold text-sm"><i class="fa-solid fa-credit-card w-4"></i> Abonelikler</a>
+            <a href="/admin/access" class="px-4 py-3 rounded-xl hover:bg-primary hover:text-background transition flex items-center gap-3 font-semibold text-sm"><i class="fa-solid fa-key w-4"></i> Erişim</a>
+            <a href="/istekler" class="px-4 py-3 rounded-xl hover:bg-primary hover:text-background transition flex items-center gap-3 font-semibold text-sm"><i class="fa-solid fa-inbox w-4"></i> İstekler</a>
+            <a href="/canli" class="px-4 py-3 rounded-xl hover:bg-primary hover:text-background transition flex items-center gap-3 font-semibold text-sm"><span class="w-2 h-2 bg-red-500 rounded-full animate-pulse inline-block"></span> Canlı</a>
+            <a href="/yayin" class="px-4 py-3 rounded-xl hover:bg-primary hover:text-background transition flex items-center gap-3 font-semibold text-sm"><i class="fa-solid fa-satellite-dish w-4"></i> Yayın</a>
+            <a href="/admin/settings" class="px-4 py-3 rounded-xl hover:bg-primary hover:text-background transition flex items-center gap-3 font-semibold text-sm"><i class="fa-solid fa-gear w-4"></i> Ayarlar</a>
+            <div class="border-t border-hairline pt-2 mt-1 flex items-center justify-between">
+                <span class="text-sm theme-text-secondary px-3 flex items-center gap-1.5">
+                    <i class="fa-solid fa-user-circle"></i>
+                    {% if owner_name %}{{ owner_name }}{% else %}{{ current_user.name if current_user.name is defined else current_user }}{% endif %}
+                </span>
+                <a href="/logout" class="bg-red-600 text-white px-3 py-1.5 rounded-full hover:bg-red-700 transition-colors text-sm font-semibold">Çıkış Yap</a>
             </div>
         </div>
-    </footer>
+    </div>
+    {% endif %}
+</nav>
 
-    <script>
-        function toggleMobileMenu() {
-            document.getElementById('mobile-menu').classList.toggle('open');
-        }
-        document.addEventListener('click', function(e) {
-            const menu = document.getElementById('mobile-menu');
-            const btn = document.getElementById('hamburger-btn');
-            if (menu && btn && !menu.contains(e.target) && !btn.contains(e.target)) {
-                menu.classList.remove('open');
+<main class="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-4">
+    {% block content %}{% endblock %}
+</main>
+
+<footer class="mt-auto w-full max-w-5xl mx-auto px-6 py-8">
+    <div class="glass-panel rounded-3xl p-6 flex flex-col md:flex-row justify-between items-center gap-4">
+        <div class="flex items-center gap-2">
+            <i class="fa-brands fa-telegram text-primary text-xl"></i>
+            <p class="theme-text-secondary text-sm">© 2026 {{ app_name }}.</p>
+        </div>
+    </div>
+</footer>
+
+<div id="toast-container" class="fixed top-4 right-4 z-[9999] space-y-3 pointer-events-none"></div>
+
+<script>
+const btn = document.getElementById('menu-btn');
+const mobileMenu = document.getElementById('mobile-menu');
+const overlay = document.getElementById('overlay');
+const icon = document.getElementById('menu-icon');
+const navbar = document.getElementById('navbar');
+const userBtn = document.getElementById('user-btn');
+const userDropdown = document.getElementById('user-dropdown');
+const navContainer = document.getElementById('nav-container');
+
+let isMenuOpen = false;
+let isUserOpen = false;
+
+function toggleMenu() {
+    isMenuOpen = !isMenuOpen;
+    if(isUserOpen) closeUser();
+    if (isMenuOpen) {
+        mobileMenu.style.maxHeight = mobileMenu.scrollHeight + "px";
+        mobileMenu.style.opacity = "1";
+        overlay.style.opacity = "1";
+        overlay.classList.remove("pointer-events-none");
+        icon.classList.replace("fa-bars","fa-xmark");
+    } else closeMenu();
+}
+
+function closeMenu() {
+    if (!mobileMenu) return;
+    mobileMenu.style.maxHeight = "0px";
+    mobileMenu.style.opacity = "0";
+    if(icon) icon.classList.replace("fa-xmark","fa-bars");
+    isMenuOpen = false;
+    checkOverlay();
+}
+
+function toggleUser(e) {
+    if(e) e.stopPropagation();
+    isUserOpen = !isUserOpen;
+    if(isMenuOpen) closeMenu();
+    if (isUserOpen) {
+        userDropdown.classList.remove("opacity-0", "scale-95", "pointer-events-none");
+        overlay.style.opacity = "1";
+        overlay.classList.remove("pointer-events-none");
+    } else closeUser();
+}
+
+function closeUser() {
+    if(userDropdown) userDropdown.classList.add("opacity-0", "scale-95", "pointer-events-none");
+    isUserOpen = false;
+    checkOverlay();
+}
+
+function checkOverlay() {
+    if (!isMenuOpen && !isUserOpen) {
+        overlay.style.opacity = "0";
+        overlay.classList.add("pointer-events-none");
+    }
+}
+
+function showToast(message, type = 'info', title = '', duration = 2600) {
+    const container = document.getElementById('toast-container');
+    if (!container) return;
+
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+
+    const iconClass = type === 'success'
+        ? 'fa-circle-check'
+        : type === 'error'
+            ? 'fa-triangle-exclamation'
+            : 'fa-circle-info';
+
+    toast.innerHTML = `
+        <i class="fa-solid ${iconClass} mt-0.5"></i>
+        <div class="min-w-0">
+            ${title ? `<div class="toast-title">${escapeHtml(title)}</div>` : ''}
+            <div class="toast-message">${escapeHtml(message)}</div>
+        </div>
+    `;
+
+    container.appendChild(toast);
+
+    setTimeout(() => {
+        toast.style.animation = 'toast-out 180ms ease-in forwards';
+        setTimeout(() => {
+            if (toast.parentNode) toast.parentNode.removeChild(toast);
+        }, 200);
+    }, duration);
+}
+
+function escapeHtml(str) {
+    return String(str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
+if(btn) btn.onclick = toggleMenu;
+if(userBtn) userBtn.onclick = toggleUser;
+if(overlay) overlay.onclick = () => { closeMenu(); closeUser(); };
+
+let scrollTicking = false;
+let navScrolled = false;
+window.addEventListener("scroll", () => {
+    if (isMenuOpen) closeMenu();
+    if (isUserOpen) closeUser();
+    if (!scrollTicking) {
+        scrollTicking = true;
+        requestAnimationFrame(() => {
+            const past = window.scrollY > 20;
+            if (past !== navScrolled) {
+                navScrolled = past;
+                if(navbar) navbar.classList.toggle("nav-scrolled", past);
             }
+            scrollTicking = false;
         });
-    </script>
+    }
+}, { passive: true });
 
-    <!-- ── CSRF Koruması — Global fetch wrapper ───────────────────────────────
-         Oturum açık olduğunda /api/csrf-token'dan token alınır ve her
-         state-değiştiren fetch isteğine X-CSRF-Token başlığı otomatik eklenir.
-         Tüm template'ler base.html'den türediğinden bu blok her sayfada çalışır.
-    ──────────────────────────────────────────────────────────────────────── -->
-    <script>
-    (function () {
-        // Token RAM'de tutulur; sayfa yenilenince /api/csrf-token'dan tekrar alınır.
-        let _csrfToken = null;
+document.addEventListener("keydown", e => {
+    if (e.key === "Escape") { closeMenu(); closeUser(); }
+});
 
-        // CSRF korumasına tabi HTTP metodları
-        const _CSRF_METHODS = new Set(['POST', 'PUT', 'DELETE', 'PATCH']);
+if (userDropdown) {
+    userDropdown.addEventListener("click", e => e.stopPropagation());
+}
 
-        // Public path'ler — token eklenmez
-        const _PUBLIC_PREFIXES = ['/stremio/', '/dl/', '/subtitles/', '/stream/'];
+const links = document.querySelectorAll(".nav-link");
+const pill = document.getElementById("active-pill");
+let activeLink = null;
 
-        function _isPublic(url) {
-            try {
-                const path = new URL(url, location.origin).pathname;
-                return _PUBLIC_PREFIXES.some(p => path.startsWith(p));
-            } catch { return false; }
+function movePill(el) {
+    if(!pill || !el) return;
+    const r = el.getBoundingClientRect();
+    const pr = el.parentElement.getBoundingClientRect();
+    pill.style.width = r.width + "px";
+    pill.style.height = r.height + "px";
+    pill.style.left = (r.left - pr.left + el.parentElement.scrollLeft) + "px";
+    pill.style.top = (r.top - pr.top) + "px";
+    links.forEach(l => l.classList.toggle("pill-active", l === el));
+}
+
+window.addEventListener('load', () => {
+    const current = window.location.pathname;
+    activeLink = [...links].find(l => l.getAttribute("href") === current) || links[0];
+    if(activeLink) movePill(activeLink);
+});
+
+links.forEach(l => {
+    l.addEventListener("mouseenter", () => movePill(l));
+});
+
+if(navContainer) {
+    navContainer.addEventListener("mouseleave", () => {
+        if(activeLink) movePill(activeLink);
+    });
+}
+
+/* Legacy hook kept for pages calling toggleMobileMenu()/applyTheme() directly */
+function toggleMobileMenu() { toggleMenu(); }
+</script>
+
+<!-- ── CSRF Koruması — Global fetch wrapper ───────────────────────────────
+     Oturum açık olduğunda /api/csrf-token'dan token alınır ve her
+     state-değiştiren fetch isteğine X-CSRF-Token başlığı otomatik eklenir.
+     Tüm template'ler base.html'den türediğinden bu blok her sayfada çalışır.
+──────────────────────────────────────────────────────────────────────── -->
+<script>
+(function () {
+    // Token RAM'de tutulur; sayfa yenilenince /api/csrf-token'dan tekrar alınır.
+    let _csrfToken = null;
+
+    // CSRF korumasına tabi HTTP metodları
+    const _CSRF_METHODS = new Set(['POST', 'PUT', 'DELETE', 'PATCH']);
+
+    // Public path'ler — token eklenmez
+    const _PUBLIC_PREFIXES = ['/stremio/', '/dl/', '/subtitles/', '/stream/'];
+
+    function _isPublic(url) {
+        try {
+            const path = new URL(url, location.origin).pathname;
+            return _PUBLIC_PREFIXES.some(p => path.startsWith(p));
+        } catch { return false; }
+    }
+
+    async function _getToken() {
+        if (_csrfToken) return _csrfToken;
+        try {
+            const res = await _originalFetch('/api/csrf-token', { credentials: 'same-origin' });
+            if (res.ok) {
+                const data = await res.json();
+                _csrfToken = data.token || null;
+            }
+        } catch (e) {
+            console.warn('[CSRF] Token alınamadı:', e);
         }
+        return _csrfToken;
+    }
 
-        async function _getToken() {
-            if (_csrfToken) return _csrfToken;
-            try {
-                const res = await _originalFetch('/api/csrf-token', { credentials: 'same-origin' });
-                if (res.ok) {
-                    const data = await res.json();
-                    _csrfToken = data.token || null;
-                }
-            } catch (e) {
-                console.warn('[CSRF] Token alınamadı:', e);
+    // Orijinal fetch'i sakla
+    const _originalFetch = window.fetch.bind(window);
+
+    // Global fetch wrapper
+    window.fetch = async function (input, init = {}) {
+        const method = (init.method || 'GET').toUpperCase();
+
+        if (_CSRF_METHODS.has(method) && !_isPublic(input instanceof Request ? input.url : input)) {
+            const token = await _getToken();
+            if (token) {
+                init.headers = Object.assign({}, init.headers, { 'X-CSRF-Token': token });
             }
-            return _csrfToken;
         }
+        return _originalFetch(input, init);
+    };
 
-        // Orijinal fetch'i sakla
-        const _originalFetch = window.fetch.bind(window);
+    // Token önbelleği; oturumu kapatan sayfa yenilemelerinde sıfırlanır.
+    // Çıkış linklerine tıklandığında önbelleği sıfırla.
+    document.addEventListener('click', function (e) {
+        const a = e.target.closest('a[href]');
+        if (a && (a.href.includes('/logout') || a.href.includes('/cikis'))) {
+            _csrfToken = null;
+        }
+    });
 
-        // Global fetch wrapper
-        window.fetch = async function (input, init = {}) {
-            const method = (init.method || 'GET').toUpperCase();
-
-            if (_CSRF_METHODS.has(method) && !_isPublic(input instanceof Request ? input.url : input)) {
-                const token = await _getToken();
-                if (token) {
-                    init.headers = Object.assign({}, init.headers, { 'X-CSRF-Token': token });
-                }
+    // Tema değiştirme — fetch wrapper üzerinden gider, CSRF token otomatik eklenir.
+    window.applyTheme = async function (themeName) {
+        try {
+            const res = await fetch('/set-theme', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: 'theme=' + encodeURIComponent(themeName),
+                credentials: 'same-origin',
+            });
+            if (res.ok || res.redirected) {
+                location.reload();
             }
-            return _originalFetch(input, init);
-        };
-
-        // Token önbelleği; oturumu kapatan sayfa yenilemelerinde sıfırlanır.
-        // Çıkış linklerine tıklandığında önbelleği sıfırla.
-        document.addEventListener('click', function (e) {
-            const a = e.target.closest('a[href]');
-            if (a && (a.href.includes('/logout') || a.href.includes('/cikis'))) {
-                _csrfToken = null;
-            }
-        });
-
-        // Tema değiştirme — fetch wrapper üzerinden gider, CSRF token otomatik eklenir.
-        window.applyTheme = async function (themeName) {
-            try {
-                const res = await fetch('/set-theme', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                    body: 'theme=' + encodeURIComponent(themeName),
-                    credentials: 'same-origin',
-                });
-                if (res.ok || res.redirected) {
-                    location.reload();
-                }
-            } catch (e) {
-                console.error('[applyTheme] Hata:', e);
-            }
-        };
-    })();
-    </script>
+        } catch (e) {
+            console.error('[applyTheme] Hata:', e);
+        }
+    };
+})();
+</script>
 </body>
 </html>

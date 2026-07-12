@@ -10,55 +10,54 @@
     </div>
 
     <div class="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-8">
-        <div class="theme-card p-6 rounded-lg shadow text-center">
-            <div class="w-16 h-16 mx-auto mb-4 theme-primary rounded-full flex items-center justify-center">
-                <span class="text-white text-2xl">✓</span>
+        <div class="surface-card p-6 text-center">
+            <div class="w-16 h-16 mx-auto mb-4 bg-primary rounded-full flex items-center justify-center shadow-[0_0_15px_var(--primary)]">
+                <i class="fa-solid fa-check text-white text-2xl"></i>
             </div>
             <h3 class="text-lg font-semibold mb-2">Sunucu Durumu</h3>
-            <p class="text-green-600 font-medium">{{ stats.status|title }}</p>
+            <p class="text-green-500 font-medium">{{ stats.status|title }}</p>
         </div>
 
-        <div class="theme-card p-6 rounded-lg shadow text-center">
-            <div class="w-16 h-16 mx-auto mb-4 bg-blue-500 rounded-full flex items-center justify-center">
-                <span class="text-white text-2xl">↑</span>
+        <div class="surface-card p-6 text-center">
+            <div class="w-16 h-16 mx-auto mb-4 bg-accent rounded-full flex items-center justify-center">
+                <i class="fa-solid fa-arrow-up text-white text-2xl"></i>
             </div>
             <h3 class="text-lg font-semibold mb-2">Çalışma Süresi</h3>
-            <p class="text-green-600 font-medium">{{ stats.uptime }}</p>
+            <p class="text-green-500 font-medium">{{ stats.uptime }}</p>
         </div>
 
-        <div class="theme-card p-6 rounded-lg shadow text-center">
-            <div class="w-16 h-16 mx-auto mb-4 bg-purple-500 rounded-full flex items-center justify-center">
-                <span class="text-white text-2xl">v</span>
+        <div class="surface-card p-6 text-center">
+            <div class="w-16 h-16 mx-auto mb-4 bg-secondary rounded-full flex items-center justify-center">
+                <i class="fa-solid fa-code-branch text-white text-2xl"></i>
             </div>
             <h3 class="text-lg font-semibold mb-2">Sürüm</h3>
             <p class="theme-text-secondary font-medium">{{ stats.version }}</p>
         </div>
     </div>
 
-    <div class="theme-card p-6 rounded-lg shadow mb-8">
+    <div class="surface-card p-6 mb-8">
         <h2 class="text-xl font-semibold mb-4">Servis Durumları</h2>
         <div class="space-y-4">
             <div class="flex justify-between items-center">
                 <span>API Uç Noktaları</span>
-                <span class="bg-green-100 text-green-800 px-2 py-1 rounded-full text-sm">Aktif</span>
+                <span class="badge" style="background:color-mix(in srgb, #22c55e 18%, transparent); color:#22c55e;">Aktif</span>
             </div>
             <div class="flex justify-between items-center">
                 <span>Stremio Eklentisi</span>
-                <span class="bg-green-100 text-green-800 px-2 py-1 rounded-full text-sm">Aktif</span>
+                <span class="badge" style="background:color-mix(in srgb, #22c55e 18%, transparent); color:#22c55e;">Aktif</span>
             </div>
             <div class="flex justify-between items-center">
                 <span>Veritabanı</span>
-                <span class="bg-green-100 text-green-800 px-2 py-1 rounded-full text-sm">Bağlı</span>
+                <span class="badge" style="background:color-mix(in srgb, #22c55e 18%, transparent); color:#22c55e;">Bağlı</span>
             </div>
         </div>
     </div>
 
     {% if not is_authenticated %}
-    <div class="theme-card p-6 rounded-lg shadow text-center">
+    <div class="surface-card p-6 text-center">
         <h2 class="text-xl font-semibold mb-4">Yönetici Erişimi</h2>
         <p class="theme-text-secondary mb-4">Tam yönetici paneline erişmek için giriş yapın</p>
-        <a href="/login"
-            class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-md transition-colors inline-block shadow-sm">
+        <a href="/login" class="btn-primary px-6 py-3 inline-block">
             Yönetici Girişi
         </a>
     </div>

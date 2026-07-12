@@ -2,7 +2,7 @@ import asyncio
 import logging
 import json
 from fastapi import Request, Query, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from Backend import db, StartTime, __version__
 from Backend.helper.pyro import get_readable_time
 from Backend.pyrofork.bot import multi_clients, StreamBot
@@ -1159,3 +1159,192 @@ async def requery_media_api(request: Request, tmdb_id: int, db_index: int, media
     except Exception as e:
         _logger.error("Yeniden sorgulama hatası", exc_info=True)
         raise HTTPException(status_code=500, detail="Sunucu hatası")
+
+
+# --- API Routes: Ayarlar (Settings) ---
+
+async def get_settings_api():
+    """Panelde gösterilecek güncel ayarları döner (hassas alanlar maskelenmez,
+    çünkü bu uygulamada statik admin şifresi yok — kimlik doğrulama OTP tabanlı)."""
+    try:
+        from Backend.helper.settings_manager import SettingsManager, get_env_multi_tokens
+        data = SettingsManager.current().to_dict()
+        try:
+            data["database_list"] = db.get_database_list()
+        except Exception:
+            data["database_list"] = []
+
+        #----- config.env üzerinden tanımlanan MULTI_TOKEN_x değişkenleri:
+        #----- bunlar ayarlar sayfasından silinemez/eklenemez, bu yüzden panelde
+        #----- salt okunur (maskelenmiş) olarak ayrı gösterilir.
+        try:
+            data["env_multi_tokens"] = get_env_multi_tokens()
+        except Exception:
+            data["env_multi_tokens"] = []
+
+        return {"success": True, "settings": data}
+    except Exception as e:
+        _logger.error("get_settings_api hatası", exc_info=True)
+        raise HTTPException(status_code=500, detail="Ayarlar okunamadı")
+
+
+async def update_settings_api(payload: dict):
+    """Ayarlar sayfasından gelen değişiklikleri kaydeder ve ilgili
+    bileşenleri (çoklu token, veritabanları, abonelik görevi vb.) yeniden başlatır."""
+    try:
+        from Backend.helper.settings_manager import SettingsManager
+        results = await SettingsManager.update(db, payload or {})
+        return {
+            "success": True,
+            "message": "Ayarlar kaydedildi.",
+            "details": results,
+            "settings": SettingsManager.current().to_dict(),
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        _logger.error("update_settings_api hatası", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Ayarlar kaydedilemedi: {e}")
+
+
+async def export_settings_backup_api():
+    """Ayarları indirilebilir bir JSON yedeği olarak döner."""
+    try:
+        from Backend.helper.settings_manager import SettingsManager
+        data = SettingsManager.current().to_dict()
+        data.pop("_id", None)
+        payload = {
+            "app": "Telegram-Stremio",
+            "version": __version__,
+            "exported_at": time(),
+            "settings": data,
+        }
+        return JSONResponse(
+            content=payload,
+            headers={"Content-Disposition": "attachment; filename=ayarlar_yedek.json"},
+        )
+    except Exception as e:
+        _logger.error("export_settings_backup_api hatası", exc_info=True)
+        raise HTTPException(status_code=500, detail="Yedek oluşturulamadı")
+
+
+async def import_settings_backup_api(payload: dict):
+    """Daha önce dışa aktarılmış bir JSON yedeğini geri yükler."""
+    try:
+        from Backend.helper.settings_manager import SettingsManager
+        incoming = payload.get("settings") if isinstance(payload, dict) and "settings" in payload else payload
+        if not isinstance(incoming, dict):
+            raise HTTPException(status_code=400, detail="Geçersiz yedek dosyası")
+        results = await SettingsManager.update(db, incoming)
+        return {
+            "success": True,
+            "message": "Yedek geri yüklendi.",
+            "details": results,
+            "settings": SettingsManager.current().to_dict(),
+        }
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        _logger.error("import_settings_backup_api hatası", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Yedek geri yüklenemedi: {e}")
+
+
+async def invalidate_admin_sessions_api():
+    """Tüm aktif yönetici oturumlarını geçersiz kılar (herkes yeniden /start ile giriş yapmalı)."""
+    try:
+        await db.invalidate_admin_session()
+        return {"success": True, "message": "Tüm yönetici oturumları sonlandırıldı."}
+    except Exception as e:
+        _logger.error("invalidate_admin_sessions_api hatası", exc_info=True)
+        raise HTTPException(status_code=500, detail="Oturumlar sonlandırılamadı")
+
+
+# ----- ── Sistem & Bakım (Ayarlar sayfası: Veritabanı & Sistem İstatistikleri + Loglar) ──
+
+LOG_FILE = "log.txt"
+
+
+async def get_db_stats_api() -> dict:
+    """Tüm depolama veritabanlarındaki içerik + sistem metriklerini toplar (Ayarlar > Sistem & Bakım)."""
+    try:
+        from Backend.helper.pyro import get_readable_file_size
+
+        db_stats = await db.get_database_stats()
+        total_movies = sum(stat.get("movie_count", 0) for stat in db_stats)
+        total_tv = sum(stat.get("tv_count", 0) for stat in db_stats)
+        total_db_size = sum(stat.get("dataSize", 0) for stat in db_stats)
+
+        total_episodes = total_streams = 0
+        for key in db.dbs.keys():
+            if not key.startswith("storage_"):
+                continue
+            storage = db.dbs[key]
+
+            # Film yayın (stream) sayısı — sunucu tarafında (aggregation) hesaplanır
+            movie_pipeline = [
+                {"$project": {"n": {"$size": {"$ifNull": ["$telegram", []]}}}},
+                {"$group": {"_id": None, "total": {"$sum": "$n"}}},
+            ]
+            async for row in storage["movie"].aggregate(movie_pipeline):
+                total_streams += row.get("total", 0)
+
+            # Dizi bölüm + yayın sayısı — sunucu tarafında (aggregation) hesaplanır
+            tv_pipeline = [
+                {"$unwind": {"path": "$seasons", "preserveNullAndEmptyArrays": False}},
+                {"$unwind": {"path": "$seasons.episodes", "preserveNullAndEmptyArrays": False}},
+                {"$group": {
+                    "_id": None,
+                    "episodes": {"$sum": 1},
+                    "streams": {"$sum": {"$size": {"$ifNull": ["$seasons.episodes.telegram", []]}}},
+                }},
+            ]
+            async for row in storage["tv"].aggregate(tv_pipeline):
+                total_episodes += row.get("episodes", 0)
+                total_streams += row.get("streams", 0)
+
+        from Backend.helper.settings_manager import SettingsManager
+        auth_channels = len(SettingsManager.current().auth_channels)
+
+        return {
+            "status": "success",
+            "data": {
+                "version": __version__,
+                "movies": total_movies,
+                "tv_shows": total_tv,
+                "episodes": total_episodes,
+                "streams": total_streams,
+                "uptime": get_readable_time(time() - StartTime),
+                "db_size": get_readable_file_size(total_db_size),
+                "storage_dbs": db.current_db_index,
+                "auth_channels": auth_channels,
+            },
+        }
+    except Exception as e:
+        _logger.error("get_db_stats_api hatası", exc_info=True)
+        return {"status": "error", "message": str(e)}
+
+
+async def get_logs_api(lines: int = 300) -> dict:
+    """Web log görüntüleyicisi için log dosyasının son satırlarını döner."""
+    import os
+    path = os.path.abspath(LOG_FILE)
+    if not os.path.exists(path):
+        return {"status": "error", "message": "Log dosyası bulunamadı.", "log": ""}
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            tail = f.readlines()[-max(1, min(lines, 2000)):]
+        return {"status": "success", "log": "".join(tail)}
+    except Exception as e:
+        return {"status": "error", "message": str(e), "log": ""}
+
+
+async def download_logs_api():
+    """Ham log dosyasını indirir."""
+    import os
+    from fastapi.responses import FileResponse
+    path = os.path.abspath(LOG_FILE)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Log dosyası bulunamadı.")
+    return FileResponse(path, filename="log.txt", media_type="text/plain")

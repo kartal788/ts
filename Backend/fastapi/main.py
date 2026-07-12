@@ -18,7 +18,8 @@ from Backend.fastapi.routes.template_routes import (
     login_page, login_post, logout, set_theme, dashboard_page,
     media_management_page, edit_media_page,
     admin_dashboard_page, admin_subscriptions_page, admin_access_page, canli_page,
-    link_ekle_page, istatistik_page, sunucu_page
+    link_ekle_page, istatistik_page, sunucu_page, settings_page,
+    istekler_page
 )
 from Backend.fastapi.routes.link_ekle_routes import (
     link_ekle_query, link_ekle_save
@@ -53,6 +54,8 @@ from Backend.fastapi.routes.notification_routes import (
     my_movie_reminders,
     submit_content_request,
     my_content_requests,
+    admin_list_content_requests,
+    admin_review_content_requests,
 )
 from Backend.fastapi.routes.api_routes import (
     list_media_api, delete_media_api, update_media_api, requery_media_api,
@@ -66,7 +69,11 @@ from Backend.fastapi.routes.api_routes import (
     get_subscription_plans_api, add_subscription_plan_api,
     update_subscription_plan_api, delete_subscription_plan_api,
     get_all_subscribers_api, manage_subscriber_api,
-    get_all_tokens_api, assign_plan_api, link_token_user_api
+    get_all_tokens_api, assign_plan_api, link_token_user_api,
+    get_settings_api, update_settings_api,
+    export_settings_backup_api, import_settings_backup_api,
+    invalidate_admin_sessions_api,
+    get_db_stats_api, get_logs_api, download_logs_api,
 )
 from Backend.fastapi.routes.uyeler_routes import (
     admin_uyeler_page,
@@ -900,6 +907,42 @@ async def root(request: Request):
 async def admin_dashboard(request: Request, _: bool = Depends(require_auth)):
     return await admin_dashboard_page(request, _)
 
+@app.get("/admin/settings", response_class=HTMLResponse)
+async def admin_settings(request: Request, _: bool = Depends(require_auth)):
+    return await settings_page(request, _)
+
+@app.get("/api/admin/settings")
+async def get_settings(_: bool = Depends(require_auth)):
+    return await get_settings_api()
+
+@app.put("/api/admin/settings")
+async def update_settings(payload: dict, _: bool = Depends(require_auth)):
+    return await update_settings_api(payload)
+
+@app.get("/api/admin/settings/backup")
+async def export_settings_backup(_: bool = Depends(require_auth)):
+    return await export_settings_backup_api()
+
+@app.post("/api/admin/settings/backup/import")
+async def import_settings_backup(payload: dict, _: bool = Depends(require_auth)):
+    return await import_settings_backup_api(payload)
+
+@app.post("/api/admin/settings/invalidate-sessions")
+async def invalidate_admin_sessions(_: bool = Depends(require_auth)):
+    return await invalidate_admin_sessions_api()
+
+@app.get("/api/admin/stats")
+async def admin_db_stats(_: bool = Depends(require_auth)):
+    return await get_db_stats_api()
+
+@app.get("/api/admin/logs")
+async def admin_logs(lines: int = Query(300, ge=1, le=2000), _: bool = Depends(require_auth)):
+    return await get_logs_api(lines)
+
+@app.get("/api/admin/logs/download")
+async def admin_logs_download(_: bool = Depends(require_auth)):
+    return await download_logs_api()
+
 @app.get("/media/manage", response_class=HTMLResponse)
 async def media_management(request: Request, media_type: str = "movie", _: bool = Depends(require_auth)):
     return await media_management_page(request, media_type, _)
@@ -1133,6 +1176,20 @@ async def admin_uye_reminders(member_id: str, _: bool = Depends(require_auth)):
 @app.get("/istatistik", response_class=HTMLResponse)
 async def istatistik(request: Request, _: bool = Depends(require_auth)):
     return await istatistik_page(request, _)
+
+# ── İstekler Sayfası (içerik talepleri onay/red) ──────────────────────────────
+@app.get("/istekler", response_class=HTMLResponse)
+async def istekler(request: Request, _: bool = Depends(require_auth)):
+    return await istekler_page(request, _)
+
+@app.get("/api/admin/istekler")
+async def admin_istekler_api(_: bool = Depends(require_auth)):
+    return await admin_list_content_requests()
+
+@app.post("/api/admin/istekler/aksiyon")
+async def admin_istekler_aksiyon_api(request: Request, _: bool = Depends(require_auth)):
+    return await admin_review_content_requests(request)
+# ─────────────────────────────────────────────────────────────────────────────
 
 @app.get("/api/istatistik/bandwidth")
 async def bandwidth_stats_api(_: bool = Depends(require_auth)):

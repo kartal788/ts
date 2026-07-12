@@ -1164,6 +1164,15 @@ async def _fetch_movie_metadata_impl(title, encoded_string, year=None, quality=N
             for c in cast_arr
         ]
 
+        # Yönetmen(ler): crew içindeki "Director" görevindekiler
+        crew_arr = getattr(credits, "crew", []) or []
+        director_names = [
+            getattr(c, "name", None) or getattr(c, "original_name", None)
+            for c in crew_arr
+            if (getattr(c, "job", "") or "").lower() == "director"
+        ]
+        director_names = [d for d in director_names if d]
+
         runtime_val = getattr(movie, "runtime", None)
         runtime = f"{runtime_val} min" if runtime_val else ""
 
@@ -1189,6 +1198,7 @@ async def _fetch_movie_metadata_impl(title, encoded_string, year=None, quality=N
             "backdrop_de": getattr(movie, "backdrop_de", "") or "",
             "logo_de": getattr(movie, "logo_de", "") or "",
             "cast": cast_names,
+            "director": director_names,
             "runtime": str(runtime),
             "media_type": "movie",
             "genres": [g.name for g in (movie.genres or [])],
@@ -1285,6 +1295,7 @@ async def _fetch_movie_metadata_impl(title, encoded_string, year=None, quality=N
         "backdrop_de": backdrop_de,
         "logo_de": logo_de,
         "cast": imdb.get("cast", []),
+        "director": imdb.get("director", []),
         "runtime": str(imdb.get("runtime") or ""),
         "media_type": "movie",
         "genres": imdb.get("genre", []),

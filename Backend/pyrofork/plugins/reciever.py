@@ -117,6 +117,14 @@ async def process_file():
                         platform_catalog.schedule_refresh()
                     except Exception as _cat_err:
                         LOGGER.warning(f"Katalog yenileme planlanamadı: {_cat_err}")
+                    # ── Yeni içerik duyurusu (Telegram kanalı / konusu) ──────────
+                    try:
+                        from Backend.helper.content_announcer import announce_new_content
+                        _announce_info = dict(metadata_info)
+                        _announce_info["source_filename"] = title
+                        announce_new_content(_announce_info)
+                    except Exception as _announce_err:
+                        LOGGER.warning(f"Duyuru tetiklenemedi: {_announce_err}")
                 else:
                     LOGGER.info("Update failed due to validation errors.")
         except Exception as e:

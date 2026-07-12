@@ -218,6 +218,116 @@ class Database:
             upsert=True
         )
 
+    #-----
+    #----- Ayarlar (SettingsManager tarafından kullanılır)
+    #-----
+    async def get_settings(self) -> dict:
+        try:
+            doc = await self.dbs["tracking"]["settings"].find_one({"_id": "app_settings"})
+            return doc or {}
+        except Exception as e:
+            LOGGER.error(f"Database.get_settings hatası: {e}")
+            return {}
+
+    async def save_settings(self, settings: dict) -> bool:
+        try:
+            clean = {k: v for k, v in settings.items() if k != "_id"}
+            await self.dbs["tracking"]["settings"].update_one(
+                {"_id": "app_settings"},
+                {"$set": clean},
+                upsert=True,
+            )
+            return True
+        except Exception as e:
+            LOGGER.error(f"Database.save_settings hatası: {e}")
+            return False
+
+    #-----
+    #----- Ek veritabanı bağlantı yönetimi (Ayarlar → Veritabanları bölümü)
+    #-----
+    def get_database_list(self) -> List[Dict[str, Any]]:
+        result = []
+        for index, uri in enumerate(self.db_uris):
+            masked = re.sub(r"://(.*?):.*?@", r"://\1:*****@", uri).split('?')[0]
+            db_key = "tracking" if index == 0 else f"storage_{index}"
+            entry = {
+                "index": index,
+                "uri_masked": masked,
+                "locked": index <= 1,  # ilk iki DB (tracking + storage_1) config.env'den gelir, silinemez
+                "type": "tracking" if index == 0 else "storage",
+                "connected": db_key in self.clients,
+            }
+            if index > 1:
+                entry["full_uri"] = uri
+            result.append(entry)
+        return result
+
+    async def connect_storage_db(self, uri: str, index: int) -> bool:
+        try:
+            client = motor.motor_asyncio.AsyncIOMotorClient(uri, maxPoolSize=10, minPoolSize=1)
+            await client.admin.command("ping")
+
+            db_key = "tracking" if index == 0 else f"storage_{index}"
+            self.clients[db_key] = client
+            self.dbs[db_key] = client[self.db_name]
+
+            db_type = "Tracking" if index == 0 else f"Storage {index}"
+            masked_uri = re.sub(r"://(.*?):.*?@", r"://\1:*****@", uri).split('?')[0]
+            LOGGER.info(f"{db_type} veritabanı bağlandı: {masked_uri}")
+            return True
+        except Exception as e:
+            LOGGER.error(f"connect_storage_db hatası (index {index}): {e}")
+            return False
+
+    async def disconnect_storage_db(self, index: int) -> None:
+        db_key = f"storage_{index}"
+        client = self.clients.pop(db_key, None)
+        self.dbs.pop(db_key, None)
+        if client:
+            client.close()
+            LOGGER.info(f"{db_key} bağlantısı kapatıldı.")
+
+    async def reload_extra_databases(self, new_extra_uris: List[str]) -> Dict[str, Any]:
+        """Ayarlar sayfasından 2. sıradan sonraki (ek) veritabanlarını günceller.
+        Var olan storage_2, storage_3... konumlarındaki URI'ler DEĞİŞTİRİLEMEZ
+        (mevcut medya kayıtları bu index'lere göre saklanır); sadece sona
+        ekleme veya en sondakini kaldırma desteklenir."""
+        old_extra = self.db_uris[2:]
+        new_extra = [u.strip() for u in (new_extra_uris or []) if u and u.strip()]
+
+        common_len = min(len(old_extra), len(new_extra))
+        for i in range(common_len):
+            if old_extra[i] != new_extra[i]:
+                raise ValueError(
+                    f"storage_{i + 2} konumundaki veritabanı yerinde değiştirilemez — "
+                    f"mevcut medya kayıtları bu index'e göre saklanıyor. "
+                    f"Sadece sona ekleme veya en sonuncuları kaldırma desteklenir."
+                )
+
+        added = 0
+        removed = 0
+
+        if len(new_extra) > len(old_extra):
+            for offset, uri in enumerate(new_extra[len(old_extra):]):
+                index = len(old_extra) + 2 + offset
+                ok = await self.connect_storage_db(uri, index)
+                if not ok:
+                    raise ValueError(
+                        f"storage_{index} bağlantısı kurulamadı. URI'yi kontrol edin — "
+                        f"hiçbir değişiklik kaydedilmedi."
+                    )
+                added += 1
+        elif len(new_extra) < len(old_extra):
+            for index in range(len(old_extra) + 1, len(new_extra) + 1, -1):
+                await self.disconnect_storage_db(index)
+                removed += 1
+
+        self.db_uris = self.db_uris[:2] + new_extra
+
+        message = f"{added} veritabanı eklendi, {removed} veritabanı kaldırıldı."
+        LOGGER.info(f"reload_extra_databases: {message}")
+        return {"added": added, "removed": removed, "message": message}
+
     # -------------------------------
     # User Subscription Management
     # -------------------------------
@@ -1457,6 +1567,21 @@ class Database:
             doc = await self.dbs[db_key]["movie"].find_one({"tmdb_id": tmdb_id})
             if doc and "telegram" in doc:
                 for quality in doc["telegram"]:
+                    #----- Parçalı (split) dosyalarda her parçanın kendi chat_id/msg_id'si
+                    #----- "parts" listesinde tutulur; sadece quality["id"]'yi (1. parça)
+                    #----- silmek diğer parçaları (.002, .003, ...) Telegram'da bırakır.
+                    parts = quality.get("parts") or []
+                    if parts:
+                        for part in parts:
+                            try:
+                                part_chat_id = part.get("chat_id")
+                                part_msg_id = part.get("msg_id")
+                                if part_chat_id and part_msg_id:
+                                    chat_id = int(f"-100{part_chat_id}")
+                                    create_task(delete_message(chat_id, int(part_msg_id)))
+                            except Exception as e:
+                                LOGGER.error(f"Failed to queue split part for deletion: {e}")
+                        continue
                     try:
                         old_id = quality.get("id")
                         if old_id:
@@ -1474,6 +1599,21 @@ class Database:
                 for season in doc["seasons"]:
                     for episode in season.get("episodes", []):
                         for quality in episode.get("telegram", []):
+                            #----- Parçalı (split) dosyalarda her parçanın kendi chat_id/msg_id'si
+                            #----- "parts" listesinde tutulur; sadece quality["id"]'yi (1. parça)
+                            #----- silmek diğer parçaları (.002, .003, ...) Telegram'da bırakır.
+                            parts = quality.get("parts") or []
+                            if parts:
+                                for part in parts:
+                                    try:
+                                        part_chat_id = part.get("chat_id")
+                                        part_msg_id = part.get("msg_id")
+                                        if part_chat_id and part_msg_id:
+                                            chat_id = int(f"-100{part_chat_id}")
+                                            create_task(delete_message(chat_id, int(part_msg_id)))
+                                    except Exception as e:
+                                        LOGGER.error(f"Failed to queue split part for deletion: {e}")
+                                continue
                             try:
                                 old_id = quality.get("id")
                                 if old_id:
@@ -1488,6 +1628,16 @@ class Database:
         
         if result.deleted_count > 0:
             LOGGER.info(f"{media_type} with tmdb_id {tmdb_id} deleted successfully.")
+            #----- İçerik tamamen silindi: duyuru bekleme (cooldown) kaydını da temizle.
+            #----- Böylece bu tmdb_id'ye yeniden video eklenirse, sanki hiç eklenmemiş
+            #----- gibi 24 saat beklemeden tekrar duyurulabilir.
+            try:
+                announce_media_type = "movie" if media_type == "Movie" else "tv"
+                await self.dbs["tracking"]["announced_content"].delete_one(
+                    {"_id": f"{announce_media_type}:{tmdb_id}"}
+                )
+            except Exception as e:
+                LOGGER.warning(f"Duyuru bekleme kaydı temizlenemedi (tmdb_id={tmdb_id}): {e}")
             return True
         LOGGER.info(f"No document found with tmdb_id {tmdb_id}.")
         return False
@@ -3467,6 +3617,22 @@ class Database:
             "created_at": datetime.utcnow(),
         })
         return str(result.inserted_id)
+
+    async def set_content_request_admin_messages(self, request_id: str, admin_messages: list) -> bool:
+        """
+        İçerik talebinin yönetici(ler)e gönderilen Telegram bildirim mesajlarının
+        (chat_id/message_id) listesini kaydeder. Bu sayede talep herhangi bir yerden
+        (bot butonu veya web panelinden) onaylanıp/reddedildiğinde, tüm yöneticilerin
+        gördüğü bot mesajları senkron biçimde güncellenebilir.
+        """
+        try:
+            result = await self.dbs["tracking"]["content_requests"].update_one(
+                {"_id": ObjectId(request_id)},
+                {"$set": {"admin_messages": admin_messages}}
+            )
+            return result.modified_count > 0
+        except Exception:
+            return False
 
     async def get_content_request(self, request_id: str) -> Optional[dict]:
         """
