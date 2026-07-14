@@ -143,118 +143,6 @@ async def _claim(media_type: str, tmdb_id) -> bool:
     return result.modified_count > 0
 
 
-#----- Dosya adını ayraçlara (nokta, boşluk, alt çizgi, tire, parantez) göre
-#----- küçük harfli token'lara böler; "tr-en" gibi birleşik etiketler de
-#----- ayrı ayrı token'lara (tr, en) ayrılmış olur.
-def _filename_tokens(filename: str) -> set:
-    if not filename:
-        return set()
-    tokens = set(re.split(r'[^a-z0-9]+', filename.lower()))
-    tokens.discard("")
-    return tokens
-
-
-#----- Dosya adındaki dil kodlarının duyuru metnindeki karşılıkları.
-#----- Büyük/küçük harf önemli değildir (tüm etiketler _filename_tokens
-#----- içinde zaten küçük harfe çevrilerek token'lara ayrılır).
-_LANGUAGE_LABELS = {
-    "tr": "Türkçe",
-    "en": "İngilizce",
-    "de": "Almanca",
-    "german": "Almanca",
-    "fr": "Fransızca",
-    "ja": "Japonca",
-    "es": "İspanyolca",
-    "zh": "Çince",
-    "ko": "Korece",
-}
-#----- Etiketler tespit edildiğinde duyuru metnine bu sırayla yazılır
-#----- (ör. "Türkçe, İngilizce ve Almanca" — önce tr, sonra en, sonra de).
-_LANGUAGE_ORDER = ["tr", "en", "de", "german", "fr", "ja", "es", "zh", "ko"]
-
-
-#----- Dosya adındaki dil etiketlerinden duyuru metnine yazılacak "Ses" alanını üretir
-#----- dual         → hiçbir şey yazılmaz (ses satırı hiç eklenmez)
-#----- en-trsub      → İngilizce Ses, Türkçe Altyazı
-#----- de-en-trsub   → Almanca ve İngilizce Ses, Türkçe Altyazı
-#----- de / german   → Almanca
-#----- tr            → Türkçe
-#----- tr + en       → Türkçe ve İngilizce
-#----- tr + en + de  → Türkçe, İngilizce ve Almanca
-#----- fr / ja / es / zh / ko → Fransızca / Japonca / İspanyolca / Çince / Korece
-#-----
-#----- NOT: tüm dil etiketleri, dosya adındaki ayraçlara (nokta, boşluk, alt
-#----- çizgi, tire, parantez) göre token'lara bölünerek tespit edilir; bu
-#----- yüzden etiketlerin dosya adındaki sırası veya harf büyüklüğü fark
-#----- etmez (büyük/küçük harf duyarsız).
-#----- "trsub" (Türkçe altyazı) ile birlikte birden fazla ses dili tespit
-#----- edildiğinde ("Almanca ve İngilizce Ses" gibi) bu öncelik sırasıyla
-#----- yazılır.
-_AUDIO_LABEL_PRIORITY = ["Almanca", "İngilizce", "Fransızca", "Japonca", "İspanyolca", "Çince", "Korece"]
-
-
-def _detect_language_label(filename: str) -> Optional[str]:
-    tokens = _filename_tokens(filename)
-    if not tokens:
-        return None
-
-    #----- "dual" etiketi varsa ses dili belirtilmez (satır hiç yazılmaz)
-    if "dual" in tokens:
-        return None
-
-    has_trsub = "trsub" in tokens
-
-    #----- Tespit edilen dilleri sabit bir sırayla, tekrarsız topla
-    #----- (de ve german ikisi de "Almanca"ya eşleniyor; ikisi de varsa
-    #----- listede yalnızca bir kez yer alır)
-    found = []
-    for code in _LANGUAGE_ORDER:
-        if code in tokens:
-            label = _LANGUAGE_LABELS[code]
-            if label not in found:
-                found.append(label)
-
-    def _join(labels: list) -> str:
-        if len(labels) == 1:
-            return labels[0]
-        return f"{', '.join(labels[:-1])} ve {labels[-1]}"
-
-    if has_trsub:
-        audio_langs = [l for l in found if l != "Türkçe"]
-        audio_langs.sort(
-            key=lambda l: _AUDIO_LABEL_PRIORITY.index(l) if l in _AUDIO_LABEL_PRIORITY else 999
-        )
-        if audio_langs:
-            return f"{_join(audio_langs)} Ses, Türkçe Altyazı"
-        return None
-
-    if not found:
-        return None
-    return _join(found)
-
-
-#----- Dosya adındaki kaynak etiketinden duyuru metnine yazılacak "Kalite"
-#----- alanını üretir; camrip / cam / telesync / ts / hdts etiketlerinin
-#----- hepsi tek bir metne, "Sinema Çekimi"ne karşılık gelir. Dosya
-#----- uzantısının kendisi ".ts" olsa bile (MPEG-TS konteyneri) bu, gerçek bir
-#----- kaynak etiketi olarak sayılmaz; bu yüzden uzantı hariç tutulur.
-#----- Bu etiketler dışındaki kaliteler (ör. WEB-DL, HDRip, 1080p vb.) duyuruya
-#----- hiç eklenmez; sadece bu kaynaklardan biri tespit edildiğinde satır gösterilir.
-_CAM_TELESYNC_TOKENS = {"camrip", "cam", "telesync", "ts", "hdts"}
-
-
-def _detect_resolution_label(filename: str) -> str:
-    if filename:
-        ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-        name_without_ext = filename.rsplit(".", 1)[0] if ext else filename
-        tokens = _filename_tokens(name_without_ext)
-
-        if tokens & _CAM_TELESYNC_TOKENS:
-            return "Sinema Çekimi"
-
-    return ""
-
-
 #----- Duyuru metnini Türkçe olarak oluşturur
 def _build_caption(info: dict) -> str:
     is_tv = info.get("media_type") == "tv"
@@ -284,18 +172,7 @@ def _build_caption(info: dict) -> str:
     if genres_tr:
         lines.append(f"🎭 <b>Kategori:</b> {', '.join(genres_tr[:4])}")
 
-    source_filename = info.get("source_filename") or ""
-
-    #----- Dili: dosya adındaki dil etiketlerinden çıkarılır
-    language_label = _detect_language_label(source_filename)
-    if language_label:
-        lines.append(f"🗣 <b>Ses:</b> {language_label}")
-
-    #----- Kalite: sadece Sinema Çekimi veya Telesync ise gösterilir,
-    #----- diğer kaliteler (WEB-DL, HDRip, 1080p vb.) duyuruya eklenmez
-    resolution_label = _detect_resolution_label(source_filename)
-    if resolution_label:
-        lines.append(f"📶 <b>Kalite:</b> {resolution_label}")
+    #----- Ses ve Kalite bilgileri duyuru metnine hiçbir zaman eklenmez.
 
     #----- Film ise yönetmen ve oyuncular da eklenir
     if not is_tv:

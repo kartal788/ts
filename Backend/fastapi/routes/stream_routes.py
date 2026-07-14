@@ -1,4 +1,5 @@
 import logging
+import re
 _logger = logging.getLogger(__name__)
 import math
 import secrets
@@ -43,6 +44,31 @@ def safe_content_disposition(fname: str, disposition: str = "inline") -> str:
         ascii_fallback = fname.encode("ascii", "ignore").decode("ascii") or "file"
         encoded = _urlquote(fname, safe="")
         return f"{disposition}; filename=\"{ascii_fallback}\"; filename*=UTF-8''{encoded}"
+
+_SPLIT_SUFFIX_RE = re.compile(
+    r'\.(mkv|mp4|avi|ts|m4v|mov|wmv|webm|flv)\.\d{2,3}$', re.IGNORECASE,
+)
+_SPLIT_PART_RE = re.compile(r'\.part\d+\.(\w+)$', re.IGNORECASE)
+
+
+def clean_split_filename(fname: str) -> str:
+    """
+    Çok parçalı (split) Telegram dosyaları tek bir sanal akış olarak
+    birleştirilip kullanıcıya gönderildiğinden, ilk parçanın adındaki
+    sahte parça numarası (".mkv.001", ".mp4.002" vb.) indirme dosya
+    adında görünmemeli — bu sadece kaynak parçanın numarasıdır, birleşik
+    dosyanın bir parçası değildir.
+    """
+    if not fname:
+        return fname
+    m = _SPLIT_SUFFIX_RE.search(fname)
+    if m:
+        return fname[: m.start()] + "." + m.group(1)
+    m = _SPLIT_PART_RE.search(fname)
+    if m:
+        return fname[: m.start()] + "." + m.group(1)
+    return fname
+
 
 _streamer_by_client: Dict = {}
 
@@ -543,6 +569,9 @@ async def virtual_media_streamer(
     mime_type = first_file_id.mime_type or _mt.guess_type(file_name)[0] or "application/octet-stream"
     if "." not in file_name and "/" in mime_type:
         file_name = f"{file_name}.{mime_type.split('/')[1]}"
+    # Parçalar tek bir dosya halinde birleştirilip gönderiliyor; isimdeki
+    # sahte parça numarasını (".mkv.001" vb.) indirme adından temizle.
+    file_name = clean_split_filename(file_name)
 
     common_headers = {
         "Content-Type": mime_type,

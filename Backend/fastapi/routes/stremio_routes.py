@@ -432,6 +432,11 @@ def _clean_encoder(encoder: str) -> str:
     enc = str(encoder).strip()
     if "-" in enc:
         enc = enc.rsplit("-", 1)[-1].strip()
+    # "TR.Filmbol.Yerli", "Türkçe.Altyazı.FilmbolSeries", "TR.ENG.FilmbolSeries"
+    # gibi dil/altyazı etiketleriyle birlikte gelen varyasyonları sade
+    # "Filmbol" olarak normalize et.
+    if _re.search(r'(?i)filmbol', enc):
+        return "Filmbol"
     return enc
 
 
@@ -496,7 +501,7 @@ def format_stream_details(filename: str, quality: str, size: str, file_id: str, 
         for enc in _EXTRA_ENCODERS:
             import re as _re_enc
             if _re_enc.search(r'(?<![a-z])' + enc + r'(?![a-z])', fn_lower):
-                encoder = enc.upper()
+                encoder = "Filmbol" if "filmbol" in enc else enc.upper()
                 break
 
     # --- stream_name: "Kartal 1080p AMZN WEB-DL" ---

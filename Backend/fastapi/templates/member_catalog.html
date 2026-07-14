@@ -1368,6 +1368,16 @@ function _isArchive(name){
   const n=(name||"").toLowerCase();
   return /\.(zip|7z|rar)(\.(\d+))?$/.test(n)||/\.z\d+$/.test(n)||/\.part\d+\.rar$/.test(n);
 }
+function cleanDownloadName(name){
+  // Çok parçalı (split) dosyalarda indirme sırasında görünen sahte parça
+  // numarasını (".mkv.001", ".mp4.002" vb.) isimden temizler. Sunucu bu
+  // parçaları zaten tek bir dosya halinde birleştirip gönderdiği için
+  // kullanıcıya gösterilen/indirilen dosya adında ".001" gibi bir ek
+  // görünmemeli.
+  if(!name)return name;
+  return name.replace(/\.(mkv|mp4|avi|ts|m4v|mov|wmv|webm|flv)\.\d{2,3}$/i,".$1")
+             .replace(/\.part\d+\.(\w+)$/i,".$1");
+}
 function _partNumber(name){
   // .part001.mkv, .part01.mkv, .zip.001, .7z.001, .z01
   const n=(name||"").toLowerCase();
@@ -1447,7 +1457,7 @@ function renderMovieQualities(qs){
   if(!qs.length){list.innerHTML=`<p class="ts text-sm">${t("noDownload")}</p>`;return;}
   const sorted=sortQualities(qs);
   list.innerHTML=sorted.map(q=>{
-    const fn=encodeURIComponent(q.name||"video.mkv");
+    const fn=encodeURIComponent(cleanDownloadName(q.name)||"video.mkv");
     // Bu quality'nin diline göre bayrak
     const qFlags=extractLangFlags(q.name||"");
     const qFlagHtml=qFlags?qFlags.split(" ").filter(Boolean).map(f=>`<span class="fi fi-${f}" style="width:1.3em;height:1em;border-radius:2px;display:inline-block;box-shadow:0 1px 3px rgba(0,0,0,.7);flex-shrink:0;transform:translateZ(0);isolation:isolate;color-scheme:light;filter:none;-webkit-filter:none"></span>`).join(""):"";
@@ -1584,7 +1594,7 @@ function renderEp(ep){
     <div class="text-sm font-medium leading-snug mb-1">${epTitle(ep)}</div>
     ${ep.released?`<div class="text-xs ts mb-2">${fmtDate(ep.released)}</div>`:""}
     ${qs.map(q=>{
-      const fn=encodeURIComponent(q.name||"video.mkv");
+      const fn=encodeURIComponent(cleanDownloadName(q.name)||"video.mkv");
       // Her quality için dil bayrağı
       const qFlags=extractLangFlags(q.name||"");
       const qFlagHtml=qFlags?qFlags.split(" ").filter(Boolean).map(f=>`<span class="fi fi-${f}" style="width:1.3em;height:1em;border-radius:2px;display:inline-block;box-shadow:0 1px 3px rgba(0,0,0,.7);flex-shrink:0;transform:translateZ(0);isolation:isolate;color-scheme:light;filter:none;-webkit-filter:none"></span>`).join(""):"";
