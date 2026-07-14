@@ -143,6 +143,52 @@ async def _claim(media_type: str, tmdb_id) -> bool:
     return result.modified_count > 0
 
 
+#----- Dosya adında "camrips, cam, telesync, ts, 1xbet" gibi kaçak sinema
+#----- çekimi (cam/telesync) belirten ifadeler geçiyorsa True döner.
+#----- Kelime sınırı (\b) kullanılır; büyük/küçük harf ayırt edilmez.
+_CAM_KEYWORDS_RE = re.compile(
+    r'\b(camrips?|telesync|1xbet|ts|cam)\b', re.IGNORECASE
+)
+
+#----- Film adının kendisi "Cam Sehpa", "Cam Perde", "Cam Ustası" gibi
+#----- "cam" (=glass) kelimesini içeren gerçek bir film ismiyse, dosya adında
+#----- geçen "cam" ifadesi kaçak sinema çekimi anlamına gelmez; bu yüzden
+#----- kalite tespiti film ADINA göre bu ifadelerden biriyse devre dışı
+#----- bırakılır. Ayraç olarak boşluk, nokta, alt çizgi veya tire kabul edilir.
+_CAM_FALSE_POSITIVE_TITLE_RE = re.compile(
+    r'\bcam[\s._-]*(sehpa|perde|ustas\w*)\b', re.IGNORECASE
+)
+
+#----- "german" ifadesi dosya adında varsa Almanca, "tr" ifadesi varsa
+#----- Türkçe ses etiketi döner. Büyük/küçük harf ayırt edilmez.
+_GERMAN_AUDIO_RE = re.compile(r'\bgerman\b', re.IGNORECASE)
+_TR_AUDIO_RE = re.compile(r'\btr\b', re.IGNORECASE)
+
+
+#----- Dosya adı ve film adına bakarak (kalite = "Sinema Çekimi mi?", ses
+#----- etiketi = "Almanca"/"Türkçe"/None) bilgisini döndürür.
+def _detect_cam_quality_and_audio(info: dict) -> Tuple[bool, Optional[str]]:
+    filename = str(info.get("source_filename") or info.get("file_name") or "")
+    title = str(info.get("title_tr") or info.get("title") or "")
+
+    if _CAM_FALSE_POSITIVE_TITLE_RE.search(title):
+        #----- Film adı "cam sehpa/perde/ustası" gibiyse sinema çekimi değildir.
+        return False, None
+
+    is_cam = bool(_CAM_KEYWORDS_RE.search(filename))
+    if not is_cam:
+        return False, None
+
+    if _GERMAN_AUDIO_RE.search(filename):
+        audio = "Almanca"
+    elif _TR_AUDIO_RE.search(filename):
+        audio = "Türkçe"
+    else:
+        audio = None
+
+    return True, audio
+
+
 #----- Duyuru metnini Türkçe olarak oluşturur
 def _build_caption(info: dict) -> str:
     is_tv = info.get("media_type") == "tv"
@@ -164,17 +210,14 @@ def _build_caption(info: dict) -> str:
     if genres_tr:
         lines.append(f"🎭 <b>Kategori:</b> {', '.join(genres_tr[:4])}")
 
-    #----- Ses ve Kalite bilgileri duyuru metnine hiçbir zaman eklenmez.
-
-    #----- Film ise yönetmen ve oyuncular da eklenir
-    if not is_tv:
-        directors = [d for d in (info.get("director") or []) if d]
-        if directors:
-            lines.append(f"🎬 <b>Yönetmen:</b> {', '.join(directors[:3])}")
-
-        cast = [c for c in (info.get("cast") or []) if c]
-        if cast:
-            lines.append(f"👥 <b>Oyuncular:</b> {', '.join(cast[:5])}")
+    #----- Ses ve Kalite bilgileri normalde duyuru metnine eklenmez; tek
+    #----- istisna, dosya adından tespit edilen "Sinema Çekimi" (cam/telesync)
+    #----- kalitesidir. Bu durumda kalite ve (varsa) ses etiketi eklenir.
+    is_cam, cam_audio = _detect_cam_quality_and_audio(info)
+    if is_cam:
+        lines.append("🎥 <b>Kalite:</b> Sinema Çekimi")
+        if cam_audio:
+            lines.append(f"🔊 <b>Ses:</b> {cam_audio}")
 
     desc = (info.get("description_tr") or info.get("description") or "").strip()
     if desc:
@@ -264,18 +307,33 @@ async def _announce(info: dict) -> None:
         return
 
     caption = _build_caption(info)
-    #----- Duyuru resmi adayları: backdrop_tr → backdrop → backdrop_de →
-    #----- poster_tr → poster → poster_de sırasıyla denenir. İlk dolu alan
-    #----- değil, ilk GERÇEKTEN GÖNDERİLEBİLEN görsel kullanılır (dolu ama
-    #----- bozuk/kayıp bir link olabilir).
-    posters = [
-        info.get("backdrop_tr"),
-        info.get("backdrop"),
-        info.get("backdrop_de"),
-        info.get("poster_tr"),
-        info.get("poster"),
-        info.get("poster_de"),
-    ]
+    is_cam, _cam_audio = _detect_cam_quality_and_audio(info)
+    if is_cam:
+        #----- Sinema çekimi (cam/telesync) içerikte resim önceliği farklıdır:
+        #----- önce poster_tr, yoksa poster, o da yoksa backdrop_tr, o da
+        #----- yoksa backdrop denenir. İlk dolu alan değil, ilk GERÇEKTEN
+        #----- GÖNDERİLEBİLEN görsel kullanılır (dolu ama bozuk/kayıp link olabilir).
+        posters = [
+            info.get("poster_tr"),
+            info.get("poster"),
+            info.get("backdrop_tr"),
+            info.get("backdrop"),
+            info.get("backdrop_de"),
+            info.get("poster_de"),
+        ]
+    else:
+        #----- Duyuru resmi adayları: backdrop_tr → backdrop → backdrop_de →
+        #----- poster_tr → poster → poster_de sırasıyla denenir. İlk dolu alan
+        #----- değil, ilk GERÇEKTEN GÖNDERİLEBİLEN görsel kullanılır (dolu ama
+        #----- bozuk/kayıp bir link olabilir).
+        posters = [
+            info.get("backdrop_tr"),
+            info.get("backdrop"),
+            info.get("backdrop_de"),
+            info.get("poster_tr"),
+            info.get("poster"),
+            info.get("poster_de"),
+        ]
     display_title = info.get("title_tr") or info.get("title")
 
     markup = None
