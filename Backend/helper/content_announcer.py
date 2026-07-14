@@ -153,14 +153,6 @@ def _build_caption(info: dict) -> str:
 
     lines = [header, "", f"🗂 <b>Tür:</b> {'Dizi' if is_tv else 'Film'}"]
 
-    if is_tv and (info.get("season_number") or info.get("episode_number")):
-        season = info.get("season_number") or 0
-        episode = info.get("episode_number") or 0
-        try:
-            lines.append(f"🆕 <b>Bölüm:</b> {int(season)}.sezon {int(episode)}. bölüm")
-        except (TypeError, ValueError):
-            pass
-
     if info.get("rate"):
         try:
             lines.append(f"⭐ <b>Puan:</b> {round(float(info['rate']), 1)}")

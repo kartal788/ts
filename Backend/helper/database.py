@@ -1411,6 +1411,7 @@ class Database:
                         {"title": regex_query},
                         {"title_de": regex_query},
                     {"title_tr": regex_query},
+                        {"cast": regex_query},
                         {"seasons.episodes.telegram.name": regex_query}
                     ]
                 })
@@ -1419,6 +1420,7 @@ class Database:
                         {"title": regex_query},
                         {"title_de": regex_query},
                     {"title_tr": regex_query},
+                        {"cast": regex_query},
                         {"telegram.name": regex_query}
                     ]
                 })

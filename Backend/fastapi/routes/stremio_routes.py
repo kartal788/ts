@@ -2,7 +2,7 @@ import logging
 _logger = logging.getLogger(__name__)
 from fastapi import APIRouter, HTTPException, Depends, Request
 from typing import Optional
-from urllib.parse import unquote
+from urllib.parse import unquote, unquote_plus
 from Backend.config import Telegram
 from Backend import db, __version__
 from Backend.helper.platform_catalog import platform_catalog, PLATFORM_LABELS
@@ -1615,7 +1615,11 @@ async def get_catalog(token: str, media_type: str, id: str, extra: Optional[str]
             if param.startswith("genre="):
                 genre_filter = unquote(param.removeprefix("genre="))
             elif param.startswith("search="):
-                search_query = unquote(param.removeprefix("search="))
+                # unquote_plus: bazı istemciler boşluğu "+" olarak kodluyor
+                # ("Tom+Hanks"); düz unquote bunu boşluğa çevirmediğinden
+                # çok kelimeli oyuncu adı aramaları tek kelime gibi
+                # algılanıp cast alanında hiç eşleşmiyordu.
+                search_query = unquote_plus(param.removeprefix("search="))
             elif param.startswith("skip="):
                 try:
                     stremio_skip = int(param.removeprefix("skip="))
