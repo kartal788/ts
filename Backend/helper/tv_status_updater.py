@@ -25,6 +25,7 @@ import asyncio
 import logging
 import os
 import threading
+import time
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -39,6 +40,38 @@ _status_timer: threading.Timer | None = None
 _status_running: bool = False
 _main_loop: asyncio.AbstractEventLoop | None = None
 
+_REQUEST_TIMEOUT = float(os.getenv("TV_STATUS_REQUEST_TIMEOUT", "20"))
+_MAX_RETRIES = int(os.getenv("TV_STATUS_MAX_RETRIES", "3"))
+
+_http_client_lock = threading.Lock()
+_http_client: httpx.Client | None = None
+
+
+def _get_http_client() -> httpx.Client:
+    """Tüm istekler için tek, yeniden kullanılan bir httpx.Client döner.
+    Her istekte yeni bağlantı açıp kapatmak yerine bağlantı havuzunu (keep-alive)
+    kullanır — bu, ardışık 'read timeout' hatalarının en sık nedenlerinden biri
+    olan tekrarlayan TCP/TLS el sıkışmasını ortadan kaldırır."""
+    global _http_client
+    with _http_client_lock:
+        if _http_client is None or _http_client.is_closed:
+            _http_client = httpx.Client(
+                timeout=httpx.Timeout(_REQUEST_TIMEOUT, connect=10),
+                limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),
+            )
+        return _http_client
+
+
+def _reset_http_client() -> None:
+    global _http_client
+    with _http_client_lock:
+        if _http_client is not None:
+            try:
+                _http_client.close()
+            except Exception:
+                pass
+        _http_client = None
+
 
 # ── TMDB yardımcıları ──────────────────────────────────────────────────────────
 
@@ -51,27 +84,49 @@ def _get_api_key() -> str:
 
 
 def _fetch_tv_status(tmdb_id: int) -> Optional[str]:
-    """TMDB'den senkron olarak tek bir dizinin status değerini çeker."""
+    """TMDB'den senkron olarak tek bir dizinin status değerini çeker.
+    Geçici ağ hatalarında (timeout/bağlantı hatası) kısa aralıklarla birkaç
+    kez daha dener; kalıcı hatalarda (404, geçersiz anahtar) hemen vazgeçer."""
     api_key = _get_api_key()
     if not api_key:
         return None
-    try:
-        with httpx.Client(timeout=10) as c:
-            r = c.get(
+
+    client = _get_http_client()
+    last_error: Exception | None = None
+
+    for attempt in range(1, _MAX_RETRIES + 1):
+        try:
+            r = client.get(
                 f"{_TMDB_BASE}/tv/{tmdb_id}",
                 params={"api_key": api_key, "language": "en-US"},
             )
             r.raise_for_status()
             return r.json().get("status") or None
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 404:
-            logger.debug("[tv-status] TMDB %d → 404, atlanıyor.", tmdb_id)
-        else:
-            logger.warning("[tv-status] TMDB %d HTTP hatası: %s", tmdb_id, e)
-        return None
-    except Exception as e:
-        logger.warning("[tv-status] TMDB %d isteği başarısız: %s", tmdb_id, e)
-        return None
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                logger.debug("[tv-status] TMDB %d → 404, atlanıyor.", tmdb_id)
+            else:
+                logger.warning("[tv-status] TMDB %d HTTP hatası: %s", tmdb_id, e)
+            return None  # HTTP hatası tekrar denenmez
+        except (httpx.TimeoutException, httpx.TransportError) as e:
+            last_error = e
+            if attempt < _MAX_RETRIES:
+                logger.debug(
+                    "[tv-status] TMDB %d isteği zaman aşımına uğradı (deneme %d/%d), "
+                    "tekrar denenecek: %s", tmdb_id, attempt, _MAX_RETRIES, e
+                )
+                time.sleep(1.5 * attempt)  # artan bekleme (1.5s, 3s, ...)
+                # Bağlantı sorunlarında istemciyi yenile — takılı kalan bir
+                # bağlantı havuzuna tekrar tekrar çarpmayı önler.
+                _reset_http_client()
+                client = _get_http_client()
+            continue
+        except Exception as e:
+            last_error = e
+            break
+
+    logger.warning("[tv-status] TMDB %d isteği başarısız: %s", tmdb_id, last_error)
+    return None
 
 
 # ── Zamanlama yardımcıları ────────────────────────────────────────────────────
@@ -117,6 +172,8 @@ async def _run_status_update_async() -> None:
     total_updated = 0
     total_skipped = 0
     total_errors  = 0
+    consecutive_failures = 0
+    _CIRCUIT_BREAKER_THRESHOLD = int(os.getenv("TV_STATUS_CIRCUIT_BREAKER", "10"))
 
     for db_key in storage_keys:
         col = _db.dbs[db_key]["tv"]
@@ -153,13 +210,32 @@ async def _run_status_update_async() -> None:
                     doc.get("imdb_id", "?"), tmdb_id, e
                 )
                 total_errors += 1
-                await asyncio.sleep(_REQUEST_DELAY)
-                continue
+                consecutive_failures += 1
+                new_status = None
 
             if new_status is None:
                 total_errors += 1
+                consecutive_failures += 1
+
+                # ── Devre kesici: TMDB'ye art arda çok sayıda ulaşılamıyorsa
+                # (ör. ağ/DNS kesintisi) her dizi için tek tek 20sn timeout
+                # bekleyip loga aynı hatayı basmak yerine, bir süre tamamen
+                # duraklat ve tek bir uyarı ver. ──────────────────────────
+                if consecutive_failures >= _CIRCUIT_BREAKER_THRESHOLD:
+                    cooldown = 120
+                    logger.warning(
+                        "[tv-status] TMDB'ye art arda %d istek başarısız oldu — "
+                        "olası ağ/servis kesintisi. %ds beklenip tekrar denenecek.",
+                        consecutive_failures, cooldown,
+                    )
+                    _reset_http_client()
+                    await asyncio.sleep(cooldown)
+                    consecutive_failures = 0
+
                 await asyncio.sleep(_REQUEST_DELAY)
                 continue
+
+            consecutive_failures = 0
 
             if new_status == old_status:
                 total_skipped += 1
