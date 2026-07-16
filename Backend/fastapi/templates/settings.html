@@ -59,6 +59,17 @@
                 border-radius:0.75rem;padding:1rem;font-family:'JetBrains Mono',monospace;font-size:0.75rem;
                 line-height:1.5;color:var(--text);max-height:340px;overflow:auto;white-space:pre-wrap;
                 word-break:break-word;margin:0">Loglar yükleniyor…</pre>
+
+            <hr class="sm-divider">
+
+            <!-- Botu yeniden başlat -->
+            <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
+                <label class="s-label" style="margin-bottom:0">Botu Yeniden Başlat</label>
+            </div>
+            <p class="text-xs text-text opacity-60 mb-3">Telegram botunu ve web panelini yeniden başlatır. İşlem birkaç saniye sürer, bu sırada panel geçici olarak erişilemez olabilir.</p>
+            <button id="restart-bot-btn" onclick="restartBot()" class="bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white px-4 py-2.5 rounded-xl text-sm font-bold transition-all">
+                <i class="fa-solid fa-power-off mr-1"></i> Botu Yeniden Başlat
+            </button>
         </div>
 
         <!-- Genel -->
@@ -194,6 +205,19 @@
                 <input class="s-input" id="add-approver_ids" placeholder="Telegram kullanıcı ID">
                 <button class="add-btn" onclick="addItem('approver_ids')"><i class="fa-solid fa-plus"></i> Ekle</button>
             </div>
+
+            <hr class="sm-divider">
+            <label class="s-label">Üye Olmayanlara Gösterilen /start Mesajı</label>
+            <p class="text-xs text-text opacity-60 mb-2">
+                <i class="fa-solid fa-circle-info"></i>
+                Aktif aboneliği olmayan bir kullanıcı bota <code>/start</code> yazdığında,
+                plan seçenekleri listelenmeden önce bu metin gösterilir.
+                <code>{isim}</code> yazarsan bot adıyla (<code>{{ settings.isim }}</code>) değiştirilir.
+                HTML biçimlendirmesi (<code>&lt;b&gt;</code>, <code>&lt;i&gt;</code> vb.) desteklenir.
+            </p>
+            <textarea class="s-input" id="s-uye_olmayan_mesaji" rows="5"
+                placeholder="{isim} ile sinema keyfine hazır mısın?...">{{ settings.uye_olmayan_mesaji }}</textarea>
+
             <p class="text-xs text-text opacity-50 mt-3">Not: Abonelik planları ve üyeler ayrıca <a href="/admin/subscriptions" class="text-primary underline">Abonelikler</a> sayfasından yönetilir.</p>
         </div>
 
@@ -360,6 +384,7 @@
     transition: border-color 0.2s;
 }
 .s-input:focus { border-color: var(--primary); }
+textarea.s-input { font-family: inherit; resize: vertical; line-height: 1.5; }
 .s-label {
     display: block; font-size: 0.72rem; font-weight: 700;
     color: var(--text-sec); text-transform: uppercase;
@@ -548,6 +573,7 @@ function renderSettings(s) {
     document.getElementById('s-subscription').checked = !!s.subscription;
     document.getElementById('s-subscription_group_id').value = s.subscription_group_id ?? '';
     document.getElementById('s-subscription_url').value = s.subscription_url || '';
+    document.getElementById('s-uye_olmayan_mesaji').value = s.uye_olmayan_mesaji || '';
 
     document.getElementById('s-yenileme').value = s.yenileme || '';
     document.getElementById('s-hiz_limiti').value = s.hiz_limiti || '';
@@ -609,6 +635,7 @@ function buildPayload() {
         subscription_group_id: toInt('s-subscription_group_id', 0),
         subscription_url: document.getElementById('s-subscription_url').value.trim(),
         approver_ids: collectList('approver_ids').map(x => parseInt(x, 10)).filter(Number.isFinite),
+        uye_olmayan_mesaji: document.getElementById('s-uye_olmayan_mesaji').value.trim(),
 
         yenileme: document.getElementById('s-yenileme').value.trim(),
         hiz_limiti: document.getElementById('s-hiz_limiti').value.trim(),
@@ -695,6 +722,50 @@ async function invalidateSessions() {
     } catch (err) {
         showStatus('❌ Hata: ' + err.message, false);
     }
+}
+
+async function restartBot() {
+    if (!confirm('Bot ve web paneli yeniden başlatılsın mı? İşlem birkaç saniye sürecek.')) return;
+    const btn = document.getElementById('restart-bot-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> Yeniden başlatılıyor…';
+
+    try {
+        const res = await fetch('/api/admin/restart', { method: 'POST' });
+        const data = await res.json().catch(() => ({}));
+        if (!data.success) {
+            showStatus('❌ ' + (data.detail || 'Yeniden başlatma başarısız.'), false);
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fa-solid fa-power-off mr-1"></i> Botu Yeniden Başlat';
+            return;
+        }
+    } catch (err) {
+        // Süreç yeniden başlarken bağlantının kopması normaldir, devam et
+    }
+
+    showStatus('⏳ Bot yeniden başlatılıyor, panel tekrar erişilebilir olduğunda bu sayfa otomatik yenilenecek…', true);
+    waitForServerAndReload();
+}
+
+function waitForServerAndReload() {
+    // Süreç kapanıp yeniden ayağa kalkana kadar birkaç saniye bekle, sonra
+    // sunucu tekrar yanıt vermeye başlayana kadar periyodik olarak dene.
+    setTimeout(() => {
+        const check = setInterval(async () => {
+            try {
+                const res = await fetch('/api/csrf-token', { cache: 'no-store' });
+                if (res.ok) {
+                    clearInterval(check);
+                    location.reload();
+                }
+            } catch (err) {
+                // sunucu henüz ayakta değil, denemeye devam et
+            }
+        }, 2000);
+
+        // Güvenlik için 2 dakika sonra denemeyi bırak
+        setTimeout(() => clearInterval(check), 120000);
+    }, 3000);
 }
 
 /* ── Sistem & Bakım: DB/sistem istatistikleri + loglar ─────────────────── */

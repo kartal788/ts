@@ -185,6 +185,49 @@ def _archive_to_video_name(title: str) -> str:
     return name + ".mkv"
 
 
+async def _consume_manual_season_episode(mode_snapshot: dict) -> tuple:
+    """Panel/komut üzerinden açılan 'tv' modundaki bir sonraki sezon/bölüm
+    numarasını döndürür ve global sayacı bir sonraki dosya için artırır.
+    Aynı anda birden çok dosya işlenirken sayaç yarışına (race condition)
+    girmemek için Backend.MANUAL_MODE_LOCK kullanılır.
+
+    Not: mode_snapshot çağrı anında yakalanan referanstır; kilit altında
+    Backend.MANUAL_MODE hâlâ aynı obje mi (mod bu sırada kapatılmadı mı)
+    kontrol edilip güvenle güncellenir.
+    """
+    async with Backend.MANUAL_MODE_LOCK:
+        current_mode = Backend.MANUAL_MODE
+        if current_mode is not mode_snapshot or current_mode is None:
+            # Mod bu esnada kapatıldı/değiştirildi — panelden ayarlanan son
+            # değerleri kullan (sayaç ilerletmeden).
+            season = (mode_snapshot or {}).get("season")
+            episode = (mode_snapshot or {}).get("next_episode")
+            return season, episode
+        season = current_mode.get("season")
+        episode = current_mode.get("next_episode")
+        if episode is not None:
+            current_mode["next_episode"] = episode + 1
+        return season, episode
+
+
+async def _consume_attach_season_episode(mode_snapshot: dict) -> tuple:
+    """/media/edit sayfasındaki 'İçerik Ekle' modunda bir sonraki sezon/bölüm
+    numarasını döndürür ve global sayacı bir sonraki dosya için artırır.
+    _consume_manual_season_episode ile aynı mantık; Backend.ATTACH_MODE_LOCK
+    kullanır (Backend.MANUAL_MODE_LOCK ile karışmaması için ayrı kilit)."""
+    async with Backend.ATTACH_MODE_LOCK:
+        current_mode = Backend.ATTACH_MODE
+        if current_mode is not mode_snapshot or current_mode is None:
+            season = (mode_snapshot or {}).get("season")
+            episode = (mode_snapshot or {}).get("next_episode")
+            return season, episode
+        season = current_mode.get("season")
+        episode = current_mode.get("next_episode")
+        if episode is not None:
+            current_mode["next_episode"] = episode + 1
+        return season, episode
+
+
 async def _handle_video_message(client: Client, message: Message):
     """
     Tek bir video/arşiv mesajını işler.
@@ -202,11 +245,48 @@ async def _handle_video_message(client: Client, message: Message):
             size = get_readable_file_size(file.file_size)
             channel = str(message.chat.id).replace("-100", "")
 
-            from Backend.helper.metadata import extract_default_id
-            override_id, _id_media_type = extract_default_id(title) if title else (None, None)
+            if Backend.ATTACH_MODE:
+                from Backend.helper.metadata import build_manual_metadata
+                _attach_snapshot = Backend.ATTACH_MODE
+                _attach_media_type = _attach_snapshot.get("media_type", "movie")
+                _a_season, _a_episode = (None, None)
+                if _attach_media_type == "tv":
+                    _a_season, _a_episode = await _consume_attach_season_episode(_attach_snapshot)
+                async with METADATA_SEMAPHORE:
+                    metadata_info = await build_manual_metadata(
+                        clean_filename(title), int(channel), msg_id,
+                        title=_attach_snapshot.get("title"),
+                        poster=_attach_snapshot.get("poster"),
+                        media_type=_attach_media_type,
+                        season_number=_a_season,
+                        episode_number=_a_episode,
+                        tmdb_id=_attach_snapshot.get("tmdb_id"),
+                        imdb_id=_attach_snapshot.get("imdb_id"),
+                    )
+            elif Backend.MANUAL_MODE:
+                from Backend.helper.metadata import build_manual_metadata
+                _mode_snapshot = Backend.MANUAL_MODE
+                _mode_media_type = _mode_snapshot.get("media_type", "movie")
+                _season, _episode = (None, None)
+                if _mode_media_type == "tv":
+                    _season, _episode = await _consume_manual_season_episode(_mode_snapshot)
+                async with METADATA_SEMAPHORE:
+                    metadata_info = await build_manual_metadata(
+                        clean_filename(title), int(channel), msg_id,
+                        title=_mode_snapshot.get("title"),
+                        poster=_mode_snapshot.get("poster"),
+                        description=_mode_snapshot.get("description"),
+                        media_type=_mode_media_type,
+                        season_number=_season,
+                        episode_number=_episode,
+                        year=_mode_snapshot.get("year"),
+                    )
+            else:
+                from Backend.helper.metadata import extract_default_id
+                override_id, _id_media_type = extract_default_id(title) if title else (None, None)
 
-            async with METADATA_SEMAPHORE:
-                metadata_info = await metadata(clean_filename(title), int(channel), msg_id, override_id=override_id)
+                async with METADATA_SEMAPHORE:
+                    metadata_info = await metadata(clean_filename(title), int(channel), msg_id, override_id=override_id)
 
             if metadata_info is None:
                 LOGGER.warning(f"Metadata failed for file: {title} (ID: {msg_id})")
@@ -238,6 +318,7 @@ async def _handle_video_message(client: Client, message: Message):
 
             from Backend.helper.metadata import extract_default_id
             override_id, _id_media_type = extract_default_id(raw_title) if raw_title else (None, None)
+            _manual_mode_snapshot = Backend.MANUAL_MODE
 
             # .mkv.001 gibi video split dosyalarında group_key/part_number ve
             # görünen ad CAPTION'dan çıkarılmalı (varsa) — leech botları dosyayı
@@ -250,8 +331,45 @@ async def _handle_video_message(client: Client, message: Message):
             video_name = _archive_to_video_name(split_source)
             clean_name = clean_filename(video_name)
 
-            async with METADATA_SEMAPHORE:
-                metadata_info = await metadata(clean_name, int(channel), msg_id, override_id=override_id)
+            _attach_mode_snapshot = Backend.ATTACH_MODE
+
+            if _attach_mode_snapshot:
+                from Backend.helper.metadata import build_manual_metadata
+                _attach_media_type = _attach_mode_snapshot.get("media_type", "movie")
+                _a_season, _a_episode = (None, None)
+                if _attach_media_type == "tv":
+                    _a_season, _a_episode = await _consume_attach_season_episode(_attach_mode_snapshot)
+                async with METADATA_SEMAPHORE:
+                    metadata_info = await build_manual_metadata(
+                        clean_name, int(channel), msg_id,
+                        title=_attach_mode_snapshot.get("title"),
+                        poster=_attach_mode_snapshot.get("poster"),
+                        media_type=_attach_media_type,
+                        season_number=_a_season,
+                        episode_number=_a_episode,
+                        tmdb_id=_attach_mode_snapshot.get("tmdb_id"),
+                        imdb_id=_attach_mode_snapshot.get("imdb_id"),
+                    )
+            elif _manual_mode_snapshot:
+                from Backend.helper.metadata import build_manual_metadata
+                _mode_media_type = _manual_mode_snapshot.get("media_type", "movie")
+                _season, _episode = (None, None)
+                if _mode_media_type == "tv":
+                    _season, _episode = await _consume_manual_season_episode(_manual_mode_snapshot)
+                async with METADATA_SEMAPHORE:
+                    metadata_info = await build_manual_metadata(
+                        clean_name, int(channel), msg_id,
+                        title=_manual_mode_snapshot.get("title"),
+                        poster=_manual_mode_snapshot.get("poster"),
+                        description=_manual_mode_snapshot.get("description"),
+                        media_type=_mode_media_type,
+                        season_number=_season,
+                        episode_number=_episode,
+                        year=_manual_mode_snapshot.get("year"),
+                    )
+            else:
+                async with METADATA_SEMAPHORE:
+                    metadata_info = await metadata(clean_name, int(channel), msg_id, override_id=override_id)
 
             if metadata_info is None:
                 LOGGER.warning(f"Metadata failed for archive: {raw_title} (ID: {msg_id})")

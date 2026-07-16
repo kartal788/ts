@@ -1348,3 +1348,33 @@ async def download_logs_api():
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="Log dosyası bulunamadı.")
     return FileResponse(path, filename="log.txt", media_type="text/plain")
+
+
+async def restart_bot_api() -> dict:
+    """
+    Botu ve web panelini yeniden başlatır — /restart komutuyla aynı mantık
+    (uv run update.py sonrası os.execl ile süreç yeniden başlatılır).
+    Ayarlar sayfasındaki "Botu Yeniden Başlat" butonundan tetiklenir.
+    """
+    import shutil
+    from asyncio import create_subprocess_exec
+    from os import execl as osexecl
+
+    async def _do_restart():
+        # Yanıtın tarayıcıya ulaşması için kısa bir bekleme
+        await asyncio.sleep(0.8)
+        try:
+            proc = await create_subprocess_exec('uv', 'run', 'update.py')
+            await proc.wait()
+        except Exception as e:
+            _logger.warning(f"[restart] update.py çalıştırılamadı: {e}")
+
+        _logger.info("[restart] Ayarlar panelinden yeniden başlatma tetiklendi.")
+        uv_path = shutil.which("uv")
+        if uv_path:
+            osexecl(uv_path, uv_path, "run", "-m", "Backend")
+        else:
+            _logger.error("[restart] 'uv' PATH içinde bulunamadı, yeniden başlatma iptal edildi.")
+
+    asyncio.create_task(_do_restart())
+    return {"success": True, "message": "Bot yeniden başlatılıyor…"}

@@ -840,6 +840,222 @@ class Database:
                 notify_new_content()
             except Exception:
                 pass
+            try:
+                await self.auto_assign_custom_catalogs(
+                    file_name=name,
+                    imdb_id=metadata_info.get("imdb_id"),
+                    media_type=metadata_info.get("media_type"),
+                    title=metadata_info.get("title_tr") or metadata_info.get("title"),
+                    poster=metadata_info.get("poster_tr") or metadata_info.get("poster"),
+                )
+            except Exception as e:
+                LOGGER.warning(f"[custom_catalogs] Dosya adına göre otomatik ekleme hatası: {e}")
+        return result
+
+    async def auto_assign_custom_catalogs(
+        self,
+        file_name: str,
+        imdb_id: Optional[str],
+        media_type: Optional[str],
+        title: str = "",
+        poster: str = "",
+    ) -> list:
+        """Dosya adında, bir özel katalog için tanımlı anahtar kelimelerden biri geçiyorsa
+        ilgili içeriği (film/dizi) otomatik olarak o kataloğa ekler.
+
+        - Bir kataloğun "keywords" alanı boşsa (eskisi gibi) hiçbir otomatik ekleme yapılmaz;
+          o kataloğa içerik sadece admin panelinden elle eklenir.
+        - Bir katalogda kelime tanımlıysa, dosya adında (büyük/küçük harf duyarsız) bu
+          kelimelerden herhangi biri geçtiğinde içerik o kataloğa eklenir.
+        - Katalogun media_type kısıtı ("movie"/"series") varsa, uyuşmayan içerikler atlanır.
+        """
+        if not imdb_id or not file_name:
+            return []
+
+        norm_media_type = "tv" if media_type in ("tv", "tv_show", "series") else "movie"
+        catalog_media_type = "series" if norm_media_type == "tv" else "movie"
+
+        catalogs = await self.get_custom_catalogs(active_only=True)
+        haystack = file_name.casefold()
+
+        matched_ids = []
+        for cat in catalogs:
+            keywords = [k for k in (cat.get("keywords") or []) if k and k.strip()]
+            if not keywords:
+                continue  # kelime tanımlı değilse eskisi gibi davran, otomatik ekleme yapma
+
+            cat_media_type = cat.get("media_type", "mixed")
+            if cat_media_type != "mixed" and cat_media_type != catalog_media_type:
+                continue
+
+            if not any(kw.strip().casefold() in haystack for kw in keywords):
+                continue
+
+            item = {
+                "imdb_id": imdb_id,
+                "media_type": norm_media_type,
+                "title": title or "",
+                "poster": poster or "",
+            }
+            added = await self.add_custom_catalog_item(cat["_id"], item)
+            if added:
+                matched_ids.append(cat["_id"])
+                LOGGER.info(
+                    f"[custom_catalogs] '{file_name}' dosya adı eşleşti → '{cat.get('name')}' kataloğuna eklendi ({imdb_id})"
+                )
+
+        return matched_ids
+
+    async def rescan_custom_catalog_by_keywords(self, catalog_id: str, progress_cb=None) -> dict:
+        """Var olan (bu katalog oluşturulmadan/kelime eklenmeden ÖNCE zaten kütüphaneye
+        eklenmiş) film ve dizileri, kataloğun anahtar kelimelerine göre geriye dönük tarar.
+
+        "Otomatik ekleme" (auto_assign_custom_catalogs) sadece BUNDAN SONRA eklenecek
+        yeni dosyalar için tetiklenir; hâlihazırda kütüphanede olan içerikler için bu
+        fonksiyon aynı eşleştirme mantığını mevcut kayıtlar üzerinde çalıştırır.
+
+        progress_cb: verilirse, tarama ilerledikçe periyodik olarak
+        {"checked", "matched", "total", "collection"} sözlüğüyle awaitlenir.
+        Bu sayede çağıran taraf (örn. arka plan görevi) ilerlemeyi kullanıcıya
+        gösterebilir; büyük dizi koleksiyonlarının taranması uzun sürebildiği için
+        bu geri bildirim olmadan işlem "askıda/başarısız" gibi görünebiliyordu.
+
+        Not: dizi kayıtları (seasons → episodes → telegram) film kayıtlarına göre çok
+        daha büyük/derin dokümanlar olabildiğinden, sadece ihtiyaç duyulan alanlar
+        projeksiyonla çekilir ve her koleksiyon/doküman kendi try/except'i içinde
+        işlenir — böylece tek bir bozuk/ağır kayıt, o ana kadar bulunan eşleşmeleri
+        (örn. filmler) kaybettirmeden taramayı durdurmaz.
+        """
+        catalog = await self.get_custom_catalog(catalog_id)
+        if not catalog:
+            return {"checked": 0, "matched": 0, "error": "Katalog bulunamadı"}
+
+        keywords = [k.strip().casefold() for k in (catalog.get("keywords") or []) if k and k.strip()]
+        if not keywords:
+            return {"checked": 0, "matched": 0, "error": "Bu katalog için kelime tanımlı değil"}
+
+        cat_media_type = catalog.get("media_type", "mixed")
+        collections = []
+        if cat_media_type in ("movie", "mixed"):
+            collections.append("movie")
+        if cat_media_type in ("series", "mixed"):
+            collections.append("tv")
+
+        movie_projection = {
+            "imdb_id": 1, "title": 1, "title_tr": 1,
+            "poster": 1, "poster_tr": 1, "telegram": 1,
+        }
+        tv_projection = {
+            "imdb_id": 1, "title": 1, "title_tr": 1,
+            "poster": 1, "poster_tr": 1,
+            "seasons.episodes.telegram": 1,
+        }
+
+        total_storage_dbs = len(self.dbs) - 1
+
+        async def _report(collection_label: str):
+            if progress_cb is None:
+                return
+            try:
+                await progress_cb({
+                    "checked": checked,
+                    "matched": matched,
+                    "total": total_docs,
+                    "collection": collection_label,
+                })
+            except Exception:
+                pass  # ilerleme bildirimi taramayı asla durdurmamalı
+
+        # ── Önce toplam kayıt sayısını hesapla (ilerleme yüzdesi için) ──────
+        total_docs = 0
+        for db_index in range(1, total_storage_dbs + 1):
+            storage = self.dbs.get(f"storage_{db_index}")
+            if storage is None:
+                continue
+            for coll_name in collections:
+                try:
+                    total_docs += await storage[coll_name].count_documents({})
+                except Exception:
+                    pass
+
+        checked = 0
+        matched = 0
+        collection_errors = []
+        await _report("başlıyor")
+
+        for db_index in range(1, total_storage_dbs + 1):
+            storage = self.dbs.get(f"storage_{db_index}")
+            if storage is None:
+                continue
+
+            for coll_name in collections:
+                collection_label = "Filmler" if coll_name == "movie" else "Diziler"
+                projection = movie_projection if coll_name == "movie" else tv_projection
+                try:
+                    cursor = storage[coll_name].find({}, projection)
+                    async for doc in cursor:
+                        checked += 1
+                        try:
+                            imdb_id = doc.get("imdb_id")
+                            if not imdb_id:
+                                continue
+
+                            names = []
+                            if coll_name == "movie":
+                                for q in (doc.get("telegram") or []):
+                                    if isinstance(q, dict) and q.get("name"):
+                                        names.append(q["name"])
+                            else:  # tv
+                                for season in (doc.get("seasons") or []):
+                                    if not isinstance(season, dict):
+                                        continue
+                                    for ep in (season.get("episodes") or []):
+                                        if not isinstance(ep, dict):
+                                            continue
+                                        for q in (ep.get("telegram") or []):
+                                            if isinstance(q, dict) and q.get("name"):
+                                                names.append(q["name"])
+
+                            if not names:
+                                continue
+
+                            haystack = " | ".join(names).casefold()
+                            if not any(kw in haystack for kw in keywords):
+                                continue
+
+                            item = {
+                                "imdb_id": imdb_id,
+                                "media_type": "tv" if coll_name == "tv" else "movie",
+                                "title": doc.get("title_tr") or doc.get("title", ""),
+                                "poster": doc.get("poster_tr") or doc.get("poster", ""),
+                            }
+                            added = await self.add_custom_catalog_item(catalog_id, item)
+                            if added:
+                                matched += 1
+                        except Exception as doc_err:
+                            LOGGER.warning(
+                                f"[custom_catalogs] Tarama sırasında kayıt atlandı "
+                                f"(storage_{db_index}.{coll_name}, _id={doc.get('_id')}): {doc_err}"
+                            )
+                            continue
+                        finally:
+                            if checked % 20 == 0:
+                                await _report(collection_label)
+                except Exception as coll_err:
+                    LOGGER.warning(
+                        f"[custom_catalogs] Tarama hatası (storage_{db_index}.{coll_name}): {coll_err}"
+                    )
+                    collection_errors.append(f"storage_{db_index}.{coll_name}")
+                    continue
+
+                await _report(collection_label)
+
+        result = {"checked": checked, "matched": matched}
+        if collection_errors:
+            result["partial_error"] = (
+                "Bazı koleksiyonlar taranırken hata oluştu, sonuçlar eksik olabilir: "
+                + ", ".join(collection_errors)
+            )
         return result
 
     async def _insert_media_internal(
@@ -960,6 +1176,40 @@ class Database:
             )
             return await self.update_tv_show(tv_show)
 
+    async def _dedupe_same_name_size(self, qualities: list, incoming: dict) -> list:
+        """Gelen video ile aynı isim + boyuta sahip mevcut bir kayıt varsa onu
+        kaldırır (Telegram'daki eski mesajı silmeyi de dener). Böylece kanala
+        mükerrer (isim + boyut eşleşen) bir video iletildiğinde, eski kayıt
+        yeni gelenle otomatik güncellenmiş olur — aynı isim + boyutta iki
+        ayrı kayıt oluşmaz. Split dosya parçaları (group_key'li) bu kontrolün
+        dışında tutulur, onlar zaten kendi grup mantığıyla birleştirilir."""
+        incoming_name = (incoming.get("name") or "").strip().casefold()
+        incoming_size = (incoming.get("size") or "").strip().casefold()
+        if not incoming_name or not incoming_size:
+            return qualities
+
+        kept = []
+        for q in qualities:
+            if q.get("group_key"):
+                kept.append(q)
+                continue
+            same_name = (q.get("name") or "").strip().casefold() == incoming_name
+            same_size = (q.get("size") or "").strip().casefold() == incoming_size
+            if same_name and same_size:
+                try:
+                    old_id = q.get("id")
+                    if old_id:
+                        decoded = await decode_string(old_id)
+                        chat_id = int(f"-100{decoded['chat_id']}")
+                        msg_id = int(decoded['msg_id'])
+                        create_task(delete_message(chat_id, msg_id))
+                except Exception as e:
+                    LOGGER.error(f"[dedupe] Mükerrer kaydın eski Telegram mesajı silinemedi: {e}")
+                LOGGER.info(f"[dedupe] Mükerrer video (isim+boyut eşleşti) güncellendi: {q.get('name')} ({q.get('size')})")
+                continue  # eski kaydı at, yenisi eklenecek
+            kept.append(q)
+        return kept
+
     async def update_movie(self, movie_data: MovieSchema) -> Optional[ObjectId]:
         try:
             movie_dict = movie_data.dict()
@@ -1019,6 +1269,10 @@ class Database:
         existing_qualities = existing_movie.get("telegram", [])
 
         incoming_group_key = quality_to_update.get("group_key")
+
+        # ── Mükerrer (isim + boyut) kontrolü — modu ne olursa olsun uygulanır ──
+        if not incoming_group_key:
+            existing_qualities = await self._dedupe_same_name_size(existing_qualities, quality_to_update)
 
         if incoming_group_key:
             # ── Split dosya: aynı group_key'e ait kaliteye parça olarak ekle ──
@@ -1175,6 +1429,12 @@ class Database:
                 for quality in episode["telegram"]:
                     target_quality = quality.get("quality")
                     incoming_group_key = quality.get("group_key")
+
+                    # ── Mükerrer (isim + boyut) kontrolü — modu ne olursa olsun uygulanır ──
+                    if not incoming_group_key:
+                        existing_episode["telegram"] = await self._dedupe_same_name_size(
+                            existing_episode["telegram"], quality
+                        )
 
                     if incoming_group_key:
                         # ── Split dosya: aynı group_key'e parça olarak ekle ──
@@ -2028,6 +2288,135 @@ class Database:
         cursor = self.dbs["tracking"]["broadcasts"].find({"active": True}).sort("order", 1)
         docs = await cursor.to_list(None)
         return [convert_objectid_to_str(d) for d in docs]
+
+    # ─── Katalog Yönetimi (Admin: platform/trend/öneri açıp-kapama + özel katalog CRUD) ──
+
+    async def get_catalog_global_settings(self) -> dict:
+        """Global olarak kapatılmış (disabled) hazır katalog ID'lerini döndürür.
+        Örn: ['tmdb_trending', 'similar', 'platform_netflix']"""
+        doc = await self.dbs["tracking"]["catalog_settings"].find_one({"_id": "global"})
+        if not doc:
+            return {"disabled": []}
+        return {"disabled": doc.get("disabled", [])}
+
+    async def set_builtin_catalog_enabled(self, catalog_id: str, enabled: bool) -> bool:
+        """Hazır (built-in) bir kataloğu global olarak açar/kapatır."""
+        if enabled:
+            result = await self.dbs["tracking"]["catalog_settings"].update_one(
+                {"_id": "global"},
+                {"$pull": {"disabled": catalog_id}},
+                upsert=True,
+            )
+        else:
+            result = await self.dbs["tracking"]["catalog_settings"].update_one(
+                {"_id": "global"},
+                {"$addToSet": {"disabled": catalog_id}},
+                upsert=True,
+            )
+        return bool(result.acknowledged)
+
+    async def get_custom_catalogs(self, active_only: bool = False) -> list:
+        """Tüm özel katalogları (veya sadece aktif olanları) sıra numarasına göre döndürür."""
+        query = {"active": True} if active_only else {}
+        cursor = self.dbs["tracking"]["custom_catalogs"].find(query).sort("order", 1)
+        docs = await cursor.to_list(None)
+        return [convert_objectid_to_str(d) for d in docs]
+
+    async def get_custom_catalog(self, catalog_id: str) -> Optional[dict]:
+        """Tek bir özel kataloğu id'ye göre getirir."""
+        from bson import ObjectId as _OID
+        try:
+            oid = _OID(catalog_id)
+        except Exception:
+            return None
+        doc = await self.dbs["tracking"]["custom_catalogs"].find_one({"_id": oid})
+        return convert_objectid_to_str(doc) if doc else None
+
+    async def add_custom_catalog(self, data: dict) -> dict:
+        """Yeni özel katalog oluşturur."""
+        data.setdefault("active", True)
+        data.setdefault("items", [])
+        data.setdefault("keywords", [])
+        if "order" not in data:
+            count = await self.dbs["tracking"]["custom_catalogs"].count_documents({})
+            data["order"] = count
+        data["created_at"] = datetime.utcnow()
+        data["updated_at"] = datetime.utcnow()
+        result = await self.dbs["tracking"]["custom_catalogs"].insert_one(data)
+        data["_id"] = str(result.inserted_id)
+        return convert_objectid_to_str(data)
+
+    async def update_custom_catalog(self, catalog_id: str, data: dict) -> bool:
+        """Özel katalog meta bilgilerini (ad, tür, aktiflik, sıra) günceller."""
+        from bson import ObjectId as _OID
+        try:
+            oid = _OID(catalog_id)
+        except Exception:
+            return False
+        data["updated_at"] = datetime.utcnow()
+        result = await self.dbs["tracking"]["custom_catalogs"].update_one(
+            {"_id": oid}, {"$set": data}
+        )
+        return result.matched_count > 0
+
+    async def delete_custom_catalog(self, catalog_id: str) -> bool:
+        """Özel kataloğu tamamen siler."""
+        from bson import ObjectId as _OID
+        try:
+            oid = _OID(catalog_id)
+        except Exception:
+            return False
+        result = await self.dbs["tracking"]["custom_catalogs"].delete_one({"_id": oid})
+        return result.deleted_count > 0
+
+    async def add_custom_catalog_item(self, catalog_id: str, item: dict) -> bool:
+        """Özel kataloğa bir film/dizi ekler (aynı imdb_id zaten varsa eklemez)."""
+        from bson import ObjectId as _OID
+        try:
+            oid = _OID(catalog_id)
+        except Exception:
+            return False
+        existing = await self.dbs["tracking"]["custom_catalogs"].find_one(
+            {"_id": oid, "items.imdb_id": item.get("imdb_id")}
+        )
+        if existing:
+            return False  # zaten ekli
+        item["added_at"] = datetime.utcnow()
+        result = await self.dbs["tracking"]["custom_catalogs"].update_one(
+            {"_id": oid},
+            {"$push": {"items": item}, "$set": {"updated_at": datetime.utcnow()}},
+        )
+        return result.matched_count > 0
+
+    async def remove_custom_catalog_item(self, catalog_id: str, imdb_id: str) -> bool:
+        """Özel katalogdan bir film/diziyi çıkarır."""
+        from bson import ObjectId as _OID
+        try:
+            oid = _OID(catalog_id)
+        except Exception:
+            return False
+        result = await self.dbs["tracking"]["custom_catalogs"].update_one(
+            {"_id": oid},
+            {"$pull": {"items": {"imdb_id": imdb_id}}, "$set": {"updated_at": datetime.utcnow()}},
+        )
+        return result.modified_count > 0
+
+    async def get_media_by_imdb(self, imdb_id: str) -> Optional[dict]:
+        """imdb_id'ye göre film ya da dizi dokümanını (media_type alanıyla birlikte) döndürür.
+        Katalog önizleme/serve aşamasında kullanılır."""
+        for db_idx in range(self.current_db_index, 0, -1):
+            db_key = f"storage_{db_idx}"
+            movie_doc = await self.dbs[db_key]["movie"].find_one({"imdb_id": imdb_id})
+            if movie_doc:
+                movie_doc = convert_objectid_to_str(movie_doc)
+                movie_doc.setdefault("media_type", "movie")
+                return movie_doc
+            tv_doc = await self.dbs[db_key]["tv"].find_one({"imdb_id": imdb_id})
+            if tv_doc:
+                tv_doc = convert_objectid_to_str(tv_doc)
+                tv_doc.setdefault("media_type", "tv")
+                return tv_doc
+        return None
 
     # Get per-DB statistics (movies, tv shows, used size, etc.)
     async def get_database_stats(self):

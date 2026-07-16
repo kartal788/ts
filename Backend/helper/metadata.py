@@ -603,6 +603,259 @@ def de_genre_normalize(genres):
     return out
 
 # ----------------- Main Metadata -----------------
+import hashlib
+
+
+def _slugify_manual_title(title: str) -> str:
+    """Başlığı 'manual-<slug>' biçiminde kararlı (deterministik) bir kimliğe çevirir.
+    Aynı başlıkla gelen dosyalar aynı kayda (imdb_id eşleşmesiyle) düşer; farklı
+    başlıklar farklı kartlar oluşturur."""
+    normalized = title.strip().casefold()
+    digest = hashlib.sha1(normalized.encode("utf-8")).hexdigest()[:16]
+    return f"manual-{digest}"
+
+
+def _manual_tmdb_id(manual_id: str) -> int:
+    """Manuel içerik için başlıktan türetilen, kararlı (deterministik) NEGATİF
+    bir tamsayı üretir.
+
+    Admin panelindeki düzenle/sil/kalite yeniden adlandır/sezon-bölüm sil gibi
+    tüm uçlar (bkz. Backend/fastapi/routes/template_routes.py,
+    Backend/fastapi/routes/api_routes.py, Backend/fastapi/main.py) ve
+    Backend/helper/database.py içindeki get_document/update_document/
+    delete_document gibi fonksiyonlar kaydı bulmak için tmdb_id'yi int()'e
+    çevirip sorguluyor. tmdb_id=None bırakılırsa "/media/edit?tmdb_id=None"
+    gibi bir URL üretilip int_parsing hatası veriyordu ve kayıt hiçbir zaman
+    bulunamıyordu.
+
+    Gerçek TMDB id'leri her zaman pozitif olduğundan, negatif bir sayı
+    kullanmak TMDB'den gelen içeriklerle çakışmayı imkansız kılar; aynı
+    zamanda tüm bu uçların manuel içerik için de değişiklik yapmadan
+    çalışmasını sağlar.
+    """
+    digest_int = int(hashlib.sha1(manual_id.encode("utf-8")).hexdigest()[:10], 16)
+    return -digest_int
+
+
+def _parse_quality_from_filename(filename: str) -> str:
+    """metadata()'daki ana kalite tespiti mantığının küçük, bağımsız bir kopyası —
+    manuel eklemede TMDB/IMDb sorgusu yapılmadığı için ayrı tutuldu."""
+    try:
+        parsed = PTN.parse(filename)
+    except Exception:
+        parsed = {}
+    quality = parsed.get("resolution")
+    if not quality:
+        if re.search(r"dvdrip|\.avi", filename, re.IGNORECASE):
+            quality = "576p"
+        else:
+            quality = "1080p"
+    ptn_source = (parsed.get("quality") or "").lower()
+    if re.search(r"\bcam[-_]?rip\b|\bcamrip\b|\bcam\b", filename, re.IGNORECASE) or \
+       re.search(r"\bcam[-_]?rip\b|\bcamrip\b|\bcam\b", ptn_source):
+        quality = "CamRip"
+    return quality
+
+
+def _parse_manual_season_episode(filename: str) -> tuple[int | None, int | None]:
+    """Manuel ekleme modunda dosya adından sezon/bölüm numarasını çıkarmaya çalışır.
+    Panelden ayarlanan sezon/otomatik bölüm sayacına göre öncelik taşır: dosya adında
+    açıkça bir kalıp varsa (S01E02, 1x02, "Sezon 2 Bölüm 5", "Bölüm 7", "Hafta 3" vb.)
+    o kullanılır; yoksa (None, None) döner ve çağıran taraf panel değerlerini kullanır.
+
+    Dönüş: (season, episode) — season bulunamadıysa None olabilir (yalnızca bölüm
+    numarası tespit edilmiş olabilir), episode bulunamadıysa (None, None) döner.
+    """
+    name = filename
+
+    # S01E02 / S1E2
+    m = re.search(r"\bS(\d{1,2})[\s._-]?E(\d{1,3})\b", name, re.IGNORECASE)
+    if m:
+        return int(m.group(1)), int(m.group(2))
+
+    # 1x02
+    m = re.search(r"\b(\d{1,2})x(\d{1,3})\b", name, re.IGNORECASE)
+    if m:
+        return int(m.group(1)), int(m.group(2))
+
+    # "Sezon 2 Bölüm 5"
+    m = re.search(r"sezon\s*(\d{1,2}).{0,6}?b[oö]l[uü]m\s*(\d{1,3})", name, re.IGNORECASE)
+    if m:
+        return int(m.group(1)), int(m.group(2))
+
+    # Yalnızca bölüm/hafta/ep numarası (sezon panelden gelir)
+    for pattern in (
+        r"\bb[oö]l[uü]m\s*(\d{1,3})\b",
+        r"\bhafta\s*(\d{1,3})\b",
+        r"\bep(?:isode)?\.?\s*(\d{1,3})\b",
+        r"\bE(\d{1,3})\b",
+    ):
+        m = re.search(pattern, name, re.IGNORECASE)
+        if m:
+            return None, int(m.group(1))
+
+    return None, None
+
+
+async def build_manual_metadata(
+    filename: str,
+    channel: int,
+    msg_id,
+    title: str,
+    poster: str | None = None,
+    description: str | None = None,
+    media_type: str = "movie",
+    season_number: int | None = None,
+    episode_number: int | None = None,
+    year: int | None = None,
+    tmdb_id: int | None = None,
+    imdb_id: str | None = None,
+) -> dict | None:
+    """Manuel içerik ekleme modu için: TMDB/IMDb'de karşılığı olmayan (ders
+    videosu, kişisel video vb.) dosyalar için TMDB/IMDb sorgusu yapmadan doğrudan
+    kullanılabilir bir metadata_info sözlüğü üretir.
+
+    media_type == "movie" (varsayılan): Kişisel video / film gibi tek içerik.
+    Üretilen kayıt normal 'movie' şeması üzerinden veritabanına yazılır. Aynı
+    başlıkla gönderilen farklı dosyalar aynı kart altında birleşir (imdb_id
+    başlıktan deterministik türetilir), her biri o kartın altında ayrı bir
+    "kalite" satırı olarak listelenir.
+
+    Not: "quality" etiketine dosya adından türetilmiş kısa bir ayraç eklenir.
+    Böylece aynı başlık altına gönderilen, çözünürlük bilgisi taşımayan farklı
+    videolar (örn. Hafta1.mp4, Hafta2.mp4) REPLACE_MODE açıkken birbirinin
+    yerine geçip silinmez — her biri ayrı bir satır olarak kalır.
+
+    media_type == "tv": Ders videoları gibi sezon/bölüm yapısına sahip içerik.
+    Gerçek 'tv' şeması üzerinden yazılır (seasons -> episodes -> telegram),
+    böylece katalogda normal bir dizi gibi sezon/bölüm listesiyle görünür.
+    season_number/episode_number çağıran taraf (reciever.py) tarafından panel
+    ayarlarına göre hesaplanıp geçirilir; dosya adında açık bir S/E kalıbı varsa
+    bu fonksiyon onu tercih eder.
+
+    year: opsiyonel çıkış yılı (panelde boş bırakılabilir, None gönderilirse
+    kayıtta year=None olarak kalır).
+
+    tmdb_id/imdb_id: normalde başlıktan deterministik olarak türetilir (yeni
+    "manuel" bir kayıt oluşturmak için). Ancak /media/edit sayfasındaki
+    "İçerik Ekle" (var olan içeriğe ekleme) modu bu ikisini var olan kaydın
+    gerçek tmdb_id/imdb_id'siyle geçirir; böylece insert_media() bu dosyayı
+    yeni bir kart olarak değil, var olan kaydın altına (film ise yeni kalite,
+    dizi ise yeni bölüm olarak) ekler.
+    """
+    if not title or not title.strip():
+        LOGGER.warning("build_manual_metadata: boş başlıkla çağrıldı, atlanıyor.")
+        return None
+
+    base_quality = _parse_quality_from_filename(filename)
+    file_label = re.sub(r"\.[A-Za-z0-9]{1,5}$", "", filename).strip()
+    file_label = re.sub(r"\s+", " ", file_label)[:40]
+    quality = f"{base_quality} • {file_label}" if file_label else base_quality
+
+    data = {"chat_id": channel, "msg_id": msg_id}
+    try:
+        encoded_string = await encode_string(data)
+    except Exception:
+        LOGGER.error(f"build_manual_metadata: encode_string başarısız ({filename})")
+        return None
+
+    manual_id = _slugify_manual_title(title)
+    resolved_tmdb_id = tmdb_id if tmdb_id is not None else _manual_tmdb_id(manual_id)
+    resolved_imdb_id = imdb_id or manual_id
+
+    if media_type != "tv":
+        return {
+            "media_type": "movie",
+            "tmdb_id": resolved_tmdb_id,
+            "imdb_id": resolved_imdb_id,
+            "title": title.strip(),
+            "title_tr": title.strip(),
+            "title_de": title.strip(),
+            "description": description or "",
+            "description_tr": description or "",
+            "description_de": description or "",
+            "genres": [],
+            "genres_tr": [],
+            "genres_de": [],
+            "rate": 0,
+            "year": year,
+            "poster": poster or "",
+            "backdrop": poster or "",
+            "logo": "",
+            "cast": [],
+            "runtime": None,
+            "original_language": "tr",
+            "quality": quality,
+            "encoded_string": encoded_string,
+            "group_key": None,
+            "part_number": None,
+        }
+
+    # ----- TV (dizi) modu: sezon/bölüm dosya adından tespit edilebiliyorsa
+    # o kullanılır, yoksa panelden gelen değerlere düşülür.
+    detected_season, detected_episode = _parse_manual_season_episode(filename)
+    season = detected_season if detected_season is not None else season_number
+    episode = detected_episode if detected_episode is not None else episode_number
+
+    if not season or not episode:
+        LOGGER.warning(
+            f"build_manual_metadata: dizi modunda sezon/bölüm belirlenemedi "
+            f"({filename}) — season={season}, episode={episode}"
+        )
+        return None
+
+    episode_title = file_label or f"Sezon {season} Bölüm {episode}"
+
+    return {
+        "media_type": "tv",
+        "tmdb_id": resolved_tmdb_id,
+        "imdb_id": resolved_imdb_id,
+        "title": title.strip(),
+        "title_tr": title.strip(),
+        "title_de": title.strip(),
+        "description": description or "",
+        "description_tr": description or "",
+        "description_de": description or "",
+        "genres": [],
+        "genres_tr": [],
+        "genres_de": [],
+        "rate": 0,
+        "year": year,
+        "poster": poster or "",
+        "backdrop": poster or "",
+        "logo": "",
+        "poster_tr": poster or "",
+        "backdrop_tr": poster or "",
+        "logo_tr": "",
+        "poster_de": poster or "",
+        "backdrop_de": poster or "",
+        "logo_de": "",
+        "cast": [],
+        "runtime": None,
+        "original_language": "tr",
+        "status": None,
+        "certification_tr": None,
+        "certification_de": None,
+        "certification_us": None,
+
+        "season_number": season,
+        "episode_number": episode,
+        "episode_title": episode_title,
+        "episode_title_tr": episode_title,
+        "episode_title_de": episode_title,
+        "episode_backdrop": "",
+        "episode_overview": "",
+        "episode_overview_tr": "",
+        "episode_overview_de": "",
+        "episode_released": "",
+
+        "quality": quality,
+        "encoded_string": encoded_string,
+        "group_key": None,
+        "part_number": None,
+    }
+
+
 async def metadata(filename: str, channel: int, msg_id, override_id: str = None) -> dict | None:
     try:
         filename = re.sub(r'\bm(1080p|720p|2160p|480p)\b', r'\1', filename, flags=re.IGNORECASE)

@@ -20,6 +20,128 @@
                 class="px-4 py-2 rounded-md transition-colors text-sm font-medium {% if media_type == 'tv' %}bg-blue-600 text-white{% else %}theme-card border hover:bg-gray-50{% endif %}">
                 TV Shows
             </a>
+            <button type="button" id="manual-add-toggle-btn" onclick="toggleManualAddPanel()"
+                class="px-4 py-2 rounded-md transition-colors text-sm font-medium theme-card border hover:bg-gray-50">
+                📎 İçerik Ekle
+            </button>
+        </div>
+    </div>
+
+    <!-- İçerik Ekle -->
+    <div class="theme-card p-6 rounded-lg shadow mb-8 hidden" id="manual-add-panel">
+        <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+            <div>
+                <h2 class="text-lg font-semibold">📎 İçerik Ekle</h2>
+                <p class="theme-text-secondary text-sm mt-1">
+                    IMDb/TMDB'de karşılığı olmayan ders videoları, kişisel videolar vb. içerikleri
+                    başlık/poster elle girerek kataloğa ekle.
+                </p>
+            </div>
+            <span id="manual-add-status-badge"
+                class="px-3 py-1 rounded-full text-xs font-medium bg-gray-200 text-gray-700">Kapalı</span>
+        </div>
+
+        <div id="manual-add-idle" class="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div class="md:col-span-4">
+                <label class="block text-sm font-medium mb-1">İçerik Türü</label>
+                <div class="flex gap-2">
+                    <button type="button" id="manual-add-type-movie" onclick="setManualAddType('movie')"
+                        class="px-4 py-2 rounded-md transition-colors text-sm font-medium bg-blue-600 text-white">
+                        🎬 Film / Tek Video
+                    </button>
+                    <button type="button" id="manual-add-type-tv" onclick="setManualAddType('tv')"
+                        class="px-4 py-2 rounded-md transition-colors text-sm font-medium theme-card border hover:bg-gray-50">
+                        📺 Dizi (Sezon/Bölüm)
+                    </button>
+                </div>
+                <p class="theme-text-secondary text-xs mt-1">
+                    Film: iletilen tüm videolar tek bir kart altında birleşir. Dizi: her video ayrı bir
+                    bölüm olarak eklenir; ders videoları için bunu kullan.
+                </p>
+            </div>
+            <div class="md:col-span-1">
+                <label class="block text-sm font-medium mb-1">Başlık *</label>
+                <input type="text" id="manual-add-title" placeholder="Örn. Matematik 101"
+                    class="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent text-sm">
+            </div>
+            <div class="md:col-span-1">
+                <label class="block text-sm font-medium mb-1">Çıkış Yılı (opsiyonel)</label>
+                <input type="number" id="manual-add-year" placeholder="Örn. 2024" min="1900" max="2100" step="1"
+                    class="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent text-sm">
+            </div>
+            <div class="md:col-span-1">
+                <label class="block text-sm font-medium mb-1">Poster URL (opsiyonel)</label>
+                <input type="text" id="manual-add-poster" placeholder="https://..."
+                    class="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent text-sm">
+            </div>
+            <div class="md:col-span-1">
+                <label class="block text-sm font-medium mb-1">Açıklama (opsiyonel)</label>
+                <input type="text" id="manual-add-description" placeholder="Kısa açıklama"
+                    class="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent text-sm">
+            </div>
+            <div id="manual-add-tv-fields" class="md:col-span-4 hidden grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium mb-1">Sezon Numarası</label>
+                    <input type="number" min="1" step="1" id="manual-add-season" value="1"
+                        class="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent text-sm">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">Başlangıç Bölüm Numarası</label>
+                    <input type="number" min="1" step="1" id="manual-add-start-episode" value="1"
+                        class="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent text-sm">
+                </div>
+                <p class="md:col-span-2 theme-text-secondary text-xs">
+                    Videoları hangi sırayla iletirsen bölüm numarası otomatik artar (1, 2, 3, …).
+                    Dosya adında "S01E02", "1x02", "Bölüm 5" veya "Hafta 5" gibi bir kalıp varsa,
+                    otomatik sayaç yerine o kullanılır.
+                </p>
+            </div>
+            <div class="md:col-span-4">
+                <button onclick="startManualAdd()"
+                    class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-md transition-colors text-sm font-medium shadow-sm">
+                    Modu Başlat
+                </button>
+                <span id="manual-add-error" class="text-red-600 text-sm ml-3"></span>
+            </div>
+        </div>
+
+        <div id="manual-add-running" class="hidden">
+            <div class="flex items-start gap-4 flex-wrap">
+                <div class="flex-1 min-w-[240px]">
+                    <p class="text-sm theme-text-secondary">Şu an aktif başlık:</p>
+                    <p class="text-lg font-semibold" id="manual-add-active-title"></p>
+                    <p class="text-sm theme-text-secondary mt-1" id="manual-add-active-meta"></p>
+                    <p class="text-sm theme-text-secondary mt-3" id="manual-add-hint">
+                        Şimdi ilgili video dosyalarını Telegram kanalına ilet. Hepsi bu başlık altında
+                        tek bir kart olarak birleşecek. Bitince aşağıdan modu kapat.
+                    </p>
+                </div>
+                <button onclick="stopManualAdd()"
+                    class="bg-red-600 hover:bg-red-700 text-white px-6 py-2 rounded-md transition-colors text-sm font-medium shadow-sm">
+                    Modu Kapat
+                </button>
+            </div>
+
+            <div id="manual-add-tv-controls" class="hidden mt-4 pt-4 border-t flex flex-wrap items-end gap-3">
+                <div>
+                    <label class="block text-xs font-medium mb-1">Sıradaki bölüm no</label>
+                    <input type="number" min="1" step="1" id="manual-add-next-episode-input"
+                        class="w-28 px-3 py-1.5 border border-gray-300 rounded-md text-sm">
+                </div>
+                <button onclick="updateNextEpisode()"
+                    class="border border-gray-300 px-3 py-1.5 rounded-md hover:bg-gray-50 transition-colors text-xs font-medium">
+                    Bölüm No Güncelle
+                </button>
+                <div class="ml-2">
+                    <label class="block text-xs font-medium mb-1">Yeni sezon no</label>
+                    <input type="number" min="1" step="1" id="manual-add-new-season-input"
+                        class="w-28 px-3 py-1.5 border border-gray-300 rounded-md text-sm">
+                </div>
+                <button onclick="startNewSeason()"
+                    class="border border-gray-300 px-3 py-1.5 rounded-md hover:bg-gray-50 transition-colors text-xs font-medium">
+                    Yeni Sezona Geç
+                </button>
+            </div>
         </div>
     </div>
 
@@ -209,6 +331,206 @@
         }
     }
 
+    // ---------- İçerik Ekle paneli ----------
+    function formatApiError(detail) {
+        if (!detail) return 'Bilinmeyen hata';
+        if (typeof detail === 'string') return detail;
+        if (Array.isArray(detail)) {
+            return detail.map(d => d.msg || JSON.stringify(d)).join(', ');
+        }
+        return JSON.stringify(detail);
+    }
+
+    function toggleManualAddPanel() {
+        const panel = document.getElementById('manual-add-panel');
+        const btn = document.getElementById('manual-add-toggle-btn');
+        const isHidden = panel.classList.contains('hidden');
+        if (isHidden) {
+            panel.classList.remove('hidden');
+            btn.classList.add('bg-blue-600', 'text-white');
+            btn.classList.remove('theme-card', 'border', 'hover:bg-gray-50');
+            panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        } else {
+            panel.classList.add('hidden');
+            btn.classList.remove('bg-blue-600', 'text-white');
+            btn.classList.add('theme-card', 'border', 'hover:bg-gray-50');
+        }
+    }
+
+    async function loadManualAddStatus() {
+        try {
+            const response = await fetch('/api/manual-add/status', {
+                method: 'GET',
+                credentials: 'same-origin',
+                headers: { 'Accept': 'application/json' }
+            });
+            if (!response.ok) return;
+            const data = await response.json();
+            renderManualAddStatus(data);
+        } catch (error) {
+            console.error('Manuel ekleme durumu alınamadı:', error);
+        }
+    }
+
+    let manualAddType = 'movie';
+
+    function setManualAddType(type) {
+        manualAddType = type;
+        const movieBtn = document.getElementById('manual-add-type-movie');
+        const tvBtn = document.getElementById('manual-add-type-tv');
+        const tvFields = document.getElementById('manual-add-tv-fields');
+
+        const activeCls = 'px-4 py-2 rounded-md transition-colors text-sm font-medium bg-blue-600 text-white';
+        const inactiveCls = 'px-4 py-2 rounded-md transition-colors text-sm font-medium theme-card border hover:bg-gray-50';
+
+        if (type === 'tv') {
+            tvBtn.className = activeCls;
+            movieBtn.className = inactiveCls;
+            tvFields.classList.remove('hidden');
+        } else {
+            movieBtn.className = activeCls;
+            tvBtn.className = inactiveCls;
+            tvFields.classList.add('hidden');
+        }
+    }
+
+    function renderManualAddStatus(data) {
+        const badge = document.getElementById('manual-add-status-badge');
+        const idleBox = document.getElementById('manual-add-idle');
+        const runningBox = document.getElementById('manual-add-running');
+        const tvControls = document.getElementById('manual-add-tv-controls');
+        const hint = document.getElementById('manual-add-hint');
+
+        if (data.active) {
+            const isTv = data.media_type === 'tv';
+            badge.textContent = isTv ? 'Aktif (Dizi)' : 'Aktif (Film)';
+            badge.className = 'px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700';
+            idleBox.classList.add('hidden');
+            runningBox.classList.remove('hidden');
+            document.getElementById('manual-add-active-title').textContent = data.title || '';
+
+            const metaParts = [];
+            if (isTv) {
+                metaParts.push(`Sezon ${data.season}`);
+                metaParts.push(`Sıradaki bölüm: ${data.next_episode}`);
+            }
+            if (data.year) metaParts.push(`Yıl: ${data.year}`);
+            if (data.poster) metaParts.push('Poster ayarlı');
+            if (data.description) metaParts.push('Açıklama ayarlı');
+            document.getElementById('manual-add-active-meta').textContent = metaParts.join(' • ');
+
+            if (isTv) {
+                tvControls.classList.remove('hidden');
+                hint.textContent = 'Bölümleri sırasıyla Telegram kanalına ilet — her video ayrı bir bölüm ' +
+                    'olarak eklenecek ve bölüm no otomatik artacak. Bitince aşağıdan modu kapat.';
+                document.getElementById('manual-add-next-episode-input').value = data.next_episode || 1;
+                document.getElementById('manual-add-new-season-input').value = (data.season || 1) + 1;
+            } else {
+                tvControls.classList.add('hidden');
+                hint.textContent = 'Şimdi ilgili video dosyalarını Telegram kanalına ilet. Hepsi bu başlık ' +
+                    'altında tek bir kart olarak birleşecek. Bitince aşağıdan modu kapat.';
+            }
+        } else {
+            badge.textContent = 'Kapalı';
+            badge.className = 'px-3 py-1 rounded-full text-xs font-medium bg-gray-200 text-gray-700';
+            idleBox.classList.remove('hidden');
+            runningBox.classList.add('hidden');
+            tvControls.classList.add('hidden');
+        }
+    }
+
+    async function startManualAdd() {
+        const title = document.getElementById('manual-add-title').value.trim();
+        const yearRaw = document.getElementById('manual-add-year').value.trim();
+        const poster = document.getElementById('manual-add-poster').value.trim();
+        const description = document.getElementById('manual-add-description').value.trim();
+        const errorEl = document.getElementById('manual-add-error');
+        errorEl.textContent = '';
+
+        if (!title) {
+            errorEl.textContent = 'Başlık boş olamaz.';
+            return;
+        }
+
+        const payload = { title, poster, description, media_type: manualAddType };
+        if (yearRaw) {
+            payload.year = parseInt(yearRaw, 10);
+        }
+        if (manualAddType === 'tv') {
+            payload.season = parseInt(document.getElementById('manual-add-season').value, 10) || 1;
+            payload.start_episode = parseInt(document.getElementById('manual-add-start-episode').value, 10) || 1;
+        }
+
+        try {
+            const response = await fetch('/api/manual-add/start', {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                errorEl.textContent = data.detail || 'Mod başlatılamadı.';
+                return;
+            }
+            document.getElementById('manual-add-title').value = '';
+            document.getElementById('manual-add-year').value = '';
+            document.getElementById('manual-add-poster').value = '';
+            document.getElementById('manual-add-description').value = '';
+            renderManualAddStatus(data);
+        } catch (error) {
+            errorEl.textContent = `Hata: ${error.message}`;
+        }
+    }
+
+    async function stopManualAdd() {
+        try {
+            const response = await fetch('/api/manual-add/stop', {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' }
+            });
+            const data = await response.json();
+            renderManualAddStatus(data);
+        } catch (error) {
+            console.error('Mod kapatılamadı:', error);
+        }
+    }
+
+    async function updateNextEpisode() {
+        const value = parseInt(document.getElementById('manual-add-next-episode-input').value, 10);
+        if (!value || value < 1) return;
+        try {
+            const response = await fetch('/api/manual-add/set-next-episode', {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ next_episode: value })
+            });
+            const data = await response.json();
+            if (response.ok) renderManualAddStatus(data);
+        } catch (error) {
+            console.error('Bölüm no güncellenemedi:', error);
+        }
+    }
+
+    async function startNewSeason() {
+        const season = parseInt(document.getElementById('manual-add-new-season-input').value, 10);
+        if (!season || season < 1) return;
+        try {
+            const response = await fetch('/api/manual-add/set-season', {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ season, start_episode: 1 })
+            });
+            const data = await response.json();
+            if (response.ok) renderManualAddStatus(data);
+        } catch (error) {
+            console.error('Sezon değiştirilemedi:', error);
+        }
+    }
+
     // Create media card HTML
     function createMediaCard(item) {
         const title = item.title || item.name || 'Unknown Title';
@@ -393,7 +715,7 @@
                 loadMedia(currentPage, currentSearch);
             } else {
                 const error = await response.json();
-                alert(`"${title}" silinirken hata: ${error.detail || 'Bilinmeyen hata'}`);
+                alert(`"${title}" silinirken hata: ${formatApiError(error.detail)}`);
             }
         } catch (error) {
             console.error('Error deleting media:', error);
@@ -405,6 +727,7 @@
     document.addEventListener('DOMContentLoaded', () => {
         // Load media on page load
         loadMedia();
+        loadManualAddStatus();
 
         // Add enter key listener to search input
         document.getElementById('search-input').addEventListener('keypress', (e) => {

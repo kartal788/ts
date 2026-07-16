@@ -2,6 +2,7 @@ from pyrogram import filters, Client, enums
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from Backend.helper.custom_filter import CustomFilters
 from Backend.config import Telegram
+from Backend.helper.settings_manager import SettingsManager
 from Backend import db
 from datetime import datetime
 
@@ -114,12 +115,16 @@ async def send_start_message(client: Client, message: Message):
 
             keyboard = InlineKeyboardMarkup(keyboard_buttons)
 
-            plan_caption = (
+            #----- Aktif aboneliği olmayan kullanıcıya gösterilen üst metin,
+            #----- panelin Ayarlar > Abonelik bölümünden düzenlenebilir.
+            #----- İçindeki {isim} ifadesi bot adıyla değiştirilir.
+            message_template = SettingsManager.current().uye_olmayan_mesaji or (
                 f'<b>{Telegram.ISIM} ile sinema keyfine hazır mısın?</b>\n\n'
                 'Stremio üzerinden sunduğumuz özel içeriklere erişebilmen için aktif bir aboneliğin olması gerekiyor. '
                 'Merak etme, senin için en avantajlı planları aşağıda listeledik.\n\n'
                 '🚀 Hemen başlamak için bir plan seç:'
             )
+            plan_caption = message_template.replace("{isim}", Telegram.ISIM)
 
             plan_image_id = await db.get_plan_image()
             if plan_image_id:

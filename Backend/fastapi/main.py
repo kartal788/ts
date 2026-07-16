@@ -11,7 +11,7 @@ from Backend.fastapi.security.csrf import CSRFMiddleware, ensure_csrf_secret, ge
 from Backend.fastapi.routes.stream_routes import router as stream_router, decay_client_failures
 from Backend.helper.db_scheduler import start_scheduler, stop_scheduler
 from Backend.fastapi.routes.yayin_routes import start_scheduler as start_yayin_scheduler, stop_scheduler as stop_yayin_scheduler
-from Backend.fastapi.routes.stremio_routes import router as stremio_router
+from Backend.fastapi.routes.stremio_routes import router as stremio_router, admin_catalog_router
 from Backend.fastapi.routes.subtitle_routes import router as subtitle_router
 from Backend.fastapi.routes.yayin_routes import router as yayin_router
 from Backend.fastapi.routes.template_routes import (
@@ -19,10 +19,23 @@ from Backend.fastapi.routes.template_routes import (
     media_management_page, edit_media_page,
     admin_dashboard_page, admin_subscriptions_page, admin_access_page, canli_page,
     link_ekle_page, istatistik_page, sunucu_page, settings_page,
-    istekler_page
+    istekler_page, kataloglar_page, araclar_page
+)
+from Backend.fastapi.routes.arac_routes import (
+    ayni_status_api, ayni_start_api,
+    iceriksil_status_api, iceriksil_start_api,
+    tara_status_api, tara_start_api, tara_iptal_api,
 )
 from Backend.fastapi.routes.link_ekle_routes import (
     link_ekle_query, link_ekle_save
+)
+from Backend.fastapi.routes.manual_add_routes import (
+    manual_add_status_api, manual_add_start_api, manual_add_stop_api,
+    manual_add_set_season_api, manual_add_set_next_episode_api
+)
+from Backend.fastapi.routes.attach_add_routes import (
+    attach_mode_status_api, attach_mode_start_api, attach_mode_stop_api,
+    attach_mode_set_season_api, attach_mode_set_next_episode_api
 )
 from Backend.fastapi.routes.sunucu_routes import (
     sunucu_yukle_stream, sunucu_bilgisayardan_yukle, sunucu_listele, sunucu_sil,
@@ -74,6 +87,7 @@ from Backend.fastapi.routes.api_routes import (
     export_settings_backup_api, import_settings_backup_api,
     invalidate_admin_sessions_api,
     get_db_stats_api, get_logs_api, download_logs_api,
+    restart_bot_api,
 )
 from Backend.fastapi.routes.uyeler_routes import (
     admin_uyeler_page,
@@ -426,6 +440,7 @@ async def _shutdown():
 # --- Include existing API routers ---
 app.include_router(stream_router)
 app.include_router(stremio_router)
+app.include_router(admin_catalog_router)
 app.include_router(yayin_router)
 app.include_router(subtitle_router)
 
@@ -907,6 +922,42 @@ async def root(request: Request):
 async def admin_dashboard(request: Request, _: bool = Depends(require_auth)):
     return await admin_dashboard_page(request, _)
 
+@app.get("/admin/kataloglar", response_class=HTMLResponse)
+async def admin_kataloglar(request: Request, _: bool = Depends(require_auth)):
+    return await kataloglar_page(request, _)
+
+@app.get("/admin/araclar", response_class=HTMLResponse)
+async def admin_araclar(request: Request, _: bool = Depends(require_auth)):
+    return await araclar_page(request, _)
+
+@app.get("/api/araclar/aynivideolarisil/status")
+async def araclar_ayni_status(_: bool = Depends(require_auth)):
+    return await ayni_status_api()
+
+@app.post("/api/araclar/aynivideolarisil/start")
+async def araclar_ayni_start(_: bool = Depends(require_auth)):
+    return await ayni_start_api()
+
+@app.get("/api/araclar/iceriksil/status")
+async def araclar_iceriksil_status(_: bool = Depends(require_auth)):
+    return await iceriksil_status_api()
+
+@app.post("/api/araclar/iceriksil/start")
+async def araclar_iceriksil_start(payload: dict, _: bool = Depends(require_auth)):
+    return await iceriksil_start_api(payload)
+
+@app.get("/api/araclar/tara/status")
+async def araclar_tara_status(_: bool = Depends(require_auth)):
+    return await tara_status_api()
+
+@app.post("/api/araclar/tara/start")
+async def araclar_tara_start(payload: dict, _: bool = Depends(require_auth)):
+    return await tara_start_api(payload)
+
+@app.post("/api/araclar/tara/iptal")
+async def araclar_tara_iptal(_: bool = Depends(require_auth)):
+    return await tara_iptal_api()
+
 @app.get("/admin/settings", response_class=HTMLResponse)
 async def admin_settings(request: Request, _: bool = Depends(require_auth)):
     return await settings_page(request, _)
@@ -943,9 +994,53 @@ async def admin_logs(lines: int = Query(300, ge=1, le=2000), _: bool = Depends(r
 async def admin_logs_download(_: bool = Depends(require_auth)):
     return await download_logs_api()
 
+@app.post("/api/admin/restart")
+async def admin_restart(_: bool = Depends(require_auth)):
+    return await restart_bot_api()
+
 @app.get("/media/manage", response_class=HTMLResponse)
 async def media_management(request: Request, media_type: str = "movie", _: bool = Depends(require_auth)):
     return await media_management_page(request, media_type, _)
+
+@app.get("/api/manual-add/status")
+async def manual_add_status(_: bool = Depends(require_auth)):
+    return await manual_add_status_api()
+
+@app.post("/api/manual-add/start")
+async def manual_add_start(payload: dict, _: bool = Depends(require_auth)):
+    return await manual_add_start_api(payload)
+
+@app.post("/api/manual-add/stop")
+async def manual_add_stop(_: bool = Depends(require_auth)):
+    return await manual_add_stop_api()
+
+@app.post("/api/manual-add/set-season")
+async def manual_add_set_season(payload: dict, _: bool = Depends(require_auth)):
+    return await manual_add_set_season_api(payload)
+
+@app.post("/api/manual-add/set-next-episode")
+async def manual_add_set_next_episode(payload: dict, _: bool = Depends(require_auth)):
+    return await manual_add_set_next_episode_api(payload)
+
+@app.get("/api/attach-mode/status")
+async def attach_mode_status(_: bool = Depends(require_auth)):
+    return await attach_mode_status_api()
+
+@app.post("/api/attach-mode/start")
+async def attach_mode_start(payload: dict, _: bool = Depends(require_auth)):
+    return await attach_mode_start_api(payload)
+
+@app.post("/api/attach-mode/stop")
+async def attach_mode_stop(_: bool = Depends(require_auth)):
+    return await attach_mode_stop_api()
+
+@app.post("/api/attach-mode/set-season")
+async def attach_mode_set_season(payload: dict, _: bool = Depends(require_auth)):
+    return await attach_mode_set_season_api(payload)
+
+@app.post("/api/attach-mode/set-next-episode")
+async def attach_mode_set_next_episode(payload: dict, _: bool = Depends(require_auth)):
+    return await attach_mode_set_next_episode_api(payload)
 
 @app.get("/media/edit", response_class=HTMLResponse)
 async def edit_media(request: Request, tmdb_id: int, db_index: int, media_type: str, _: bool = Depends(require_auth)):

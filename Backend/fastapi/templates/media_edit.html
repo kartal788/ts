@@ -17,9 +17,296 @@
             </a>
         </div>
         <h1 class="text-2xl sm:text-3xl font-bold mt-2">{{ media_type|title }} Düzenle</h1>
-        <p class="theme-text-secondary text-sm sm:text-base mt-1 sm:mt-2">TMDB ID: {{ tmdb_id }} | DB Index: {{ db_index
-            }}</p>
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mt-1 sm:mt-2">
+            <p class="theme-text-secondary text-sm sm:text-base">TMDB ID: {{ tmdb_id }} | DB Index: {{ db_index }}</p>
+            {% if media_details %}
+            <button type="button" id="attach-mode-toggle-btn" onclick="toggleAttachModePanel()"
+                class="self-start sm:self-auto px-4 py-2 rounded-md transition-colors text-sm font-medium theme-card border hover:bg-gray-50">
+                📎 İçerik Ekle
+            </button>
+            {% endif %}
+        </div>
     </div>
+
+    <!-- İçerik Ekle (var olan içeriğe ekleme modu) -->
+    {% if media_details %}
+    <div class="theme-card p-6 rounded-lg shadow mb-6 sm:mb-8 hidden" id="attach-mode-panel">
+        <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+            <div>
+                <h2 class="text-lg font-semibold">📎 İçerik Ekle</h2>
+                <p class="theme-text-secondary text-sm mt-1">
+                    Bu modu başlatıp Telegram kanalına video ilettiğinde, gelen dosyalar yeni bir kart
+                    oluşturmadan doğrudan <strong>{{ media_details.title }}</strong> içeriğinin altına eklenir
+                    {% if media_type == 'tv' %}(seçtiğin sezona yeni bölüm olarak){% else %}(yeni bir kalite satırı olarak){% endif %}.
+                    Bitirince "Modu Kapat"a bas; bot normal TMDB/IMDb sorgulama akışına geri döner.
+                </p>
+            </div>
+            <span id="attach-mode-status-badge"
+                class="px-3 py-1 rounded-full text-xs font-medium bg-gray-200 text-gray-700">Kapalı</span>
+        </div>
+
+        <div id="attach-mode-idle">
+            {% if media_type == 'tv' %}
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium mb-1">Sezon Numarası</label>
+                    <input type="number" min="1" step="1" id="attach-mode-season"
+                        class="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent text-sm">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">Başlangıç Bölüm Numarası</label>
+                    <input type="number" min="1" step="1" id="attach-mode-start-episode"
+                        class="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent text-sm">
+                </div>
+                <p class="md:col-span-2 theme-text-secondary text-xs">
+                    Videoları hangi sırayla iletirsen bölüm numarası otomatik artar (1, 2, 3, …).
+                    Dosya adında "S01E02", "1x02", "Bölüm 5" veya "Hafta 5" gibi bir kalıp varsa,
+                    otomatik sayaç yerine o kullanılır. Varsayılan değerler son bölümden sonraki
+                    boş bölüm numarasıdır.
+                </p>
+            </div>
+            {% endif %}
+            <div class="mt-4">
+                <button onclick="startAttachMode()"
+                    class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-md transition-colors text-sm font-medium shadow-sm">
+                    Modu Başlat
+                </button>
+                <span id="attach-mode-error" class="text-red-600 text-sm ml-3"></span>
+            </div>
+        </div>
+
+        <div id="attach-mode-running" class="hidden">
+            <div class="flex items-start gap-4 flex-wrap">
+                <div class="flex-1 min-w-[240px]">
+                    <p class="text-sm theme-text-secondary" id="attach-mode-hint">
+                        Şimdi ilgili video dosyalarını Telegram kanalına ilet. Bitince aşağıdan modu kapat.
+                    </p>
+                </div>
+                <button onclick="stopAttachMode()"
+                    class="bg-red-600 hover:bg-red-700 text-white px-6 py-2 rounded-md transition-colors text-sm font-medium shadow-sm">
+                    Modu Kapat
+                </button>
+            </div>
+
+            <div id="attach-mode-tv-controls" class="hidden mt-4 pt-4 border-t flex flex-wrap items-end gap-3">
+                <div>
+                    <label class="block text-xs font-medium mb-1">Sıradaki bölüm no</label>
+                    <input type="number" min="1" step="1" id="attach-mode-next-episode-input"
+                        class="w-28 px-3 py-1.5 border border-gray-300 rounded-md text-sm">
+                </div>
+                <button onclick="updateAttachNextEpisode()"
+                    class="border border-gray-300 px-3 py-1.5 rounded-md hover:bg-gray-50 transition-colors text-xs font-medium">
+                    Bölüm No Güncelle
+                </button>
+                <div class="ml-2">
+                    <label class="block text-xs font-medium mb-1">Yeni sezon no</label>
+                    <input type="number" min="1" step="1" id="attach-mode-new-season-input"
+                        class="w-28 px-3 py-1.5 border border-gray-300 rounded-md text-sm">
+                </div>
+                <button onclick="startAttachNewSeason()"
+                    class="border border-gray-300 px-3 py-1.5 rounded-md hover:bg-gray-50 transition-colors text-xs font-medium">
+                    Yeni Sezona Geç
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const tmdbIdForAttach = {{ tmdb_id }};
+        const mediaTypeForAttach = '{{ media_type }}';
+        const attachModeTitle = {{ media_details.title | tojson }};
+        const attachModePoster = {{ (media_details.poster or '') | tojson }};
+        const attachModeImdbId = {{ (media_details.imdb_id or '') | tojson }};
+        const attachModeSeasonSummary = {{ season_summary | tojson }};
+
+        function attachFormatApiError(detail) {
+            if (!detail) return 'Bilinmeyen hata';
+            if (typeof detail === 'string') return detail;
+            if (Array.isArray(detail)) {
+                return detail.map(d => d.msg || JSON.stringify(d)).join(', ');
+            }
+            return JSON.stringify(detail);
+        }
+
+        function toggleAttachModePanel() {
+            const panel = document.getElementById('attach-mode-panel');
+            const btn = document.getElementById('attach-mode-toggle-btn');
+            if (!panel || !btn) return;
+            const isHidden = panel.classList.contains('hidden');
+            if (isHidden) {
+                panel.classList.remove('hidden');
+                btn.classList.add('bg-blue-600', 'text-white');
+                btn.classList.remove('theme-card', 'border', 'hover:bg-gray-50');
+                panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            } else {
+                panel.classList.add('hidden');
+                btn.classList.remove('bg-blue-600', 'text-white');
+                btn.classList.add('theme-card', 'border', 'hover:bg-gray-50');
+            }
+        }
+
+        function computeAttachDefaults() {
+            if (mediaTypeForAttach !== 'tv' || !attachModeSeasonSummary || attachModeSeasonSummary.length === 0) {
+                return { season: 1, episode: 1 };
+            }
+            const last = attachModeSeasonSummary[attachModeSeasonSummary.length - 1];
+            return { season: last.season_number || 1, episode: (last.max_episode || 0) + 1 };
+        }
+
+        function fillAttachDefaultInputs() {
+            const seasonInput = document.getElementById('attach-mode-season');
+            const episodeInput = document.getElementById('attach-mode-start-episode');
+            if (!seasonInput || !episodeInput) return;
+            const defaults = computeAttachDefaults();
+            if (!seasonInput.value) seasonInput.value = defaults.season;
+            if (!episodeInput.value) episodeInput.value = defaults.episode;
+        }
+
+        async function loadAttachModeStatus() {
+            try {
+                const response = await fetch('/api/attach-mode/status', {
+                    method: 'GET',
+                    credentials: 'same-origin',
+                    headers: { 'Accept': 'application/json' }
+                });
+                if (!response.ok) return;
+                const data = await response.json();
+                renderAttachModeStatus(data);
+            } catch (error) {
+                console.error('İçerik ekleme durumu alınamadı:', error);
+            }
+        }
+
+        function renderAttachModeStatus(data) {
+            const badge = document.getElementById('attach-mode-status-badge');
+            const idleBox = document.getElementById('attach-mode-idle');
+            const runningBox = document.getElementById('attach-mode-running');
+            const tvControls = document.getElementById('attach-mode-tv-controls');
+            const hint = document.getElementById('attach-mode-hint');
+            if (!badge || !idleBox || !runningBox) return;
+
+            const isThisMedia = data.active && data.tmdb_id === tmdbIdForAttach && data.media_type === mediaTypeForAttach;
+
+            if (isThisMedia) {
+                const isTv = data.media_type === 'tv';
+                badge.textContent = isTv ? 'Aktif (Dizi)' : 'Aktif (Film)';
+                badge.className = 'px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700';
+                idleBox.classList.add('hidden');
+                runningBox.classList.remove('hidden');
+
+                if (isTv) {
+                    tvControls.classList.remove('hidden');
+                    hint.textContent = `Bölümleri sırasıyla Telegram kanalına ilet — Sezon ${data.season}, ` +
+                        `sıradaki bölüm ${data.next_episode}. Her video ayrı bir bölüm olarak eklenecek. ` +
+                        `Bitince aşağıdan modu kapat.`;
+                    document.getElementById('attach-mode-next-episode-input').value = data.next_episode || 1;
+                    document.getElementById('attach-mode-new-season-input').value = (data.season || 1) + 1;
+                } else {
+                    tvControls.classList.add('hidden');
+                    hint.textContent = 'Şimdi ilgili video dosyalarını Telegram kanalına ilet. Her dosya bu ' +
+                        'içeriğe yeni bir kalite satırı olarak eklenecek. Bitince aşağıdan modu kapat.';
+                }
+            } else if (data.active) {
+                badge.textContent = `Başka içerikte aktif: ${data.title || ''}`;
+                badge.className = 'px-3 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-700';
+                idleBox.classList.remove('hidden');
+                runningBox.classList.add('hidden');
+                fillAttachDefaultInputs();
+            } else {
+                badge.textContent = 'Kapalı';
+                badge.className = 'px-3 py-1 rounded-full text-xs font-medium bg-gray-200 text-gray-700';
+                idleBox.classList.remove('hidden');
+                runningBox.classList.add('hidden');
+                fillAttachDefaultInputs();
+            }
+        }
+
+        async function startAttachMode() {
+            const errorEl = document.getElementById('attach-mode-error');
+            errorEl.textContent = '';
+
+            const payload = {
+                tmdb_id: tmdbIdForAttach,
+                imdb_id: attachModeImdbId,
+                title: attachModeTitle,
+                poster: attachModePoster,
+                media_type: mediaTypeForAttach,
+            };
+            if (mediaTypeForAttach === 'tv') {
+                payload.season = parseInt(document.getElementById('attach-mode-season').value, 10) || 1;
+                payload.start_episode = parseInt(document.getElementById('attach-mode-start-episode').value, 10) || 1;
+            }
+
+            try {
+                const response = await fetch('/api/attach-mode/start', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    errorEl.textContent = attachFormatApiError(data.detail);
+                    return;
+                }
+                renderAttachModeStatus(data);
+            } catch (error) {
+                errorEl.textContent = `Hata: ${error.message}`;
+            }
+        }
+
+        async function stopAttachMode() {
+            try {
+                const response = await fetch('/api/attach-mode/stop', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const data = await response.json();
+                renderAttachModeStatus(data);
+            } catch (error) {
+                console.error('Mod kapatılamadı:', error);
+            }
+        }
+
+        async function updateAttachNextEpisode() {
+            const value = parseInt(document.getElementById('attach-mode-next-episode-input').value, 10);
+            if (!value || value < 1) return;
+            try {
+                const response = await fetch('/api/attach-mode/set-next-episode', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ next_episode: value })
+                });
+                const data = await response.json();
+                if (response.ok) renderAttachModeStatus(data);
+            } catch (error) {
+                console.error('Bölüm no güncellenemedi:', error);
+            }
+        }
+
+        async function startAttachNewSeason() {
+            const season = parseInt(document.getElementById('attach-mode-new-season-input').value, 10);
+            if (!season || season < 1) return;
+            try {
+                const response = await fetch('/api/attach-mode/set-season', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ season, start_episode: 1 })
+                });
+                const data = await response.json();
+                if (response.ok) renderAttachModeStatus(data);
+            } catch (error) {
+                console.error('Sezon değiştirilemedi:', error);
+            }
+        }
+
+        fillAttachDefaultInputs();
+        loadAttachModeStatus();
+    </script>
+    {% endif %}
 
     <!-- Media Preview -->
     {% if media_details %}
@@ -629,7 +916,7 @@
                 setTimeout(() => location.reload(), 1000);
             } else {
                 const error = await response.json();
-                showErrorMessage(`Medya güncellenirken hata: ${error.detail || 'Bilinmeyen hata'}`);
+                showErrorMessage(`Medya güncellenirken hata: ${formatApiError(error.detail)}`);
             }
         } catch (error) {
             console.error('Error updating media:', error);
@@ -651,7 +938,7 @@
                 setTimeout(() => location.reload(), 1000);
             } else {
                 const error = await response.json();
-                showErrorMessage(`Silinirken hata: ${error.detail || 'Bilinmeyen hata'}`);
+                showErrorMessage(`Silinirken hata: ${formatApiError(error.detail)}`);
             }
         } catch (error) {
             console.error('Error deleting :', error);
@@ -673,7 +960,7 @@
                 setTimeout(() => location.reload(), 1000);
             } else {
                 const error = await response.json();
-                showErrorMessage(`Silinirken hata: ${error.detail || 'Bilinmeyen hata'}`);
+                showErrorMessage(`Silinirken hata: ${formatApiError(error.detail)}`);
             }
         } catch (error) {
             console.error('Error deleting :', error);
@@ -695,7 +982,7 @@
                 setTimeout(() => location.reload(), 1000);
             } else {
                 const error = await response.json();
-                showErrorMessage(`Bölüm silinirken hata: ${error.detail || 'Bilinmeyen hata'}`);
+                showErrorMessage(`Bölüm silinirken hata: ${formatApiError(error.detail)}`);
             }
         } catch (error) {
             console.error('Error deleting episode:', error);
@@ -717,7 +1004,7 @@
                 setTimeout(() => location.reload(), 1000);
             } else {
                 const error = await response.json();
-                showErrorMessage(`Sezon silinirken hata: ${error.detail || 'Bilinmeyen hata'}`);
+                showErrorMessage(`Sezon silinirken hata: ${formatApiError(error.detail)}`);
             }
         } catch (error) {
             console.error('Error deleting season:', error);
@@ -741,6 +1028,16 @@
                 document.body.removeChild(msg);
             }
         }, 4000);
+    }
+
+    // Format a FastAPI error `detail` (string or validation-error array) into readable text
+    function formatApiError(detail) {
+        if (!detail) return 'Bilinmeyen hata';
+        if (typeof detail === 'string') return detail;
+        if (Array.isArray(detail)) {
+            return detail.map(d => d.msg || JSON.stringify(d)).join(', ');
+        }
+        return JSON.stringify(detail);
     }
 
     // Show error message

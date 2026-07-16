@@ -1,0 +1,527 @@
+{% extends "base.html" %}
+
+{% block title %}Kataloglar - Telegram Stremio{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 text-text">
+    <div class="mb-8">
+        <h1 class="text-3xl font-bold text-text">Kataloglar</h1>
+        <p class="mt-2 text-sm theme-text-secondary">Stremio eklentisinde görünen katalogları yönetin: hazır katalogları açıp kapatın, kendi özel kataloglarınızı oluşturup içerik ekleyin.</p>
+    </div>
+
+    <!-- Hazır Kataloglar -->
+    <div class="mb-10">
+        <h2 class="text-xl font-semibold text-text mb-4">Hazır Kataloglar</h2>
+        <p class="text-sm theme-text-secondary mb-4">Platform katalogları (Netflix, Disney+, ...), Trendler ve Sana Özel katalogunu tüm üyeler için açıp kapatabilirsiniz.</p>
+
+        <div id="builtin-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div class="theme-card border rounded-xl p-5 text-center theme-text-secondary text-sm">
+                <i class="fas fa-spinner fa-spin mr-2"></i> Yükleniyor...
+            </div>
+        </div>
+    </div>
+
+    <!-- Özel Kataloglar -->
+    <div>
+        <div class="flex items-center justify-between mb-4">
+            <div>
+                <h2 class="text-xl font-semibold text-text">Özel Kataloglar</h2>
+                <p class="text-sm theme-text-secondary mt-1">Kendi kataloglarınızı oluşturun, dilediğiniz film/diziyi ekleyip çıkarın.</p>
+            </div>
+            <button onclick="openCreateModal()"
+                class="bg-primary hover:opacity-90 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors shadow-sm flex items-center gap-2 shrink-0">
+                <i class="fas fa-plus"></i> Yeni Katalog
+            </button>
+        </div>
+
+        <div id="custom-list" class="space-y-3">
+            <div class="theme-card border rounded-xl p-6 text-center theme-text-secondary text-sm">
+                <i class="fas fa-spinner fa-spin mr-2"></i> Yükleniyor...
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ── Kelime Tarama İlerleme Modalı ───────────────────────────────────── -->
+<div id="rescan-progress-modal" class="hidden fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/60">
+    <div class="theme-card border rounded-xl p-6 w-full max-w-md">
+        <h3 class="text-lg font-semibold text-text mb-1">Kütüphane Taranıyor</h3>
+        <p id="rescan-progress-stage" class="text-xs theme-text-secondary mb-4">başlıyor…</p>
+
+        <div class="w-full h-2.5 rounded-full bg-white/10 overflow-hidden mb-3">
+            <div id="rescan-progress-bar" class="h-full bg-primary transition-all duration-300" style="width: 0%"></div>
+        </div>
+
+        <div class="flex justify-between text-xs theme-text-secondary mb-6">
+            <span id="rescan-progress-count">0 / 0 kontrol edildi</span>
+            <span id="rescan-progress-matched">0 eşleşme</span>
+        </div>
+
+        <p class="text-xs theme-text-secondary">Bu pencereyi kapatabilirsiniz, tarama arka planda devam eder.</p>
+        <div class="flex justify-end mt-4">
+            <button onclick="document.getElementById('rescan-progress-modal').classList.add('hidden')"
+                class="px-4 py-2 rounded-md text-sm font-medium border theme-card hover:bg-white/5 transition-colors">
+                Kapat
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- ── Yeni / Düzenle Katalog Modal ────────────────────────────────────── -->
+<div id="catalog-modal" class="hidden fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60">
+    <div class="theme-card border rounded-2xl w-full max-w-md p-6 shadow-xl">
+        <div class="flex items-center justify-between mb-4">
+            <h3 id="catalog-modal-title" class="text-lg font-semibold text-text">Yeni Katalog</h3>
+            <button onclick="closeCatalogModal()" class="theme-text-secondary hover:text-text"><i class="fas fa-times"></i></button>
+        </div>
+        <input type="hidden" id="catalog-modal-id" value="">
+        <div class="mb-4">
+            <label class="block text-xs font-bold uppercase tracking-wide theme-text-secondary mb-1.5">Katalog Adı</label>
+            <input type="text" id="catalog-modal-name" placeholder="Örn: Yılbaşı Önerileri"
+                class="w-full px-3 py-2 rounded-md border theme-card text-sm focus:outline-none focus:ring-2 focus:ring-primary">
+        </div>
+        <div class="mb-6">
+            <label class="block text-xs font-bold uppercase tracking-wide theme-text-secondary mb-1.5">İçerik Türü</label>
+            <select id="catalog-modal-type" class="w-full px-3 py-2 rounded-md border theme-card text-sm focus:outline-none focus:ring-2 focus:ring-primary">
+                <option value="mixed">Karışık (Film + Dizi)</option>
+                <option value="movie">Sadece Film</option>
+                <option value="series">Sadece Dizi</option>
+            </select>
+        </div>
+        <div class="mb-6">
+            <label class="block text-xs font-bold uppercase tracking-wide theme-text-secondary mb-1.5">Otomatik Ekleme Kelimeleri <span class="normal-case font-normal theme-text-secondary">(opsiyonel)</span></label>
+            <input type="text" id="catalog-modal-keywords" placeholder="Örn: Netflix, 4K, Yılbaşı"
+                class="w-full px-3 py-2 rounded-md border theme-card text-sm focus:outline-none focus:ring-2 focus:ring-primary">
+            <p class="text-xs theme-text-secondary mt-1.5">Virgülle ayırarak birden fazla kelime girebilirsiniz. Yeni eklenen bir dosyanın adında bu kelimelerden biri geçerse içerik otomatik olarak bu kataloga eklenir. Boş bırakırsanız katalog eskisi gibi sadece elle yönetilir.</p>
+        </div>
+        <div class="flex justify-end gap-2">
+            <button onclick="closeCatalogModal()" class="px-4 py-2 rounded-md text-sm font-medium border theme-card hover:bg-white/5 transition-colors">Vazgeç</button>
+            <button onclick="saveCatalogModal()" class="px-4 py-2 rounded-md text-sm font-medium bg-primary text-white hover:opacity-90 transition-colors">Kaydet</button>
+        </div>
+    </div>
+</div>
+
+<!-- ── İçerik Yönet Modal ──────────────────────────────────────────────── -->
+<div id="items-modal" class="hidden fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60">
+    <div class="theme-card border rounded-2xl w-full max-w-2xl p-6 shadow-xl max-h-[85vh] flex flex-col">
+        <div class="flex items-center justify-between mb-4 shrink-0">
+            <h3 id="items-modal-title" class="text-lg font-semibold text-text">Katalog İçeriği</h3>
+            <button onclick="closeItemsModal()" class="theme-text-secondary hover:text-text"><i class="fas fa-times"></i></button>
+        </div>
+
+        <div class="flex gap-2 mb-4 shrink-0">
+            <input type="text" id="items-search-input" placeholder="Film/dizi ara..."
+                onkeydown="if(event.key==='Enter'){searchMediaToAdd();}"
+                class="flex-1 px-3 py-2 rounded-md border theme-card text-sm focus:outline-none focus:ring-2 focus:ring-primary">
+            <button onclick="searchMediaToAdd()" class="px-4 py-2 rounded-md text-sm font-medium bg-primary text-white hover:opacity-90 transition-colors shrink-0">
+                <i class="fas fa-search"></i>
+            </button>
+        </div>
+
+        <div id="items-search-results" class="hidden mb-4 max-h-40 overflow-y-auto border rounded-lg divide-y divide-white/10 shrink-0"></div>
+
+        <div class="text-xs font-bold uppercase tracking-wide theme-text-secondary mb-2 shrink-0">Katalogdaki İçerikler</div>
+        <div id="items-current-list" class="flex-1 overflow-y-auto space-y-2 pr-1">
+            <div class="text-center py-6 theme-text-secondary text-sm">
+                <i class="fas fa-spinner fa-spin mr-2"></i> Yükleniyor...
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    let _customCatalogs = [];
+    let _activeItemsCatalogId = null;
+
+    // ── Hazır kataloglar ────────────────────────────────────────────────
+    async function loadBuiltinCatalogs() {
+        try {
+            const res = await fetch('/api/admin/catalogs');
+            if (!res.ok) throw new Error('İstek başarısız');
+            const data = await res.json();
+            renderBuiltin(data.builtin || []);
+            renderCustom(data.custom || []);
+        } catch (err) {
+            document.getElementById('builtin-grid').innerHTML =
+                '<div class="theme-card border rounded-xl p-5 text-center text-red-500 text-sm col-span-full">Katalog bilgileri yüklenemedi.</div>';
+            document.getElementById('custom-list').innerHTML =
+                '<div class="theme-card border rounded-xl p-6 text-center text-red-500 text-sm">Katalog bilgileri yüklenemedi.</div>';
+        }
+    }
+
+    function renderBuiltin(list) {
+        const grid = document.getElementById('builtin-grid');
+        if (!list.length) {
+            grid.innerHTML = '<div class="theme-card border rounded-xl p-5 text-center theme-text-secondary text-sm col-span-full">Hazır katalog bulunamadı.</div>';
+            return;
+        }
+        grid.innerHTML = list.map(c => `
+            <label class="toggle-wrap-card theme-card border rounded-xl p-4 flex items-center justify-between gap-3 cursor-pointer">
+                <span class="text-sm font-medium text-text">${escapeHtml(c.label)}</span>
+                <span class="switch-wrap">
+                    <input type="checkbox" class="switch-input" ${c.enabled ? 'checked' : ''}
+                        onchange="toggleBuiltin('${c.id}', this.checked)">
+                    <span class="switch-track"></span>
+                </span>
+            </label>
+        `).join('');
+    }
+
+    async function toggleBuiltin(catalogId, enabled) {
+        try {
+            const res = await fetch('/api/admin/catalogs/builtin/toggle', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ catalog_id: catalogId, enabled })
+            });
+            if (!res.ok) throw new Error();
+        } catch (err) {
+            alert('Katalog durumu güncellenemedi.');
+            loadBuiltinCatalogs();
+        }
+    }
+
+    // ── Özel kataloglar ─────────────────────────────────────────────────
+    function renderCustom(list) {
+        _customCatalogs = list;
+        const wrap = document.getElementById('custom-list');
+        if (!list.length) {
+            wrap.innerHTML = '<div class="theme-card border rounded-xl p-8 text-center theme-text-secondary text-sm">Henüz özel katalog yok. "Yeni Katalog" ile başlayın.</div>';
+            return;
+        }
+        const typeLabel = { movie: 'Film', series: 'Dizi', mixed: 'Film + Dizi' };
+        wrap.innerHTML = list.map(c => `
+            <div class="theme-card border rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div class="min-w-0">
+                    <div class="flex items-center gap-2 flex-wrap">
+                        <span class="font-semibold text-text">${escapeHtml(c.name)}</span>
+                        <span class="text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary">${typeLabel[c.media_type] || c.media_type}</span>
+                        <span class="text-xs px-2 py-0.5 rounded-full ${c.active ? 'bg-green-500/10 text-green-500' : 'bg-gray-500/10 theme-text-secondary'}">${c.active ? 'Aktif' : 'Pasif'}</span>
+                    </div>
+                    <p class="text-xs theme-text-secondary mt-1">${c.item_count} içerik</p>
+                    ${(c.keywords && c.keywords.length) ? `
+                    <p class="text-xs theme-text-secondary mt-1.5 flex items-center flex-wrap gap-1">
+                        <i class="fas fa-magic mr-1"></i>
+                        ${c.keywords.map(k => `<span class="px-1.5 py-0.5 rounded bg-primary/10 text-primary">${escapeHtml(k)}</span>`).join('')}
+                    </p>` : ''}
+                </div>
+                <div class="flex items-center gap-2 shrink-0">
+                    <button onclick="openItemsModal('${c._id}', '${escapeAttr(c.name)}')"
+                        class="px-3 py-1.5 rounded-md text-xs font-medium border theme-card hover:bg-white/5 transition-colors">
+                        <i class="fas fa-film mr-1"></i> İçerik Yönet
+                    </button>
+                    ${(c.keywords && c.keywords.length) ? `
+                    <button onclick="rescanCustomCatalog('${c._id}', '${escapeAttr(c.name)}')"
+                        class="px-3 py-1.5 rounded-md text-xs font-medium border theme-card hover:bg-white/5 transition-colors" title="Kütüphanede zaten var olan içerikleri kelimelere göre tara">
+                        <i class="fas fa-magnifying-glass mr-1"></i> Kelimelere Göre Tara
+                    </button>` : ''}
+                    <button onclick="toggleCustomActive('${c._id}', ${!c.active})"
+                        class="px-3 py-1.5 rounded-md text-xs font-medium border theme-card hover:bg-white/5 transition-colors">
+                        ${c.active ? '<i class="fas fa-eye-slash mr-1"></i> Kapat' : '<i class="fas fa-eye mr-1"></i> Aç'}
+                    </button>
+                    <button onclick="openEditModal('${c._id}', '${escapeAttr(c.name)}', '${c.media_type}')"
+                        class="px-3 py-1.5 rounded-md text-xs font-medium border theme-card hover:bg-white/5 transition-colors">
+                        <i class="fas fa-pen"></i>
+                    </button>
+                    <button onclick="deleteCustomCatalog('${c._id}', '${escapeAttr(c.name)}')"
+                        class="px-3 py-1.5 rounded-md text-xs font-medium bg-red-500/10 text-red-500 hover:bg-red-500/20 transition-colors">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    async function toggleCustomActive(catalogId, active) {
+        try {
+            const res = await fetch(`/api/admin/catalogs/custom/${catalogId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ active })
+            });
+            if (!res.ok) throw new Error();
+            loadBuiltinCatalogs();
+        } catch (err) {
+            alert('Katalog durumu güncellenemedi.');
+        }
+    }
+
+    async function deleteCustomCatalog(catalogId, name) {
+        if (!confirm(`"${name}" kataloğunu silmek istediğinizden emin misiniz? Bu işlem geri alınamaz.`)) return;
+        try {
+            const res = await fetch(`/api/admin/catalogs/custom/${catalogId}`, { method: 'DELETE' });
+            if (!res.ok) throw new Error();
+            loadBuiltinCatalogs();
+        } catch (err) {
+            alert('Katalog silinemedi.');
+        }
+    }
+
+    let _rescanPollTimer = null;
+
+    async function rescanCustomCatalog(catalogId, name) {
+        if (!confirm(`"${name}" kataloğu için, kelimeler eklenmeden ÖNCE kütüphaneye eklenmiş içerikler taransın mı? Dosya adında tanımlı kelimelerden biri geçen tüm film/diziler bu kataloga eklenecek.`)) return;
+
+        try {
+            const startRes = await fetch(`/api/admin/catalogs/custom/${catalogId}/rescan`, { method: 'POST' });
+            const startData = await startRes.json().catch(() => ({}));
+            if (!startRes.ok) throw new Error(startData.detail || 'Tarama başlatılamadı');
+
+            const jobId = startData.job_id;
+            _showRescanProgressModal();
+            _pollRescanJob(jobId);
+        } catch (err) {
+            alert(err.message || 'Tarama başlatılamadı.');
+        }
+    }
+
+    function _showRescanProgressModal() {
+        document.getElementById('rescan-progress-modal').classList.remove('hidden');
+        document.getElementById('rescan-progress-stage').textContent = 'başlıyor…';
+        document.getElementById('rescan-progress-bar').style.width = '0%';
+        document.getElementById('rescan-progress-count').textContent = '0 / 0 kontrol edildi';
+        document.getElementById('rescan-progress-matched').textContent = '0 eşleşme';
+    }
+
+    function _pollRescanJob(jobId) {
+        if (_rescanPollTimer) clearInterval(_rescanPollTimer);
+
+        _rescanPollTimer = setInterval(async () => {
+            try {
+                const res = await fetch(`/api/admin/catalogs/custom/rescan/status/${jobId}`);
+                if (!res.ok) throw new Error();
+                const job = await res.json();
+
+                const total = job.total || 0;
+                const pct = total > 0 ? Math.min(100, Math.round((job.checked / total) * 100)) : 0;
+                document.getElementById('rescan-progress-bar').style.width = pct + '%';
+                document.getElementById('rescan-progress-stage').textContent =
+                    job.status === 'running' ? `taranıyor: ${job.collection || '...'}` : (job.collection || '');
+                document.getElementById('rescan-progress-count').textContent =
+                    `${job.checked || 0} / ${total || '?'} kontrol edildi`;
+                document.getElementById('rescan-progress-matched').textContent = `${job.matched || 0} eşleşme`;
+
+                if (job.status === 'done' || job.status === 'error') {
+                    clearInterval(_rescanPollTimer);
+                    _rescanPollTimer = null;
+                    document.getElementById('rescan-progress-modal').classList.add('hidden');
+
+                    if (job.status === 'error') {
+                        alert(`Tarama başarısız: ${job.error || 'bilinmeyen hata'}`);
+                    } else {
+                        let msg = `Tarama tamamlandı: ${job.checked} içerik kontrol edildi, ${job.matched} tanesi kataloga eklendi.`;
+                        if (job.partial_error) msg += `\n\nUyarı: ${job.partial_error}`;
+                        alert(msg);
+                    }
+                    loadBuiltinCatalogs();
+                }
+            } catch (err) {
+                clearInterval(_rescanPollTimer);
+                _rescanPollTimer = null;
+                document.getElementById('rescan-progress-modal').classList.add('hidden');
+                alert('Tarama durumu alınamadı, bağlantı kesildi.');
+            }
+        }, 1200);
+    }
+
+    // ── Yeni/Düzenle Katalog Modal ──────────────────────────────────────
+    function openCreateModal() {
+        document.getElementById('catalog-modal-title').textContent = 'Yeni Katalog';
+        document.getElementById('catalog-modal-id').value = '';
+        document.getElementById('catalog-modal-name').value = '';
+        document.getElementById('catalog-modal-type').value = 'mixed';
+        document.getElementById('catalog-modal-keywords').value = '';
+        document.getElementById('catalog-modal').classList.remove('hidden');
+    }
+
+    function openEditModal(catalogId, name, mediaType) {
+        const cat = _customCatalogs.find(c => c._id === catalogId);
+        document.getElementById('catalog-modal-title').textContent = 'Katalogu Düzenle';
+        document.getElementById('catalog-modal-id').value = catalogId;
+        document.getElementById('catalog-modal-name').value = name;
+        document.getElementById('catalog-modal-type').value = mediaType;
+        document.getElementById('catalog-modal-keywords').value = (cat && cat.keywords ? cat.keywords : []).join(', ');
+        document.getElementById('catalog-modal').classList.remove('hidden');
+    }
+
+    function closeCatalogModal() {
+        document.getElementById('catalog-modal').classList.add('hidden');
+    }
+
+    async function saveCatalogModal() {
+        const id = document.getElementById('catalog-modal-id').value;
+        const name = document.getElementById('catalog-modal-name').value.trim();
+        const media_type = document.getElementById('catalog-modal-type').value;
+        const keywords = document.getElementById('catalog-modal-keywords').value
+            .split(',').map(k => k.trim()).filter(Boolean);
+
+        if (!name) { alert('Lütfen katalog adı girin.'); return; }
+
+        try {
+            let res;
+            if (id) {
+                res = await fetch(`/api/admin/catalogs/custom/${id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, media_type, keywords })
+                });
+            } else {
+                res = await fetch('/api/admin/catalogs/custom', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, media_type, keywords })
+                });
+            }
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.detail || 'İstek başarısız');
+            }
+            closeCatalogModal();
+            loadBuiltinCatalogs();
+        } catch (err) {
+            alert(err.message || 'Katalog kaydedilemedi.');
+        }
+    }
+
+    // ── İçerik Yönet Modal ──────────────────────────────────────────────
+    function openItemsModal(catalogId, name) {
+        _activeItemsCatalogId = catalogId;
+        document.getElementById('items-modal-title').textContent = `İçerik Yönet — ${name}`;
+        document.getElementById('items-search-input').value = '';
+        document.getElementById('items-search-results').classList.add('hidden');
+        document.getElementById('items-search-results').innerHTML = '';
+        document.getElementById('items-modal').classList.remove('hidden');
+        loadCatalogItems();
+    }
+
+    function closeItemsModal() {
+        document.getElementById('items-modal').classList.add('hidden');
+        _activeItemsCatalogId = null;
+    }
+
+    async function loadCatalogItems() {
+        const list = document.getElementById('items-current-list');
+        list.innerHTML = '<div class="text-center py-6 theme-text-secondary text-sm"><i class="fas fa-spinner fa-spin mr-2"></i> Yükleniyor...</div>';
+        try {
+            const res = await fetch(`/api/admin/catalogs/custom/${_activeItemsCatalogId}/items`);
+            if (!res.ok) throw new Error();
+            const data = await res.json();
+            const items = data.items || [];
+            if (!items.length) {
+                list.innerHTML = '<div class="text-center py-6 theme-text-secondary text-sm">Bu katalogda henüz içerik yok. Yukarıdan arayıp ekleyebilirsiniz.</div>';
+                return;
+            }
+            list.innerHTML = items.map(it => `
+                <div class="flex items-center gap-3 theme-card border rounded-lg p-2">
+                    ${it.poster ? `<img src="${escapeAttr(it.poster)}" class="w-9 h-13 object-cover rounded shrink-0" style="height:52px" onerror="this.style.display='none'">` : ''}
+                    <div class="min-w-0 flex-1">
+                        <div class="text-sm font-medium text-text truncate">${escapeHtml(it.title || it.imdb_id)}</div>
+                        <div class="text-xs theme-text-secondary">${it.media_type === 'tv' ? 'Dizi' : 'Film'} · ${escapeHtml(it.imdb_id)}</div>
+                    </div>
+                    <button onclick="removeCatalogItem('${escapeAttr(it.imdb_id)}')"
+                        class="text-red-500 hover:text-red-600 bg-red-500/10 hover:bg-red-500/20 rounded p-2 transition-colors shrink-0" title="Kaldır">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            `).join('');
+        } catch (err) {
+            list.innerHTML = '<div class="text-center py-6 text-red-500 text-sm">İçerikler yüklenemedi.</div>';
+        }
+    }
+
+    async function searchMediaToAdd() {
+        const q = document.getElementById('items-search-input').value.trim();
+        const resultsBox = document.getElementById('items-search-results');
+        if (!q) { resultsBox.classList.add('hidden'); resultsBox.innerHTML = ''; return; }
+
+        resultsBox.classList.remove('hidden');
+        resultsBox.innerHTML = '<div class="p-3 text-center theme-text-secondary text-sm"><i class="fas fa-spinner fa-spin mr-2"></i> Aranıyor...</div>';
+
+        try {
+            const res = await fetch(`/api/admin/catalogs/media-search?q=${encodeURIComponent(q)}`);
+            if (!res.ok) throw new Error();
+            const data = await res.json();
+            const results = data.results || [];
+            if (!results.length) {
+                resultsBox.innerHTML = '<div class="p-3 text-center theme-text-secondary text-sm">Sonuç bulunamadı.</div>';
+                return;
+            }
+            resultsBox.innerHTML = results.map(r => `
+                <div class="flex items-center gap-3 p-2">
+                    ${r.poster ? `<img src="${escapeAttr(r.poster)}" class="w-9 rounded shrink-0" style="height:52px;object-fit:cover" onerror="this.style.display='none'">` : ''}
+                    <div class="min-w-0 flex-1">
+                        <div class="text-sm font-medium text-text truncate">${escapeHtml(r.title)}</div>
+                        <div class="text-xs theme-text-secondary">${r.media_type === 'tv' ? 'Dizi' : 'Film'}${r.release_year ? ' · ' + r.release_year : ''}</div>
+                    </div>
+                    <button onclick="addCatalogItem('${escapeAttr(r.imdb_id)}')"
+                        class="px-3 py-1.5 rounded-md text-xs font-medium bg-primary text-white hover:opacity-90 transition-colors shrink-0">
+                        <i class="fas fa-plus mr-1"></i> Ekle
+                    </button>
+                </div>
+            `).join('');
+        } catch (err) {
+            resultsBox.innerHTML = '<div class="p-3 text-center text-red-500 text-sm">Arama başarısız.</div>';
+        }
+    }
+
+    async function addCatalogItem(imdbId) {
+        try {
+            const res = await fetch(`/api/admin/catalogs/custom/${_activeItemsCatalogId}/items`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ imdb_id: imdbId })
+            });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.detail || 'Eklenemedi');
+            }
+            loadCatalogItems();
+            loadBuiltinCatalogs();
+        } catch (err) {
+            alert(err.message || 'İçerik eklenemedi.');
+        }
+    }
+
+    async function removeCatalogItem(imdbId) {
+        try {
+            const res = await fetch(`/api/admin/catalogs/custom/${_activeItemsCatalogId}/items/${encodeURIComponent(imdbId)}`, {
+                method: 'DELETE'
+            });
+            if (!res.ok) throw new Error();
+            loadCatalogItems();
+            loadBuiltinCatalogs();
+        } catch (err) {
+            alert('İçerik kaldırılamadı.');
+        }
+    }
+
+    // ── Yardımcılar ──────────────────────────────────────────────────────
+    function escapeHtml(str) {
+        return String(str ?? '').replace(/[&<>"']/g, m => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        }[m]));
+    }
+    function escapeAttr(str) {
+        return String(str ?? '').replace(/'/g, "\\'");
+    }
+
+    document.addEventListener('DOMContentLoaded', loadBuiltinCatalogs);
+</script>
+
+<style>
+.switch-wrap { position: relative; display: inline-flex; align-items: center; cursor: pointer; flex-shrink: 0; }
+.switch-input { position: absolute; opacity: 0; width: 0; height: 0; }
+.switch-track {
+    display: inline-block; width: 3rem; height: 1.625rem;
+    border-radius: 9999px; background: var(--hairline, #374151);
+    position: relative; transition: background 0.2s ease;
+}
+.switch-track::after {
+    content: ''; position: absolute; top: 3px; left: 3px;
+    width: 20px; height: 20px; border-radius: 50%; background: white;
+    transition: transform 0.2s ease; box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+}
+.switch-input:checked + .switch-track { background: var(--primary); }
+.switch-input:checked + .switch-track::after { transform: translateX(1.375rem); }
+</style>
+{% endblock %}

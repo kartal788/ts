@@ -55,6 +55,38 @@ async def admin_dashboard_page(request: Request, _: bool = Depends(require_auth)
         "owner_name": owner_name,
     })
 
+async def araclar_page(request: Request, _: bool = Depends(require_auth)):
+    theme_name = request.session.get("theme", "purple_gradient")
+    theme = get_theme(theme_name)
+    current_user = get_current_user(request)
+    owner_name = await _get_owner_name()
+
+    return templates.TemplateResponse("araclar.html", {
+        "request": request,
+        "theme": theme,
+        "themes": get_all_themes(),
+        "current_theme": theme_name,
+        "app_name": Telegram.ISIM,
+        "current_user": current_user,
+        "owner_name": owner_name,
+    })
+
+async def kataloglar_page(request: Request, _: bool = Depends(require_auth)):
+    theme_name = request.session.get("theme", "purple_gradient")
+    theme = get_theme(theme_name)
+    current_user = get_current_user(request)
+    owner_name = await _get_owner_name()
+
+    return templates.TemplateResponse("kataloglar.html", {
+        "request": request,
+        "theme": theme,
+        "themes": get_all_themes(),
+        "current_theme": theme_name,
+        "app_name": Telegram.ISIM,
+        "current_user": current_user,
+        "owner_name": owner_name,
+    })
+
 async def login_page(request: Request):
     if is_authenticated(request):
         return RedirectResponse(url="/", status_code=302)
@@ -331,6 +363,22 @@ async def edit_media_page(request: Request, tmdb_id: int, db_index: int, media_t
 
         raise HTTPException(status_code=500, detail="Sunucu hatası")
     
+    # "İçerik Ekle" (attach-mode) paneli için hafif sezon/bölüm özeti:
+    # her sezonun en yüksek bölüm numarasını taşır, böylece panelde
+    # varsayılan sezon/bölüm no "son bölümden bir sonraki" olarak
+    # önerilebilir (media_details.seasons'ın tamamını tekrar JS'e
+    # göndermeye gerek kalmadan).
+    season_summary = []
+    if media_type == "tv" and media_details and media_details.get("seasons"):
+        for season in media_details["seasons"]:
+            episodes = season.get("episodes") or []
+            max_episode = max((ep.get("episode_number") or 0) for ep in episodes) if episodes else 0
+            season_summary.append({
+                "season_number": season.get("season_number"),
+                "max_episode": max_episode,
+            })
+        season_summary.sort(key=lambda s: s["season_number"] or 0)
+
     return templates.TemplateResponse("media_edit.html", {
         "request": request,
         "theme": theme,
@@ -342,6 +390,7 @@ async def edit_media_page(request: Request, tmdb_id: int, db_index: int, media_t
         "db_index": db_index,
         "media_type": media_type,
         "media_details": media_details,
+        "season_summary": season_summary,
         "gecici_token": ""
     })
 

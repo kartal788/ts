@@ -1,0 +1,331 @@
+{% extends "base.html" %}
+
+{% block title %}Araçlar - Telegram Stremio{% endblock %}
+
+{% block content %}
+<div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 text-text">
+    <div class="mb-8">
+        <h1 class="text-3xl font-bold text-text">Araçlar</h1>
+        <p class="mt-2 text-sm theme-text-secondary">Bakım komutlarını panelden başlatın ve ilerlemeyi canlı izleyin.</p>
+    </div>
+
+    <div class="space-y-6">
+
+        <!-- ═══════════════ TARA ═══════════════ -->
+        <div class="theme-card rounded-xl border shadow-sm overflow-hidden">
+            <div class="flex items-center justify-between px-6 py-4 border-b">
+                <div class="flex items-center gap-3">
+                    <div class="bg-primary/10 p-2 rounded-lg"><i class="fas fa-satellite-dish text-primary"></i></div>
+                    <div>
+                        <h3 class="text-base font-semibold text-text">Kanal Tarama <span class="text-xs font-normal theme-text-secondary">/tara</span></h3>
+                        <p class="text-xs theme-text-secondary">AUTH_CHANNEL kanallarını tarayıp kataloğa ekler.</p>
+                    </div>
+                </div>
+                <span id="tara-badge" class="text-[10px] px-2 py-0.5 rounded-full uppercase font-bold tracking-wider bg-white/10 theme-text-secondary">Boşta</span>
+            </div>
+
+            <div class="px-6 py-5">
+                <div class="flex flex-wrap gap-3 mb-4">
+                    <button id="tara-full-btn" onclick="taraStart('full')"
+                        class="btn-primary px-4 py-2 text-sm rounded-md flex items-center gap-2">
+                        <i class="fas fa-broom"></i> Veritabanını sil ve baştan tara
+                    </button>
+                    <button id="tara-db-btn" onclick="taraStart('db')"
+                        class="bg-white/10 hover:bg-white/20 text-text px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2">
+                        <i class="fas fa-plus"></i> Mevcut kayıtları koru, sadece yenileri ekle
+                    </button>
+                    <button id="tara-iptal-btn" onclick="taraIptal()" disabled
+                        class="bg-red-600 hover:bg-red-700 disabled:opacity-30 disabled:cursor-not-allowed text-white px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2">
+                        <i class="fas fa-stop"></i> İptal
+                    </button>
+                </div>
+
+                <div id="tara-progress" class="hidden">
+                    <div class="text-sm font-medium text-text mb-2" id="tara-phase">📡 Taranıyor: —</div>
+                    <div class="w-full h-2.5 rounded-full bg-white/10 overflow-hidden mb-3">
+                        <div id="tara-bar" class="h-full bg-primary transition-all duration-500" style="width:0%"></div>
+                    </div>
+                    <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
+                        <div><span class="theme-text-secondary">Süre:</span> <span id="tara-elapsed" class="font-semibold">—</span></div>
+                        <div><span class="theme-text-secondary">İşlenen:</span> <span id="tara-processed" class="font-semibold">0</span></div>
+                        <div><span class="theme-text-secondary">Eklenen:</span> <span id="tara-indexed" class="font-semibold text-green-500">0</span></div>
+                        <div><span class="theme-text-secondary">Atlandı (DB):</span> <span id="tara-dup" class="font-semibold">0</span></div>
+                        <div><span class="theme-text-secondary">Atlandı (meta):</span> <span id="tara-meta" class="font-semibold">0</span></div>
+                        <div><span class="theme-text-secondary">Hata:</span> <span id="tara-errors" class="font-semibold text-red-500">0</span></div>
+                    </div>
+                </div>
+                <div id="tara-idle-msg" class="text-sm theme-text-secondary">Şu an çalışan bir tarama yok.</div>
+            </div>
+        </div>
+
+        <!-- ═══════════════ AYNI VİDEOLARI SİL ═══════════════ -->
+        <div class="theme-card rounded-xl border shadow-sm overflow-hidden">
+            <div class="flex items-center justify-between px-6 py-4 border-b">
+                <div class="flex items-center gap-3">
+                    <div class="bg-primary/10 p-2 rounded-lg"><i class="fas fa-clone text-primary"></i></div>
+                    <div>
+                        <h3 class="text-base font-semibold text-text">Aynı Videoları Sil <span class="text-xs font-normal theme-text-secondary">/aynivideolarisil</span></h3>
+                        <p class="text-xs theme-text-secondary">Mükerrer (isim + boyut eşleşen) video kayıtlarını temizler.</p>
+                    </div>
+                </div>
+                <span id="ayni-badge" class="text-[10px] px-2 py-0.5 rounded-full uppercase font-bold tracking-wider bg-white/10 theme-text-secondary">Boşta</span>
+            </div>
+
+            <div class="px-6 py-5">
+                <button id="ayni-start-btn" onclick="ayniStart()"
+                    class="btn-primary px-4 py-2 text-sm rounded-md flex items-center gap-2 mb-4">
+                    <i class="fas fa-play"></i> Taramayı Başlat
+                </button>
+
+                <div id="ayni-progress" class="hidden">
+                    <div class="text-sm font-medium text-text mb-2" id="ayni-phase">—</div>
+                    <div class="w-full h-2.5 rounded-full bg-white/10 overflow-hidden mb-3">
+                        <div id="ayni-bar" class="h-full bg-primary transition-all duration-500" style="width:0%"></div>
+                    </div>
+                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+                        <div><span class="theme-text-secondary">%</span> <span id="ayni-pct" class="font-semibold">0%</span></div>
+                        <div><span class="theme-text-secondary">İşlenen:</span> <span id="ayni-processed" class="font-semibold">0</span>/<span id="ayni-total">0</span></div>
+                        <div><span class="theme-text-secondary">Güncellenen kayıt:</span> <span id="ayni-docs" class="font-semibold">0</span></div>
+                        <div><span class="theme-text-secondary">Silinen video:</span> <span id="ayni-removed" class="font-semibold text-red-500">0</span></div>
+                    </div>
+                </div>
+                <div id="ayni-idle-msg" class="text-sm theme-text-secondary">Şu an çalışan bir işlem yok.</div>
+            </div>
+        </div>
+
+        <!-- ═══════════════ İÇERİK SİL ═══════════════ -->
+        <div class="theme-card rounded-xl border shadow-sm overflow-hidden">
+            <div class="flex items-center justify-between px-6 py-4 border-b">
+                <div class="flex items-center gap-3">
+                    <div class="bg-primary/10 p-2 rounded-lg"><i class="fas fa-eraser text-primary"></i></div>
+                    <div>
+                        <h3 class="text-base font-semibold text-text">İçerik Sil <span class="text-xs font-normal theme-text-secondary">/iceriksil</span></h3>
+                        <p class="text-xs theme-text-secondary">Video adında anahtar kelime geçen kayıtları siler.</p>
+                    </div>
+                </div>
+                <span id="iceriksil-badge" class="text-[10px] px-2 py-0.5 rounded-full uppercase font-bold tracking-wider bg-white/10 theme-text-secondary">Boşta</span>
+            </div>
+
+            <div class="px-6 py-5">
+                <div class="flex flex-wrap items-center gap-3 mb-4">
+                    <input id="iceriksil-keyword" type="text" placeholder="Anahtar kelime (örn. blm)"
+                        class="flex-1 min-w-[200px] px-3 py-2 rounded-md bg-white/5 border border-white/10 text-sm text-text placeholder:theme-text-secondary focus:outline-none focus:ring-2 focus:ring-primary">
+                    <button onclick="iceriksilStart(true)" id="iceriksil-test-btn"
+                        class="bg-white/10 hover:bg-white/20 text-text px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2">
+                        <i class="fas fa-magnifying-glass"></i> Test (silme yapma)
+                    </button>
+                    <button onclick="iceriksilStart(false)" id="iceriksil-del-btn"
+                        class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2">
+                        <i class="fas fa-trash-alt"></i> Sil
+                    </button>
+                </div>
+
+                <div id="iceriksil-progress" class="hidden">
+                    <div class="text-sm font-medium text-text mb-2" id="iceriksil-phase">—</div>
+                    <div class="w-full h-2.5 rounded-full bg-white/10 overflow-hidden mb-3">
+                        <div id="iceriksil-bar" class="h-full bg-primary transition-all duration-500" style="width:0%"></div>
+                    </div>
+                    <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
+                        <div><span class="theme-text-secondary">%</span> <span id="iceriksil-pct" class="font-semibold">0%</span></div>
+                        <div><span class="theme-text-secondary">İşlenen:</span> <span id="iceriksil-processed" class="font-semibold">0</span>/<span id="iceriksil-total">0</span></div>
+                        <div><span class="theme-text-secondary">Eşleşen video:</span> <span id="iceriksil-hits" class="font-semibold text-yellow-500">0</span></div>
+                    </div>
+                </div>
+                <div id="iceriksil-idle-msg" class="text-sm theme-text-secondary">Şu an çalışan bir işlem yok.</div>
+                <div id="iceriksil-result" class="hidden mt-4 max-h-64 overflow-y-auto text-xs bg-black/20 rounded-md p-3 font-mono whitespace-pre-wrap"></div>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<script>
+// ─────────────────────────────────────────────────────────────
+// Ortak yardımcı
+// ─────────────────────────────────────────────────────────────
+function setBadge(id, running, label) {
+    const el = document.getElementById(id);
+    el.textContent = label;
+    el.className = "text-[10px] px-2 py-0.5 rounded-full uppercase font-bold tracking-wider " +
+        (running ? "bg-green-500/10 text-green-500" : "bg-white/10 theme-text-secondary");
+}
+
+// ─────────────────────────────────────────────────────────────
+// TARA
+// ─────────────────────────────────────────────────────────────
+async function taraStart(mode) {
+    document.getElementById('tara-full-btn').disabled = true;
+    document.getElementById('tara-db-btn').disabled = true;
+    try {
+        const res = await fetch('/api/araclar/tara/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mode })
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            alert(err.detail || 'Başlatılamadı.');
+        }
+    } catch (e) { console.error(e); }
+    document.getElementById('tara-full-btn').disabled = false;
+    document.getElementById('tara-db-btn').disabled = false;
+    pollTara();
+}
+
+async function taraIptal() {
+    try {
+        await fetch('/api/araclar/tara/iptal', { method: 'POST' });
+    } catch (e) { console.error(e); }
+}
+
+async function pollTara() {
+    try {
+        const res = await fetch('/api/araclar/tara/status');
+        if (!res.ok) return;
+        const s = await res.json();
+
+        setBadge('tara-badge', s.running, s.running ? 'Çalışıyor' : 'Boşta');
+        document.getElementById('tara-iptal-btn').disabled = !s.running;
+        document.getElementById('tara-full-btn').disabled = s.running;
+        document.getElementById('tara-db-btn').disabled = s.running;
+
+        if (s.running || s.processed > 0) {
+            document.getElementById('tara-progress').classList.remove('hidden');
+            document.getElementById('tara-idle-msg').classList.add('hidden');
+            document.getElementById('tara-phase').textContent =
+                (s.running ? '📡 Taranıyor: ' : (s.cancelled ? '🛑 İptal edildi: ' : '✅ Tamamlandı: ')) + (s.channel_name || '—');
+            const pct = s.total_found ? Math.min(100, (s.processed / s.total_found) * 100) : (s.running ? 5 : 100);
+            document.getElementById('tara-bar').style.width = pct + '%';
+            document.getElementById('tara-elapsed').textContent = s.elapsed;
+            document.getElementById('tara-processed').textContent = s.processed.toLocaleString();
+            document.getElementById('tara-indexed').textContent = s.indexed.toLocaleString();
+            document.getElementById('tara-dup').textContent = s.skipped_dup.toLocaleString();
+            document.getElementById('tara-meta').textContent = (s.skipped_meta + s.skipped_nonvid).toLocaleString();
+            document.getElementById('tara-errors').textContent = s.errors.toLocaleString();
+        } else {
+            document.getElementById('tara-progress').classList.add('hidden');
+            document.getElementById('tara-idle-msg').classList.remove('hidden');
+        }
+    } catch (e) { console.error(e); }
+}
+
+// ─────────────────────────────────────────────────────────────
+// AYNI VİDEOLARI SİL
+// ─────────────────────────────────────────────────────────────
+async function ayniStart() {
+    document.getElementById('ayni-start-btn').disabled = true;
+    try {
+        const res = await fetch('/api/araclar/aynivideolarisil/start', { method: 'POST' });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            alert(err.detail || 'Başlatılamadı.');
+        }
+    } catch (e) { console.error(e); }
+    pollAyni();
+}
+
+async function pollAyni() {
+    try {
+        const res = await fetch('/api/araclar/aynivideolarisil/status');
+        if (!res.ok) return;
+        const s = await res.json();
+
+        setBadge('ayni-badge', s.running, s.running ? 'Çalışıyor' : 'Boşta');
+        document.getElementById('ayni-start-btn').disabled = s.running;
+
+        if (s.running || s.processed > 0) {
+            document.getElementById('ayni-progress').classList.remove('hidden');
+            document.getElementById('ayni-idle-msg').classList.add('hidden');
+            document.getElementById('ayni-phase').textContent =
+                s.error ? ('❌ Hata: ' + s.error) : (s.running ? ('⏳ ' + s.phase) : '✅ ' + s.phase);
+            document.getElementById('ayni-bar').style.width = s.percent + '%';
+            document.getElementById('ayni-pct').textContent = s.percent.toFixed(1) + '%';
+            document.getElementById('ayni-processed').textContent = s.processed.toLocaleString();
+            document.getElementById('ayni-total').textContent = s.total.toLocaleString();
+            document.getElementById('ayni-docs').textContent = s.total_docs.toLocaleString();
+            document.getElementById('ayni-removed').textContent = s.total_removed.toLocaleString();
+        } else {
+            document.getElementById('ayni-progress').classList.add('hidden');
+            document.getElementById('ayni-idle-msg').classList.remove('hidden');
+        }
+    } catch (e) { console.error(e); }
+}
+
+// ─────────────────────────────────────────────────────────────
+// İÇERİK SİL
+// ─────────────────────────────────────────────────────────────
+async function iceriksilStart(test) {
+    const keyword = document.getElementById('iceriksil-keyword').value.trim();
+    if (!keyword) { alert('Anahtar kelime girin.'); return; }
+    if (!test && !confirm(`"${keyword}" ile eşleşen videolar KALICI olarak silinecek. Emin misiniz?`)) return;
+
+    document.getElementById('iceriksil-test-btn').disabled = true;
+    document.getElementById('iceriksil-del-btn').disabled = true;
+    document.getElementById('iceriksil-result').classList.add('hidden');
+    try {
+        const res = await fetch('/api/araclar/iceriksil/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ keyword, test })
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            alert(err.detail || 'Başlatılamadı.');
+        }
+    } catch (e) { console.error(e); }
+    document.getElementById('iceriksil-test-btn').disabled = false;
+    document.getElementById('iceriksil-del-btn').disabled = false;
+    pollIceriksil();
+}
+
+function renderIceriksilResult(result) {
+    const box = document.getElementById('iceriksil-result');
+    if (!result || result.total === 0) {
+        box.textContent = 'Eşleşen video bulunamadı.';
+        box.classList.remove('hidden');
+        return;
+    }
+    let lines = [];
+    result.films.forEach((f, i) => lines.push(`${i + 1}) [${f.title}] ${f.video}`));
+    result.series.forEach((s, i) => lines.push(`${i + 1}) [${s.title}] S${String(s.season).padStart(2, '0')}E${String(s.episode).padStart(2, '0')} — ${s.video}`));
+    if (result.truncated) lines.push(`… ve daha fazlası (toplam ${result.total})`);
+    box.textContent = lines.join('\n');
+    box.classList.remove('hidden');
+}
+
+async function pollIceriksil() {
+    try {
+        const res = await fetch('/api/araclar/iceriksil/status');
+        if (!res.ok) return;
+        const s = await res.json();
+
+        setBadge('iceriksil-badge', s.running, s.running ? 'Çalışıyor' : 'Boşta');
+        document.getElementById('iceriksil-test-btn').disabled = s.running;
+        document.getElementById('iceriksil-del-btn').disabled = s.running;
+
+        if (s.running || s.processed > 0) {
+            document.getElementById('iceriksil-progress').classList.remove('hidden');
+            document.getElementById('iceriksil-idle-msg').classList.add('hidden');
+            document.getElementById('iceriksil-phase').textContent =
+                s.error ? ('❌ Hata: ' + s.error) : (s.running ? `⏳ ${s.phase} — anahtar: "${s.keyword}" (${s.mode})` : `✅ ${s.phase} — anahtar: "${s.keyword}"`);
+            document.getElementById('iceriksil-bar').style.width = s.percent + '%';
+            document.getElementById('iceriksil-pct').textContent = s.percent.toFixed(1) + '%';
+            document.getElementById('iceriksil-processed').textContent = s.processed.toLocaleString();
+            document.getElementById('iceriksil-total').textContent = s.total.toLocaleString();
+            document.getElementById('iceriksil-hits').textContent = s.hits.toLocaleString();
+
+            if (!s.running && s.result) renderIceriksilResult(s.result);
+        } else {
+            document.getElementById('iceriksil-progress').classList.add('hidden');
+            document.getElementById('iceriksil-idle-msg').classList.remove('hidden');
+        }
+    } catch (e) { console.error(e); }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Sayfa yüklenince ve her 2 saniyede bir durumları kontrol et
+// ─────────────────────────────────────────────────────────────
+pollTara(); pollAyni(); pollIceriksil();
+setInterval(() => { pollTara(); pollAyni(); pollIceriksil(); }, 2000);
+</script>
+{% endblock %}

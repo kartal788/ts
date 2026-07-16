@@ -60,6 +60,17 @@ _DEFAULTS: Dict[str, Any] = {
     "multi_tokens": [],
     "announce_new_content": False,
     "announcement_channel": "",
+    #----- /start komutuna aktif aboneliği olmayan kullanıcılara gösterilen
+    #----- mesaj (satın alınabilir planlar listelenmeden önceki üst metin).
+    #----- İçinde geçen {isim} ifadesi gönderim anında Telegram.ISIM ile
+    #----- değiştirilir.
+    "uye_olmayan_mesaji": (
+        "<b>{isim} ile sinema keyfine hazır mısın?</b>\n\n"
+        "Stremio üzerinden sunduğumuz özel içeriklere erişebilmen için aktif "
+        "bir aboneliğin olması gerekiyor. Merak etme, senin için en avantajlı "
+        "planları aşağıda listeledik.\n\n"
+        "🚀 Hemen başlamak için bir plan seç:"
+    ),
 }
 
 #----- settings key -> Backend.config.Telegram attribute adı

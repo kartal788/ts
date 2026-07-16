@@ -9,6 +9,7 @@ from Backend.helper.platform_catalog import platform_catalog, PLATFORM_LABELS
 import PTN
 from datetime import datetime, timezone, timedelta
 from Backend.fastapi.security.tokens import verify_token
+from Backend.fastapi.security.credentials import require_auth
 import time as _time
 
 
@@ -161,6 +162,19 @@ LANG_LABELS_YEAR = {
     "tr": "Yıl",
     "de": "Jahr",
     "en": "Year",
+}
+
+# ── Admin panelinden açılıp kapatılabilen hazır (built-in) kataloglar ─────────
+# Sözlük anahtarı: manifest'teki lang-bağımsız temel katalog id'si (_base_id).
+# "tmdb_trending" ve "similar" film+dizi karışık olduğundan type=movie,
+# platform katalogları ise sadece dizi (mevcut davranışla aynı).
+TOGGLEABLE_BUILTIN_CATALOGS: dict = {
+    "tmdb_trending": {"label": "🔥 Trendler", "type": "movie"},
+    "similar":       {"label": "🎯 Sana Özel", "type": "movie"},
+    **{
+        f"platform_{key}": {"label": PLATFORM_LABELS[key], "type": "series"}
+        for key in PLATFORM_LABELS
+    },
 }
 
 
@@ -826,8 +840,36 @@ async def get_manifest(token: str, lang: str = "en", token_data: dict = Depends(
             },
         ]
 
-        # --- Kullanıcının gizlediği ve sıraladığı katalogları uygula ---
         from Backend import db as _db_cat
+
+        # --- Admin: globalde kapatılmış hazır katalogları çıkar ---
+        _global_settings = await _db_cat.get_catalog_global_settings()
+        _globally_disabled = set(_global_settings.get("disabled", []))
+
+        def _builtin_base_id(cat_id: str, cat_lang: str) -> str:
+            suffix = f"_{cat_lang}"
+            return cat_id[:-len(suffix)] if cat_id.endswith(suffix) else cat_id
+
+        all_catalogs = [
+            c for c in all_catalogs
+            if _builtin_base_id(c["id"], lang) not in _globally_disabled
+        ]
+
+        # --- Admin: aktif özel katalogları ekle ---
+        custom_catalogs = await _db_cat.get_custom_catalogs(active_only=True)
+        for cc in custom_catalogs:
+            cc_media_type = cc.get("media_type", "mixed")
+            catalog_type = "series" if cc_media_type == "series" else "movie"
+            cc_name = cc.get(f"name_{lang}") or cc.get("name", "Katalog")
+            all_catalogs.append({
+                "type": catalog_type,
+                "id": f"custom_{cc['_id']}_{lang}",
+                "name": cc_name,
+                "extra": [{"name": "skip"}],
+                "extraSupported": ["skip"],
+            })
+
+        # --- Kullanıcının gizlediği ve sıraladığı katalogları uygula ---
         cat_doc = await _db_cat.get_catalog_prefs_full(token)
         hidden = cat_doc.get("hidden_catalogs", []) if isinstance(cat_doc, dict) else (cat_doc or [])
         catalog_order = cat_doc.get("catalog_order", []) if isinstance(cat_doc, dict) else []
@@ -936,7 +978,7 @@ async def get_manifest(token: str, lang: str = "en", token_data: dict = Depends(
         "types": ["movie", "series", "channel"],
         "resources": resources,
         "catalogs": catalogs,
-        "idPrefixes": ["tt", "live_", "yayin_"],
+        "idPrefixes": ["tt", "manual-", "live_", "yayin_"],
         "behaviorHints": {
             "configurable": True,
             "configurationRequired": False
@@ -1602,6 +1644,10 @@ async def get_catalog(token: str, media_type: str, id: str, extra: Optional[str]
     from Backend import db as _db_cat_pref
     hidden_cats = await _db_cat_pref.get_catalog_prefs(token)
 
+    # Admin panelinden globalde kapatılmış hazır katalogları çek
+    _global_settings = await _db_cat_pref.get_catalog_global_settings()
+    globally_disabled = set(_global_settings.get("disabled", []))
+
     if media_type not in ["movie", "series", "channel"]:
         raise HTTPException(status_code=404, detail="Invalid catalog type")
 
@@ -1733,6 +1779,8 @@ async def get_catalog(token: str, media_type: str, id: str, extra: Optional[str]
 
                 if platform_key not in PLATFORM_LABELS:
                     return {"metas": []}
+                if f"platform_{platform_key}" in globally_disabled:
+                    return {"metas": []}
                 if not platform_catalog.is_loaded():
                     return {"metas": []}
 
@@ -1808,6 +1856,9 @@ async def get_catalog(token: str, media_type: str, id: str, extra: Optional[str]
 
             # ── "Sana Özel" kataloğu (izleme geçmişine dayalı öneri) ───────────
             elif id.startswith("similar_"):
+                if "similar" in globally_disabled:
+                    return {"metas": []}
+
                 from Backend import db as _db_similar
 
                 # Cache'te geçerli veri varsa DB'ye gitmeden dön
@@ -1850,6 +1901,9 @@ async def get_catalog(token: str, media_type: str, id: str, extra: Optional[str]
 
             # ── TMDB Katalogları ──────────────────────────────────────
             elif id.startswith("tmdb_"):
+                if "tmdb_trending" in globally_disabled:
+                    return {"metas": []}
+
                 from Backend.helper.tmdb_catalog import tmdb_catalog as _tmdb
 
                 if not _tmdb.is_loaded():
@@ -1865,6 +1919,36 @@ async def get_catalog(token: str, media_type: str, id: str, extra: Optional[str]
                 # Film+dizi karışık liste — type filtresi yok
                 all_items = all_items[stremio_skip: stremio_skip + PAGE_SIZE]
                 metas = [convert_to_stremio_meta(item, lang) for item in all_items]
+                return {"metas": metas}
+
+            # ── Admin: Özel (manuel) katalog ────────────────────────────
+            elif id.startswith("custom_"):
+                from Backend import db as _db_custom
+
+                # id biçimi: custom_<catalog_id>_<lang>
+                raw = id[len("custom_"):]
+                for sfx in ("_tr", "_de", "_en", "_original"):
+                    if raw.endswith(sfx):
+                        raw = raw[: -len(sfx)]
+                        break
+                catalog_id = raw
+
+                catalog = await _db_custom.get_custom_catalog(catalog_id)
+                if not catalog or not catalog.get("active", True):
+                    return {"metas": []}
+
+                catalog_items = catalog.get("items", [])
+                page_items = catalog_items[stremio_skip: stremio_skip + PAGE_SIZE]
+
+                metas = []
+                for it in page_items:
+                    imdb_id = it.get("imdb_id")
+                    if not imdb_id:
+                        continue
+                    doc = await _db_custom.get_media_by_imdb(imdb_id)
+                    if not doc or not _has_video_stream(doc):
+                        continue
+                    metas.append(convert_to_stremio_meta(doc, lang))
                 return {"metas": metas}
 
             elif "latest" in id:
@@ -2622,3 +2706,316 @@ async def get_subtitles(
         })
 
     return {"subtitles": result}
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# ── ADMIN: Katalog Yönetimi ────────────────────────────────────────────────
+#
+# Not: Bu router BİLEREK "/stremio" prefix'i altında DEĞİL, "/api/admin/catalogs"
+# altında tanımlanır. Çünkü CSRFMiddleware "/stremio/" ile başlayan tüm path'leri
+# CSRF kontrolünden muaf tutar (üye tarafı public endpoint'leri için). Admin'in
+# state değiştiren (POST/PUT/DELETE) istekleri ise CSRF korumasına tabi olmalı;
+# "/api/admin/" prefix'i zaten CSRF_PROTECTED_PREFIXES içinde tanımlı.
+# ════════════════════════════════════════════════════════════════════════════
+
+admin_catalog_router = APIRouter(prefix="/api/admin/catalogs", tags=["Admin - Katalog Yönetimi"])
+
+
+@admin_catalog_router.get("")
+async def admin_list_catalogs(_: bool = Depends(require_auth)):
+    """Hazır (built-in) katalogların açık/kapalı durumu + tüm özel katalogları döndürür."""
+    from Backend import db as _db
+
+    global_settings = await _db.get_catalog_global_settings()
+    disabled = set(global_settings.get("disabled", []))
+
+    builtin = [
+        {
+            "id": cat_id,
+            "label": info["label"],
+            "type": info["type"],
+            "enabled": cat_id not in disabled,
+        }
+        for cat_id, info in TOGGLEABLE_BUILTIN_CATALOGS.items()
+    ]
+
+    custom_raw = await _db.get_custom_catalogs(active_only=False)
+    custom = [
+        {
+            "_id": c["_id"],
+            "name": c.get("name", ""),
+            "media_type": c.get("media_type", "mixed"),
+            "active": c.get("active", True),
+            "order": c.get("order", 0),
+            "item_count": len(c.get("items", [])),
+            "keywords": c.get("keywords", []),
+        }
+        for c in custom_raw
+    ]
+
+    return {"builtin": builtin, "custom": custom}
+
+
+@admin_catalog_router.post("/builtin/toggle")
+async def admin_toggle_builtin_catalog(payload: dict, _: bool = Depends(require_auth)):
+    """Hazır bir kataloğu (netflix, disney, trendler, sana özel, ...) global olarak açar/kapatır."""
+    from Backend import db as _db
+
+    catalog_id = payload.get("catalog_id", "")
+    enabled = bool(payload.get("enabled", True))
+
+    if catalog_id not in TOGGLEABLE_BUILTIN_CATALOGS:
+        raise HTTPException(status_code=400, detail="Geçersiz katalog id")
+
+    await _db.set_builtin_catalog_enabled(catalog_id, enabled)
+    return {"ok": True, "catalog_id": catalog_id, "enabled": enabled}
+
+
+@admin_catalog_router.get("/media-search")
+async def admin_catalog_media_search(
+    q: str = "",
+    media_type: Optional[str] = None,
+    _: bool = Depends(require_auth),
+):
+    """Kataloğa eklemek için yerel veritabanında film/dizi arar (başlık bazlı)."""
+    if not q or not q.strip():
+        return {"results": []}
+
+    result = await db.search_documents(query=q, page=1, page_size=20)
+    results = result.get("results", [])
+
+    if media_type in ("movie", "tv"):
+        results = [r for r in results if r.get("media_type") == media_type]
+
+    formatted = [
+        {
+            "imdb_id":      r.get("imdb_id", ""),
+            "title":        r.get("title_tr") or r.get("title", ""),
+            "poster":       r.get("poster_tr") or r.get("poster", ""),
+            "media_type":   r.get("media_type", ""),
+            "release_year": r.get("release_year"),
+        }
+        for r in results
+        if r.get("imdb_id")
+    ]
+    return {"results": formatted}
+
+
+def _normalize_keywords(raw) -> list:
+    """Katalog anahtar kelimelerini normalize eder.
+
+    Hem liste (["kelime1", "kelime2"]) hem de virgülle ayrılmış tek bir
+    string ("kelime1, kelime2") kabul edilir. Boş/tekrar eden kelimeler
+    temizlenir. Kelime tanımlanmazsa (boş liste) otomatik ekleme devre dışı
+    kalır ve katalog eskisi gibi sadece elle yönetilir.
+    """
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        parts = raw.split(",")
+    elif isinstance(raw, (list, tuple)):
+        parts = raw
+    else:
+        return []
+
+    seen = set()
+    keywords = []
+    for p in parts:
+        kw = str(p).strip()
+        if not kw:
+            continue
+        key = kw.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        keywords.append(kw)
+    return keywords
+
+
+@admin_catalog_router.post("/custom")
+async def admin_create_custom_catalog(payload: dict, _: bool = Depends(require_auth)):
+    """Yeni özel katalog oluşturur."""
+    from Backend import db as _db
+
+    name = (payload.get("name") or "").strip()
+    media_type = payload.get("media_type", "mixed")
+
+    if not name:
+        raise HTTPException(status_code=400, detail="Katalog adı gerekli")
+    if media_type not in ("movie", "series", "mixed"):
+        media_type = "mixed"
+
+    data = {
+        "name": name,
+        "media_type": media_type,
+        "active": True,
+        "items": [],
+        "keywords": _normalize_keywords(payload.get("keywords")),
+    }
+    catalog = await _db.add_custom_catalog(data)
+    return catalog
+
+
+@admin_catalog_router.put("/custom/{catalog_id}")
+async def admin_update_custom_catalog(catalog_id: str, payload: dict, _: bool = Depends(require_auth)):
+    """Özel katalog adı/tipi/aktiflik durumunu günceller."""
+    from Backend import db as _db
+
+    update_data = {}
+    if "name" in payload:
+        name = (payload.get("name") or "").strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="Katalog adı boş olamaz")
+        update_data["name"] = name
+    if "media_type" in payload and payload["media_type"] in ("movie", "series", "mixed"):
+        update_data["media_type"] = payload["media_type"]
+    if "active" in payload:
+        update_data["active"] = bool(payload["active"])
+    if "order" in payload:
+        try:
+            update_data["order"] = int(payload["order"])
+        except (TypeError, ValueError):
+            pass
+    if "keywords" in payload:
+        update_data["keywords"] = _normalize_keywords(payload.get("keywords"))
+
+    if not update_data:
+        raise HTTPException(status_code=400, detail="Güncellenecek alan yok")
+
+    ok = await _db.update_custom_catalog(catalog_id, update_data)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Katalog bulunamadı")
+    return {"ok": True}
+
+
+_rescan_jobs: dict = {}  # job_id -> {status, checked, matched, total, collection, error, partial_error}
+
+
+@admin_catalog_router.post("/custom/{catalog_id}/rescan")
+async def admin_rescan_custom_catalog(catalog_id: str, _: bool = Depends(require_auth)):
+    """Kataloğun kelimelerini, HALİHAZIRDA kütüphanede olan (kelime tanımlanmadan önce
+    eklenmiş) film/dizilerin dosya adlarına karşı geriye dönük tarar ve eşleşenleri ekler.
+    Bundan sonra eklenecek yeni dosyalar zaten insert_media() içinde otomatik taranıyor;
+    bu endpoint sadece geçmişe dönük içerikleri yakalamak içindir.
+
+    Tarama, özellikle büyük dizi kütüphanelerinde uzun sürebildiğinden (ve tek bir HTTP
+    isteği içinde tutmak zaman aşımına yol açabildiğinden), tarama arka planda bir görev
+    olarak başlatılır. Dönen job_id ile /rescan/status/{job_id} endpoint'i periyodik olarak
+    sorgulanarak ilerleme takip edilebilir.
+    """
+    import uuid
+    from asyncio import create_task
+    from Backend import db as _db
+
+    catalog = await _db.get_custom_catalog(catalog_id)
+    if not catalog:
+        raise HTTPException(status_code=404, detail="Katalog bulunamadı")
+    if not [k for k in (catalog.get("keywords") or []) if k and k.strip()]:
+        raise HTTPException(status_code=400, detail="Bu katalog için kelime tanımlı değil")
+
+    job_id = str(uuid.uuid4())
+    _rescan_jobs[job_id] = {
+        "status": "running",
+        "checked": 0,
+        "matched": 0,
+        "total": 0,
+        "collection": "başlıyor",
+        "error": None,
+        "partial_error": None,
+    }
+
+    async def _run_rescan():
+        job = _rescan_jobs[job_id]
+
+        async def _on_progress(update: dict):
+            job.update(update)
+
+        try:
+            result = await _db.rescan_custom_catalog_by_keywords(catalog_id, progress_cb=_on_progress)
+            if result.get("error"):
+                job["status"] = "error"
+                job["error"] = result["error"]
+            else:
+                job["status"] = "done"
+                job["checked"] = result.get("checked", 0)
+                job["matched"] = result.get("matched", 0)
+                job["partial_error"] = result.get("partial_error")
+        except Exception as e:
+            _logger.error(f"[custom_catalogs] Arka plan tarama hatası: {e}")
+            job["status"] = "error"
+            job["error"] = str(e)
+
+    create_task(_run_rescan())
+    return {"job_id": job_id}
+
+
+@admin_catalog_router.get("/custom/rescan/status/{job_id}")
+async def admin_rescan_status(job_id: str, _: bool = Depends(require_auth)):
+    """Arka planda çalışan bir tarama görevinin ilerlemesini döner."""
+    job = _rescan_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Tarama görevi bulunamadı")
+    return job
+
+
+@admin_catalog_router.delete("/custom/{catalog_id}")
+async def admin_delete_custom_catalog(catalog_id: str, _: bool = Depends(require_auth)):
+    """Özel kataloğu tamamen siler."""
+    from Backend import db as _db
+
+    ok = await _db.delete_custom_catalog(catalog_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Katalog bulunamadı")
+    return {"ok": True}
+
+
+@admin_catalog_router.get("/custom/{catalog_id}/items")
+async def admin_list_custom_catalog_items(catalog_id: str, _: bool = Depends(require_auth)):
+    """Bir özel kataloğa eklenmiş film/dizileri listeler."""
+    from Backend import db as _db
+
+    catalog = await _db.get_custom_catalog(catalog_id)
+    if not catalog:
+        raise HTTPException(status_code=404, detail="Katalog bulunamadı")
+    return {"items": catalog.get("items", [])}
+
+
+@admin_catalog_router.post("/custom/{catalog_id}/items")
+async def admin_add_custom_catalog_item(catalog_id: str, payload: dict, _: bool = Depends(require_auth)):
+    """Özel kataloğa bir film/dizi ekler (imdb_id ile)."""
+    from Backend import db as _db
+
+    imdb_id = (payload.get("imdb_id") or "").strip()
+    if not imdb_id:
+        raise HTTPException(status_code=400, detail="imdb_id gerekli")
+
+    catalog = await _db.get_custom_catalog(catalog_id)
+    if not catalog:
+        raise HTTPException(status_code=404, detail="Katalog bulunamadı")
+
+    media_doc = await _db.get_media_by_imdb(imdb_id)
+    if not media_doc:
+        raise HTTPException(status_code=404, detail="Bu içerik veritabanında bulunamadı")
+
+    item = {
+        "imdb_id":    imdb_id,
+        "media_type": media_doc.get("media_type", "movie"),
+        "title":      media_doc.get("title_tr") or media_doc.get("title", ""),
+        "poster":     media_doc.get("poster_tr") or media_doc.get("poster", ""),
+    }
+
+    added = await _db.add_custom_catalog_item(catalog_id, item)
+    if not added:
+        raise HTTPException(status_code=409, detail="Bu içerik zaten katalogda ekli")
+    return {"ok": True, "item": item}
+
+
+@admin_catalog_router.delete("/custom/{catalog_id}/items/{imdb_id}")
+async def admin_remove_custom_catalog_item(catalog_id: str, imdb_id: str, _: bool = Depends(require_auth)):
+    """Özel katalogdan bir film/diziyi çıkarır."""
+    from Backend import db as _db
+
+    ok = await _db.remove_custom_catalog_item(catalog_id, imdb_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Kayıt bulunamadı")
+    return {"ok": True}
