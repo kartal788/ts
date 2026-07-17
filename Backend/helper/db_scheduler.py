@@ -116,7 +116,7 @@ def _schedule_next_daily() -> None:
 
 # ─── "Sana Özel" Cache Yenileme ──────────────────────────────────────────────
 
-async def _get_recently_active_tokens(db, window_hours: int = 24) -> set:
+async def _get_recently_active_tokens(db, window_hours: int = 30 * 24) -> set:
     """
     Son `window_hours` saat içinde stream_analytics tablosunda kaydı olan
     token'ları döner. Bu token'lar gerçekten aktif izleme yapmış demektir.
@@ -134,7 +134,7 @@ async def _get_recently_active_tokens(db, window_hours: int = 24) -> set:
 
 async def _refresh_similar_cache_async() -> None:
     """
-    Son 24 saatte izleme yapan kullanıcıların "Sana Özel" cache'ini yeniler.
+    Son 30 günde izleme yapan kullanıcıların "Sana Özel" cache'ini yeniler.
     Uyuyan/pasif üyeler atlanır — gereksiz DB sorgusu ve RAM kullanımı önlenir.
     """
     try:
@@ -154,14 +154,14 @@ async def _refresh_similar_cache_async() -> None:
             logger.info("[similar-cache] Geçerli kullanıcı yok, atlanıyor.")
             return
 
-        # Son 24 saatte aktif olanlarla kesişim
-        recently_active = await _get_recently_active_tokens(_db, window_hours=24)
+        # Son 30 günde aktif olanlarla kesişim
+        recently_active = await _get_recently_active_tokens(_db, window_hours=30 * 24)
         tokens_to_refresh = all_valid & recently_active
 
         skipped = len(all_valid) - len(tokens_to_refresh)
         if skipped:
             logger.info(
-                "[similar-cache] %d pasif kullanıcı atlandı (son 24 saatte izleme yok).",
+                "[similar-cache] %d pasif kullanıcı atlandı (son 30 günde izleme yok).",
                 skipped,
             )
 

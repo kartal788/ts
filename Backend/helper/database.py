@@ -3002,17 +3002,22 @@ class Database:
             col = self.dbs["tracking"]["stream_analytics"]
             await col.insert_one(record)
 
-            # Kullanıcı başına maksimum 10 kayıt — eskiden fazlası silinir
+            # Kullanıcı başına maksimum 100 kayıt — eskiden fazlası silinir
+            # + 30 günden eski kayıtlar (kullanıcı fark etmeksizin) silinir
             user_token = record.get("user_token")
             if user_token:
                 count = await col.count_documents({"user_token": user_token})
-                if count > 10:
+                if count > 100:
                     oldest = await col.find(
                         {"user_token": user_token},
                         {"_id": 1}
-                    ).sort("logged_at", 1).limit(count - 10).to_list(None)
+                    ).sort("logged_at", 1).limit(count - 100).to_list(None)
                     old_ids = [d["_id"] for d in oldest]
                     await col.delete_many({"_id": {"$in": old_ids}})
+
+            # 30 günden eski tüm kayıtları temizle (yaş bazlı retention)
+            age_cutoff = datetime.utcnow() - _td(days=30)
+            await col.delete_many({"logged_at": {"$lt": age_cutoff}})
         except Exception as e:
             LOGGER.warning(f"Stream analytics log failed: {e}")
 
