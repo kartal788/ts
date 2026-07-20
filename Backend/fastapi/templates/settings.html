@@ -123,6 +123,27 @@
             </div>
         </div>
 
+        <!-- Poster Ayarları -->
+        <div class="theme-card rounded-2xl p-5">
+            <h3 class="text-xs font-extrabold uppercase tracking-wider text-primary mb-4 flex items-center gap-2">
+                <i class="fa-solid fa-image"></i> Poster Ayarları
+            </h3>
+            <label class="toggle-wrap">
+                <input type="checkbox" class="toggle-input" id="s-better_poster_url" {% if settings.better_poster_url %}checked{% endif %}>
+                <span class="toggle-track"></span>
+                <span class="toggle-label">
+                    Better Poster Url
+                    <span style="color:var(--text-sec);font-size:0.78rem;display:block;font-weight:400;text-transform:none;letter-spacing:0">
+                        Açıksa Stremio'daki "poster" alanı için veritabanındaki poster yerine
+                        imdb_id'ye göre btttr.cc üzerinden üretilen link denenir. Bu link
+                        çalışmazsa (bozuksa/erişilemiyorsa) veya içeriğin imdb_id'si yoksa,
+                        otomatik olarak veritabanındaki eski poster kullanılır. Kapalıyken
+                        eski davranış (doğrudan veritabanı posteri) aynen çalışmaya devam eder.
+                    </span>
+                </span>
+            </label>
+        </div>
+
         <!-- Yetkilendirme Kanalları -->
         <div class="theme-card rounded-2xl p-5">
             <h3 class="text-xs font-extrabold uppercase tracking-wider text-primary mb-4 flex items-center gap-2">
@@ -565,6 +586,7 @@ function renderSettings(s) {
     document.getElementById('s-replace_mode').checked = !!s.replace_mode;
     document.getElementById('s-hide_catalog').checked = !!s.hide_catalog;
     document.getElementById('s-websitesi').checked = !!s.websitesi;
+    document.getElementById('s-better_poster_url').checked = !!s.better_poster_url;
 
     document.getElementById('s-announce_new_content').checked = !!s.announce_new_content;
     document.getElementById('s-announcement_channel').value = s.announcement_channel || '';
@@ -625,6 +647,7 @@ function buildPayload() {
         replace_mode: document.getElementById('s-replace_mode').checked,
         hide_catalog: document.getElementById('s-hide_catalog').checked,
         websitesi: document.getElementById('s-websitesi').checked,
+        better_poster_url: document.getElementById('s-better_poster_url').checked,
 
         auth_channels: collectList('auth_channels'),
 

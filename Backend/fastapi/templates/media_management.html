@@ -79,6 +79,16 @@
                 <input type="text" id="manual-add-description" placeholder="Kısa açıklama"
                     class="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent text-sm">
             </div>
+            <div class="md:col-span-1">
+                <label class="block text-sm font-medium mb-1">Puan (opsiyonel)</label>
+                <input type="number" id="manual-add-rating" placeholder="Örn. 7.5" min="0" max="10" step="0.1"
+                    class="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent text-sm">
+            </div>
+            <div class="md:col-span-1">
+                <label class="block text-sm font-medium mb-1">Tür (opsiyonel)</label>
+                <input type="text" id="manual-add-genre" placeholder="Örn. Aksiyon, Dram"
+                    class="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent text-sm">
+            </div>
             <div id="manual-add-tv-fields" class="md:col-span-4 hidden grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                     <label class="block text-sm font-medium mb-1">Sezon Numarası</label>
@@ -415,6 +425,8 @@
                 metaParts.push(`Sıradaki bölüm: ${data.next_episode}`);
             }
             if (data.year) metaParts.push(`Yıl: ${data.year}`);
+            if (data.rating) metaParts.push(`Puan: ${data.rating}`);
+            if (data.genres && data.genres.length) metaParts.push(`Tür: ${data.genres.join(', ')}`);
             if (data.poster) metaParts.push('Poster ayarlı');
             if (data.description) metaParts.push('Açıklama ayarlı');
             document.getElementById('manual-add-active-meta').textContent = metaParts.join(' • ');
@@ -444,6 +456,8 @@
         const yearRaw = document.getElementById('manual-add-year').value.trim();
         const poster = document.getElementById('manual-add-poster').value.trim();
         const description = document.getElementById('manual-add-description').value.trim();
+        const ratingRaw = document.getElementById('manual-add-rating').value.trim();
+        const genreRaw = document.getElementById('manual-add-genre').value.trim();
         const errorEl = document.getElementById('manual-add-error');
         errorEl.textContent = '';
 
@@ -455,6 +469,12 @@
         const payload = { title, poster, description, media_type: manualAddType };
         if (yearRaw) {
             payload.year = parseInt(yearRaw, 10);
+        }
+        if (ratingRaw) {
+            payload.rating = parseFloat(ratingRaw);
+        }
+        if (genreRaw) {
+            payload.genres = genreRaw.split(',').map(g => g.trim()).filter(Boolean);
         }
         if (manualAddType === 'tv') {
             payload.season = parseInt(document.getElementById('manual-add-season').value, 10) || 1;
@@ -477,6 +497,8 @@
             document.getElementById('manual-add-year').value = '';
             document.getElementById('manual-add-poster').value = '';
             document.getElementById('manual-add-description').value = '';
+            document.getElementById('manual-add-rating').value = '';
+            document.getElementById('manual-add-genre').value = '';
             renderManualAddStatus(data);
         } catch (error) {
             errorEl.textContent = `Hata: ${error.message}`;

@@ -31,6 +31,8 @@ def _serialize_mode(mode: dict | None) -> dict:
         "description": mode.get("description"),
         "media_type": mode.get("media_type", "movie"),
         "year": mode.get("year"),
+        "rating": mode.get("rating"),
+        "genres": mode.get("genres"),
         "season": mode.get("season"),
         "next_episode": mode.get("next_episode"),
     }
@@ -65,9 +67,29 @@ async def manual_add_start_api(payload: dict) -> dict:
         if year < 1900 or year > 2100:
             raise HTTPException(status_code=400, detail="Çıkış yılı 1900-2100 arasında olmalı.")
 
+    # Puan opsiyoneldir; boş bırakılırsa rating=None olarak kalır.
+    rating_raw = payload.get("rating")
+    rating = None
+    if rating_raw not in (None, ""):
+        try:
+            rating = float(rating_raw)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="Puan geçersiz.")
+        if rating < 0 or rating > 10:
+            raise HTTPException(status_code=400, detail="Puan 0-10 arasında olmalı.")
+
+    # Tür opsiyoneldir; virgülle ayrılmış bir liste veya string olarak gelebilir.
+    genres_raw = payload.get("genres")
+    genres: list[str] = []
+    if isinstance(genres_raw, list):
+        genres = [str(g).strip() for g in genres_raw if str(g).strip()]
+    elif isinstance(genres_raw, str) and genres_raw.strip():
+        genres = [g.strip() for g in genres_raw.split(",") if g.strip()]
+
     new_mode = {
         "title": title, "poster": poster, "description": description,
         "media_type": media_type, "year": year,
+        "rating": rating, "genres": genres,
     }
 
     if media_type == "tv":

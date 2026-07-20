@@ -6,11 +6,14 @@ from urllib.parse import unquote, unquote_plus
 from Backend.config import Telegram
 from Backend import db, __version__
 from Backend.helper.platform_catalog import platform_catalog, PLATFORM_LABELS
+from Backend.helper.settings_manager import SettingsManager
 import PTN
 from datetime import datetime, timezone, timedelta
 from Backend.fastapi.security.tokens import verify_token
 from Backend.fastapi.security.credentials import require_auth
 import time as _time
+import asyncio
+import httpx
 
 
 # --- Configuration ---
@@ -188,8 +191,67 @@ def format_released_date(media):
 
     return None
 
+# ── "Better Poster Url" ─────────────────────────────────────────────────────
+# Ayarlar sayfasındaki "Better Poster Url" açıksa, "poster" alanı için
+# veritabanı yerine imdb_id'ye göre btttr.cc üzerinden üretilen link denenir.
+# Bu link gerçekten bir görsel döndürmüyorsa (bozuk/kayıp/hatalı yanıt) veya
+# içeriğin imdb_id'si yoksa, olduğu gibi veritabanındaki eski postere
+# (fallback) geri dönülür. Ayar kapalıyken eski davranış hiç değişmeden çalışır.
+_BETTER_POSTER_BASE = "https://btttr.cc/poster/imdb/poster-default"
+
+# Her URL için "çalışıyor mu?" sonucunu bir süre önbellekte tutar; her istekte
+# tekrar tekrar dış sunucuya HTTP isteği atılmasını önler.
+_BETTER_POSTER_CACHE: dict = {}
+_BETTER_POSTER_CACHE_TTL = 6 * 60 * 60  # 6 saat
+
+
+def _better_poster_url(imdb_id: str, lang_param: Optional[str]) -> str:
+    base = f"{_BETTER_POSTER_BASE}/{imdb_id}.jpg"
+    if lang_param:
+        return f"{base}?lang={lang_param}&rs=IM"
+    return f"{base}?rs=IM"
+
+
+async def _is_image_url_reachable(url: str) -> bool:
+    now = _time.monotonic()
+    cached = _BETTER_POSTER_CACHE.get(url)
+    if cached is not None and now - cached[1] < _BETTER_POSTER_CACHE_TTL:
+        return cached[0]
+
+    ok = False
+    try:
+        async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
+            resp = await client.head(url)
+            if resp.status_code >= 400:
+                # Bazı sunucular HEAD desteklemez / hata döner; GET ile tekrar dene.
+                resp = await client.get(url)
+            content_type = resp.headers.get("content-type", "")
+            ok = resp.status_code == 200 and content_type.lower().startswith("image/")
+    except Exception as e:
+        _logger.warning(f"Better Poster Url kontrolü başarısız ({url}): {e}")
+        ok = False
+
+    _BETTER_POSTER_CACHE[url] = (ok, now)
+    return ok
+
+
+async def _resolve_poster(imdb_id: str, lang_param: Optional[str], fallback: str) -> str:
+    """'Better Poster Url' açıksa yeni linki dener; link çalışmazsa veya
+    imdb_id yoksa veritabanındaki eski posteri (fallback) döner."""
+    settings = SettingsManager.current()
+    if not getattr(settings, "better_poster_url", False):
+        return fallback
+    if not imdb_id:
+        return fallback
+
+    url = _better_poster_url(imdb_id, lang_param)
+    if await _is_image_url_reachable(url):
+        return url
+    return fallback
+
+
 # --- Helper Functions ---
-def convert_to_stremio_meta(item: dict, lang: str = "tr") -> dict:
+async def convert_to_stremio_meta(item: dict, lang: str = "tr") -> dict:
     media_type = "series" if item.get("media_type") == "tv" else "movie"
     lang = resolve_lang(lang)
 
@@ -218,6 +280,9 @@ def convert_to_stremio_meta(item: dict, lang: str = "tr") -> dict:
         poster = item.get("poster_tr") or item.get("poster") or ""
         backdrop = item.get("backdrop_tr") or item.get("backdrop") or ""
         logo = item.get("logo_tr") or item.get("logo") or ""
+
+    lang_param = lang if lang in ("tr", "de") else None
+    poster = await _resolve_poster(item.get("imdb_id", ""), lang_param, poster)
 
     meta = {
         "id": item.get('imdb_id'),
@@ -1769,7 +1834,7 @@ async def get_catalog(token: str, media_type: str, id: str, extra: Optional[str]
                 # Sadece gerçek video stream'i olan içerikleri göster (arşiv-only içerikler gizle)
                 all_items = [item for item in all_items if _has_video_stream(item)]
                 all_items = all_items[stremio_skip: stremio_skip + PAGE_SIZE]
-                metas = [convert_to_stremio_meta(item, lang) for item in all_items]
+                metas = await asyncio.gather(*(convert_to_stremio_meta(item, lang) for item in all_items))
                 return {"metas": metas}
 
             # ── Platform katalog isteği (diziler) ────────────────────────
@@ -1798,7 +1863,7 @@ async def get_catalog(token: str, media_type: str, id: str, extra: Optional[str]
 
                 items = [item for item in items if _has_video_stream(item)]
                 items = items[stremio_skip: stremio_skip + PAGE_SIZE]
-                metas = [convert_to_stremio_meta(item, lang) for item in items]
+                metas = await asyncio.gather(*(convert_to_stremio_meta(item, lang) for item in items))
                 return {"metas": metas}
 
 
@@ -1831,7 +1896,7 @@ async def get_catalog(token: str, media_type: str, id: str, extra: Optional[str]
                     items = data.get("tv_shows", [])
 
                 items = [item for item in items if _has_video_stream(item)]
-                metas = [convert_to_stremio_meta(item, lang) for item in items]
+                metas = await asyncio.gather(*(convert_to_stremio_meta(item, lang) for item in items))
                 return {"metas": metas}
 
             # ── Seri filmleri kataloğu ────────────────────────────────────
@@ -1851,7 +1916,7 @@ async def get_catalog(token: str, media_type: str, id: str, extra: Optional[str]
                         all_items = [i for i in all_items if genre_filter in (i.get("genres_tr") or [])]
 
                 all_items = all_items[stremio_skip: stremio_skip + PAGE_SIZE]
-                metas = [convert_to_stremio_meta(item, lang) for item in all_items]
+                metas = await asyncio.gather(*(convert_to_stremio_meta(item, lang) for item in all_items))
                 return {"metas": metas}
 
             # ── "Sana Özel" kataloğu (izleme geçmişine dayalı öneri) ───────────
@@ -1896,7 +1961,7 @@ async def get_catalog(token: str, media_type: str, id: str, extra: Optional[str]
                 if not page_items:
                     return {"metas": []}
 
-                metas = [convert_to_stremio_meta(item, lang) for item in page_items]
+                metas = await asyncio.gather(*(convert_to_stremio_meta(item, lang) for item in page_items))
                 return {"metas": metas}
 
             # ── TMDB Katalogları ──────────────────────────────────────
@@ -1918,7 +1983,7 @@ async def get_catalog(token: str, media_type: str, id: str, extra: Optional[str]
                 all_items = [item for item in all_items if _has_video_stream(item)]
                 # Film+dizi karışık liste — type filtresi yok
                 all_items = all_items[stremio_skip: stremio_skip + PAGE_SIZE]
-                metas = [convert_to_stremio_meta(item, lang) for item in all_items]
+                metas = await asyncio.gather(*(convert_to_stremio_meta(item, lang) for item in all_items))
                 return {"metas": metas}
 
             # ── Admin: Özel (manuel) katalog ────────────────────────────
@@ -1948,7 +2013,7 @@ async def get_catalog(token: str, media_type: str, id: str, extra: Optional[str]
                     doc = await _db_custom.get_media_by_imdb(imdb_id)
                     if not doc or not _has_video_stream(doc):
                         continue
-                    metas.append(convert_to_stremio_meta(doc, lang))
+                    metas.append(await convert_to_stremio_meta(doc, lang))
                 return {"metas": metas}
 
             elif "latest" in id:
@@ -1971,7 +2036,7 @@ async def get_catalog(token: str, media_type: str, id: str, extra: Optional[str]
 
     # Sadece video stream'i olan içerikleri kataloga ekle (arşiv-only içerikler gizle)
     items = [item for item in items if _has_video_stream(item)]
-    metas = [convert_to_stremio_meta(item, lang) for item in items]
+    metas = await asyncio.gather(*(convert_to_stremio_meta(item, lang) for item in items))
     return {"metas": metas}
 
 
@@ -2066,6 +2131,9 @@ async def get_meta(token: str, media_type: str, id: str, lang: str = "tr", token
         meta_poster = media.get("poster_tr") or media.get("poster", "")
         meta_backdrop = media.get("backdrop_tr") or media.get("backdrop", "")
         meta_logo = media.get("logo_tr") or media.get("logo", "")
+
+    meta_lang_param = lang if lang in ("tr", "de") else None
+    meta_poster = await _resolve_poster(media.get("imdb_id", ""), meta_lang_param, meta_poster)
 
     meta_obj = {
         "id": id,

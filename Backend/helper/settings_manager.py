@@ -60,6 +60,12 @@ _DEFAULTS: Dict[str, Any] = {
     "multi_tokens": [],
     "announce_new_content": False,
     "announcement_channel": "",
+    #----- Açıksa Stremio "poster" alanları (poster/poster_tr/poster_de) için
+    #----- veritabanı yerine btttr.cc üzerinden imdb_id'ye göre üretilen
+    #----- "Better Poster" linkleri denenir; bu link çalışmazsa (veya imdb_id
+    #----- yoksa) veritabanındaki eski posterlere geri düşülür. Varsayılan
+    #----- kapalı — kapalıyken eski davranış (doğrudan veritabanı posteri) aynen çalışır.
+    "better_poster_url": False,
     #----- /start komutuna aktif aboneliği olmayan kullanıcılara gösterilen
     #----- mesaj (satın alınabilir planlar listelenmeden önceki üst metin).
     #----- İçinde geçen {isim} ifadesi gönderim anında Telegram.ISIM ile
