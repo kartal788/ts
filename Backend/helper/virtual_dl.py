@@ -6,6 +6,7 @@ from fastapi import Request
 
 from Backend.logger import LOGGER
 from Backend.helper.custom_dl import ByteStreamer
+from Backend.helper.exceptions import ChunkFetchError
 
 
 async def resolve_virtual_parts(
@@ -92,8 +93,21 @@ async def virtual_stream_generator(
             # file_id zaten tüm gerekli bilgiyi içeriyor.
         )
 
-        async for chunk in body_gen:
-            yield chunk
+        try:
+            async for chunk in body_gen:
+                yield chunk
+        except ChunkFetchError:
+            # KRİTİK: part['index'] içindeki veri tükenmeden bir chunk fetch
+            # hatası yüzünden buraya düştük. Bunu "bu parça bitti, sıradaki
+            # fiziksel parçaya (mkv.002 vb.) geç" diye yorumlamak YANLIŞ —
+            # yanlış dosyanın byte'larını video akışına ekleyip oynatıcıyı
+            # bozardı. Bunun yerine stream'i burada açıkça durduruyoruz.
+            LOGGER.error(
+                "Virtual stream %s: part %s (msg_id=%s) içinde kurtarılamayan "
+                "chunk hatası — sıradaki parçaya GEÇİLMİYOR, stream durduruluyor.",
+                stream_id, part["index"], part.get("msg_id"),
+            )
+            raise
 
         # If the client disconnected mid-part, ByteStreamer's own consumer
         # already stopped yielding for us; don't waste bandwidth fetching

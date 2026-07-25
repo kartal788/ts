@@ -56,6 +56,12 @@ _DEFAULTS: Dict[str, Any] = {
     "brute_window": 60,
     "brute_max": 5,
     "brute_ban": 1800,
+    #----- Stream chunk indirme davranışı (Backend.helper.custom_dl.prefetch_stream)
+    #----- "parallel" -> Telegram.PARALLEL -> aslında prefetch KUYRUK derinliği
+    #----- "pre_fetch" -> Telegram.PRE_FETCH -> aslında Telegram'a giden EŞZAMANLI istek sayısı
+    #----- (İsimler config.env'deki eski adlandırmayla ters eşleşiyor, bkz. stream_routes.py)
+    "parallel": 4,
+    "pre_fetch": 3,
     "extra_databases": [],
     "multi_tokens": [],
     "announce_new_content": False,
@@ -111,6 +117,8 @@ _SETTINGS_TO_TELEGRAM_ATTR: Dict[str, str] = {
     "brute_window": "BRUTE_WINDOW",
     "brute_max": "BRUTE_MAX",
     "brute_ban": "BRUTE_BAN",
+    "parallel": "PARALLEL",
+    "pre_fetch": "PRE_FETCH",
 }
 
 
@@ -147,6 +155,8 @@ def _seed_from_env() -> Dict[str, Any]:
         "brute_window":         Telegram.BRUTE_WINDOW,
         "brute_max":            Telegram.BRUTE_MAX,
         "brute_ban":            Telegram.BRUTE_BAN,
+        "parallel":             Telegram.PARALLEL,
+        "pre_fetch":            Telegram.PRE_FETCH,
         "extra_databases":      list(Telegram.DATABASE[2:]) if len(Telegram.DATABASE) > 2 else [],
         "multi_tokens":         [],
     })

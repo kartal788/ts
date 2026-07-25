@@ -6,11 +6,11 @@ from typing import Dict, List, Union, Optional, Tuple
 import traceback
 from fastapi import Request
 from pyrogram import Client, raw, utils
-from pyrogram.errors import AuthBytesInvalid
+from pyrogram.errors import AuthBytesInvalid, FloodWait
 from pyrogram.file_id import FileId, FileType, ThumbnailSource
 from pyrogram.session import Session, Auth
 from Backend.logger import LOGGER
-from Backend.helper.exceptions import FIleNotFound
+from Backend.helper.exceptions import FIleNotFound, ChunkFetchError
 from Backend.helper.pyro import get_file_ids
 from Backend import db
 from Backend.pyrofork.bot import work_loads, multi_clients, client_dc_map, client_failures, client_avg_mbps
@@ -275,6 +275,21 @@ class ByteStreamer:
                         fb_s = ByteStreamer._instances.get(use_client_idx)
                         if fb_s:
                             fb_s.client.media_sessions.pop(file_id.dc_id, None)
+                except FloodWait as e:
+                    # Telegram bu session/kaynak için N saniye bekle diyor.
+                    # Bunu genel bir "geçici hata" gibi 10s'de sınırlı backoff'a
+                    # sokmak YANLIŞ: gerçek gereken süre (e.value) çoğu zaman
+                    # 10s'nin çok üzerinde olabiliyor, bu yüzden 10 deneme
+                    # tükenip chunk kalıcı olarak "başarısız" sayılıyordu —
+                    # tam da seq≈100 civarında tekrar eden hataların sebebi bu.
+                    tries += 1
+                    wait_s = min(getattr(e, "value", 5) or 5, 120)
+                    LOGGER.warning(
+                        "FloodWait: chunk seq=%s off=%s try=%s client=%s — %s sn bekleniyor",
+                        seq_idx, off, tries, use_client_idx, wait_s,
+                    )
+                    await asyncio.sleep(wait_s)
+                    continue
                 except Exception as e:
                     tries += 1
                     err_str = str(e).lower()
@@ -358,7 +373,7 @@ class ByteStreamer:
 
                             if chunk_bytes is None:
                                 LOGGER.error("Chunk fetch returned empty for stream=%s seq=%s", stream_id, seq_idx)
-                                await q.put((None, None))
+                                await q.put(("__CHUNK_ERROR__", seq_idx))
                                 return
 
                             results_buffer[seq_idx] = chunk_bytes
@@ -374,7 +389,7 @@ class ByteStreamer:
                             raise
                         except Exception as e:
                             LOGGER.exception("Error processing completed fetch task: %s%s", e, traceback.format_exc())
-                            await q.put((None, None))
+                            await q.put(("__CHUNK_ERROR__", None))
                             return
 
                     while next_to_put in results_buffer:
@@ -394,7 +409,7 @@ class ByteStreamer:
             except Exception as e:
                 LOGGER.exception("Producer unexpected error for stream %s: %s", stream_id, e)
                 try:
-                    await q.put((None, None))
+                    await q.put(("__CHUNK_ERROR__", None))
                 except Exception:
                     pass
 
@@ -423,6 +438,12 @@ class ByteStreamer:
                         break
 
                     off, chunk = off_chunk
+                    if off == "__CHUNK_ERROR__":
+                        LOGGER.error(
+                            "Stream %s aborted due to unrecoverable chunk fetch error (seq=%s)",
+                            stream_id, chunk,
+                        )
+                        raise ChunkFetchError(stream_id, seq_idx=chunk)
                     if off is None and chunk is None:
                         break
 

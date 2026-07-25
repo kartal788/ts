@@ -272,6 +272,25 @@
                     <label class="s-label">Maks. Eşzamanlı Yükleme</label>
                     <input class="s-input" id="s-max_concurrent_uploads" value="{{ settings.max_concurrent_uploads }}">
                 </div>
+                <div>
+                    <label class="s-label">Stream Eşzamanlı İstek Sayısı</label>
+                    <input class="s-input" type="number" min="1" max="10" id="s-pre_fetch" value="{{ settings.pre_fetch }}">
+                    <p class="text-xs opacity-60 mt-1">
+                        Bir video oynatılırken Telegram'a AYNI ANDA gönderilen chunk isteği sayısı.
+                        Yüksek değer daha hızlı başlatma sağlar ama Telegram'ın FloodWait
+                        (aşırı istek) limitine çarpma riskini artırır. Video oynatırken sık sık
+                        duraksama/mkv.002'ye kayma gibi sorunlar yaşıyorsanız bu değeri düşürün (örn. 2).
+                    </p>
+                </div>
+                <div>
+                    <label class="s-label">Stream Prefetch Kuyruk Derinliği</label>
+                    <input class="s-input" type="number" min="1" max="20" id="s-parallel" value="{{ settings.parallel }}">
+                    <p class="text-xs opacity-60 mt-1">
+                        Oynatıcı henüz tüketmeden önceden hazırlanıp bellekte bekletilen chunk
+                        sayısı (buffer derinliği). Genelde varsayılan değer yeterlidir; çok
+                        yükseltmek RAM kullanımını artırır.
+                    </p>
+                </div>
             </div>
         </div>
 
@@ -603,6 +622,8 @@ function renderSettings(s) {
     document.getElementById('s-default_device_limit').value = s.default_device_limit ?? '';
     document.getElementById('s-max_concurrent_downloads').value = s.max_concurrent_downloads || '';
     document.getElementById('s-max_concurrent_uploads').value = s.max_concurrent_uploads || '';
+    document.getElementById('s-pre_fetch').value = s.pre_fetch ?? 3;
+    document.getElementById('s-parallel').value = s.parallel ?? 4;
 
     document.getElementById('s-proxy').checked = !!s.proxy;
     document.getElementById('s-proxy_type').value = s.proxy_type || 'HTTPS';
@@ -666,6 +687,8 @@ function buildPayload() {
         default_device_limit: toInt('s-default_device_limit', 0),
         max_concurrent_downloads: document.getElementById('s-max_concurrent_downloads').value.trim(),
         max_concurrent_uploads: document.getElementById('s-max_concurrent_uploads').value.trim(),
+        pre_fetch: toInt('s-pre_fetch', 3),
+        parallel: toInt('s-parallel', 4),
 
         proxy: document.getElementById('s-proxy').checked,
         proxy_type: document.getElementById('s-proxy_type').value,

@@ -52,4 +52,4 @@ ATTACH_MODE_LOCK = asyncio.Lock()
 
 db = Database()  
 
-__version__ = "4.4.8"
+__version__ = "4.4.9"
