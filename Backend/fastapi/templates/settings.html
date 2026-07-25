@@ -345,6 +345,20 @@
                     <label class="s-label">Ban Süresi (sn)</label>
                     <input class="s-input" id="s-brute_ban" value="{{ settings.brute_ban }}">
                 </div>
+                <div class="md:col-span-3">
+                    <label class="s-label">Güvenilir Proxy CIDR'ları (Trusted Proxy CIDRs)</label>
+                    <input class="s-input" id="s-trusted_proxy_cidrs" placeholder="boş = X-Forwarded-For'a güvenilmez"
+                           value="{{ settings.trusted_proxy_cidrs }}">
+                    <p class="text-xs opacity-60 mt-1">
+                        Sitenin önünde Nginx/Caddy/Cloudflare gibi bir reverse proxy varsa, gerçek
+                        ziyaretçi IP'sinin doğru tespit edilmesi için proxy'nin IP aralığını (CIDR)
+                        buraya yazmalısınız — aksi halde tüm ziyaretçiler brute-force korumasına aynı
+                        (proxy'nin) IP'sinden geliyormuş gibi görünür ve biri hatalı giriş yaptığında
+                        <b>herkes</b> banlanabilir. Virgülle ayırarak birden fazla aralık girilebilir
+                        (örn. <code>127.0.0.1/32</code> veya Docker için <code>172.16.0.0/12</code>).
+                        Proxy yoksa boş bırakın.
+                    </p>
+                </div>
             </div>
         </div>
 
@@ -633,6 +647,7 @@ function renderSettings(s) {
     document.getElementById('s-brute_window').value = s.brute_window ?? '';
     document.getElementById('s-brute_max').value = s.brute_max ?? '';
     document.getElementById('s-brute_ban').value = s.brute_ban ?? '';
+    document.getElementById('s-trusted_proxy_cidrs').value = s.trusted_proxy_cidrs || '';
 
     renderList('auth_channels', s.auth_channels, false);
     renderList('approver_ids', s.approver_ids, false);
@@ -698,6 +713,7 @@ function buildPayload() {
         brute_window: toInt('s-brute_window', 60),
         brute_max: toInt('s-brute_max', 5),
         brute_ban: toInt('s-brute_ban', 1800),
+        trusted_proxy_cidrs: document.getElementById('s-trusted_proxy_cidrs').value.trim(),
 
         extra_databases: collectList('extra_databases'),
         multi_tokens: collectList('multi_tokens'),

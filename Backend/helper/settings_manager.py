@@ -62,6 +62,9 @@ _DEFAULTS: Dict[str, Any] = {
     #----- (İsimler config.env'deki eski adlandırmayla ters eşleşiyor, bkz. stream_routes.py)
     "parallel": 4,
     "pre_fetch": 3,
+    #----- Brute-force korumasının X-Forwarded-For'a güvendiği proxy CIDR'ları.
+    #----- Boş = header'a hiç güvenilmez (bkz. Backend.fastapi.security.brute_force).
+    "trusted_proxy_cidrs": "",
     "extra_databases": [],
     "multi_tokens": [],
     "announce_new_content": False,
@@ -119,6 +122,7 @@ _SETTINGS_TO_TELEGRAM_ATTR: Dict[str, str] = {
     "brute_ban": "BRUTE_BAN",
     "parallel": "PARALLEL",
     "pre_fetch": "PRE_FETCH",
+    "trusted_proxy_cidrs": "TRUSTED_PROXY_CIDRS",
 }
 
 
@@ -157,6 +161,7 @@ def _seed_from_env() -> Dict[str, Any]:
         "brute_ban":            Telegram.BRUTE_BAN,
         "parallel":             Telegram.PARALLEL,
         "pre_fetch":            Telegram.PRE_FETCH,
+        "trusted_proxy_cidrs":  Telegram.TRUSTED_PROXY_CIDRS,
         "extra_databases":      list(Telegram.DATABASE[2:]) if len(Telegram.DATABASE) > 2 else [],
         "multi_tokens":         [],
     })
@@ -324,5 +329,21 @@ class SettingsManager:
         proxy_keys = {"proxy", "proxy_type", "http_proxy_url", "proxy_mode"}
         if any(old.get(k) != new.get(k) for k in proxy_keys):
             results["proxy"] = "güncellendi — sonraki isteklerde geçerli olacak"
+
+        #----- TRUSTED_PROXY_CIDRS değiştiyse brute-force modülündeki canlı
+        #----- listeyi hemen güncelle (aksi halde process yeniden başlamadan
+        #----- eski/boş liste kullanılmaya devam eder ve gerçek IP tespiti
+        #----- yine bozuk kalır).
+        if old.get("trusted_proxy_cidrs") != new.get("trusted_proxy_cidrs"):
+            try:
+                from Backend.fastapi.security.brute_force import set_trusted_proxies
+                count = set_trusted_proxies(new.get("trusted_proxy_cidrs") or "")
+                results["trusted_proxy_cidrs"] = (
+                    f"{count} güvenilir proxy aralığı yüklendi" if count
+                    else "güvenilir proxy tanımlı değil (X-Forwarded-For'a güvenilmeyecek)"
+                )
+            except Exception as exc:
+                LOGGER.error(f"SettingsManager reinit trusted_proxy_cidrs: {exc}")
+                results["trusted_proxy_cidrs"] = f"hata: {exc}"
 
         return results

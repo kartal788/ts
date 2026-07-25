@@ -215,18 +215,31 @@ async def cleanup_expired_bans() -> None:
 
 
 # ── Güvenilir proxy IP aralıkları ────────────────────────────────────────────
-_raw_trusted = getenv("TRUSTED_PROXY_CIDRS", "").strip()
 _TRUSTED_PROXIES: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
-if _raw_trusted:
-    for _cidr in _raw_trusted.split(","):
+
+
+def set_trusted_proxies(raw: str) -> int:
+    """TRUSTED_PROXY_CIDRS listesini (yeniden) ayrıştırıp canlı olarak günceller.
+    Ayarlar panelinden değer değiştiğinde SettingsManager tarafından çağrılır —
+    process yeniden başlatmaya gerek kalmaz. Geçerli CIDR sayısını döner."""
+    global _TRUSTED_PROXIES
+    parsed: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
+    for _cidr in (raw or "").split(","):
         _cidr = _cidr.strip()
-        if _cidr:
-            try:
-                _TRUSTED_PROXIES.append(ipaddress.ip_network(_cidr, strict=False))
-            except ValueError:
-                logging.getLogger("brute_force").warning(
-                    f"[brute_force] Geçersiz TRUSTED_PROXY_CIDRS değeri: {_cidr!r} — atlandı"
-                )
+        if not _cidr:
+            continue
+        try:
+            parsed.append(ipaddress.ip_network(_cidr, strict=False))
+        except ValueError:
+            logging.getLogger("brute_force").warning(
+                f"[brute_force] Geçersiz TRUSTED_PROXY_CIDRS değeri: {_cidr!r} — atlandı"
+            )
+    _TRUSTED_PROXIES = parsed
+    return len(parsed)
+
+
+# İlk açılışta config.env'den tohumla (panelde ayar yoksa bu değer geçerli olur)
+set_trusted_proxies(getenv("TRUSTED_PROXY_CIDRS", "").strip())
 
 
 def _is_trusted_proxy(ip: str) -> bool:
@@ -237,6 +250,7 @@ def _is_trusted_proxy(ip: str) -> bool:
         return any(addr in net for net in _TRUSTED_PROXIES)
     except ValueError:
         return False
+
 
 
 def get_client_ip(request) -> str:
