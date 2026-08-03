@@ -13,7 +13,7 @@
     .ts{color:var(--c-text2);}
     .lbar-bg{height:6px;background:rgba(255,255,255,.08);border-radius:9999px;overflow:hidden;}
     .lbar-fill{height:100%;border-radius:9999px;transition:width .5s ease;}
-    .media-card{border:1px solid var(--c-border);border-radius:.75rem;overflow:hidden;background:var(--c-card);transition:transform .2s,box-shadow .2s;}
+    .media-card{border:1px solid var(--c-border);border-radius:.75rem;overflow:hidden;background:var(--c-card);transition:transform .2s,box-shadow .2s;cursor:pointer;}
     .media-card:hover{transform:translateY(-3px);box-shadow:0 10px 28px rgba(0,0,0,.55);border-color:var(--c-prim);}
     .btn-prim{background:var(--c-prim);color:#fff;}
     .btn-prim:hover{opacity:.85;}
@@ -28,6 +28,13 @@
     @keyframes shimmer{0%{background-position:-800px 0}100%{background-position:800px 0}}
     .toast{position:fixed;bottom:1.5rem;right:1.5rem;z-index:9999;padding:.6rem 1.1rem;border-radius:.6rem;font-size:.82rem;font-weight:600;color:#fff;opacity:0;transform:translateY(8px);transition:opacity .3s,transform .3s;pointer-events:none;}
     .toast.show{opacity:1;transform:translateY(0);}
+    /* İndirme Modalı */
+    .modal-box{max-height:90vh;overflow-y:hidden;border-radius:1rem;border:1px solid var(--c-border);}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .spinner{animation:spin .8s linear infinite;}
+    .chip{display:inline-flex;align-items:center;gap:4px;font-size:.7rem;padding:2px 8px;border-radius:9999px;border:1px solid var(--c-border);}
+    .btn-prim-sm{background:var(--c-prim);color:#fff;}
+    .btn-prim-sm:hover{opacity:.85;}
     .toast-info{background:#6366f1;}
     .toast-err{background:#ef4444;}
     .theme-dot.active{border-color:#fff !important;transform:scale(1.25);}
@@ -602,13 +609,17 @@ function makeCard(item, type){
         ${t('remove')}
       </button>
     </div>`;
-  // Karta tıklayınca seçim modunda seç/kaldır
+  // Karta tıklayınca: seçim modundaysa seç/kaldır, değilse indirme modalını aç
   div.addEventListener('click', function(e){
-    if(!window._selectMode) return;
-    if(e.target.closest('button')) return;
-    const cb = this.querySelector('.card-checkbox');
-    cb.checked = !cb.checked;
-    onCardCheck(cb);
+    if(window._selectMode){
+      if(e.target.closest('button')) return;
+      const cb = this.querySelector('.card-checkbox');
+      cb.checked = !cb.checked;
+      onCardCheck(cb);
+      return;
+    }
+    if(e.target.closest('button') || e.target.closest('input')) return;
+    openReminderModal(item, type);
   });
   return div;
 }
@@ -902,6 +913,12 @@ const I18N = {
     reqErr:'Hata: ', reqLimit:'Aylık istek limitinize ulaştınız.',
     reqLimitUsed:'Bu ay kullanılan:', reqLimitOf:'/', reqLimitRem:'kalan', reqLimitUnlimited:'Sınırsız istek hakkı',
     reqPending:'⏳ Bekliyor', reqApproved:'✅ Onaylandı', reqRejected:'❌ Reddedildi',
+    // İndirme modalı
+    dlTitle:'İndir', noDownload:'Bu içerik için indirme bulunamadı.',
+    season:'Sezon', episode:'Bölüm', noEp:'Bölüm bulunamadı.',
+    dlPrep:'İndirme hazırlanıyor…', dlDesc:'Güvenli link oluşturuluyor.', dlSize:'Dosya Boyutu:',
+    dlStarted:'İndirme başlatıldı ✓', dlErr:'İndirme hatası: ', dlInvalidFile:'Geçersiz dosya.',
+    limitErr:'Limitinize ulaştınız.',
   },
   en: {
     back:'Back to Catalog', title:'🔔 My Reminders', logout:'Sign Out',
@@ -932,6 +949,11 @@ const I18N = {
     reqErr:'Error: ', reqLimit:'You have reached your monthly request limit.',
     reqLimitUsed:'Used this month:', reqLimitOf:'/', reqLimitRem:'remaining', reqLimitUnlimited:'Unlimited requests',
     reqPending:'⏳ Pending', reqApproved:'✅ Approved', reqRejected:'❌ Rejected',
+    dlTitle:'Download', noDownload:'No download found for this content.',
+    season:'Season', episode:'Episode', noEp:'No episodes found.',
+    dlPrep:'Preparing download…', dlDesc:'Generating secure link.', dlSize:'File Size:',
+    dlStarted:'Download started ✓', dlErr:'Download error: ', dlInvalidFile:'Invalid file.',
+    limitErr:'You have reached your limit.',
   },
   de: {
     back:'Zurück zum Katalog', title:'🔔 Meine Erinnerungen', logout:'Abmelden',
@@ -962,6 +984,11 @@ const I18N = {
     reqErr:'Fehler: ', reqLimit:'Monatliches Anfragelimit erreicht.',
     reqLimitUsed:'Diesen Monat genutzt:', reqLimitOf:'/', reqLimitRem:'übrig', reqLimitUnlimited:'Unbegrenzte Anfragen',
     reqPending:'⏳ Ausstehend', reqApproved:'✅ Genehmigt', reqRejected:'❌ Abgelehnt',
+    dlTitle:'Herunterladen', noDownload:'Für diesen Inhalt wurde kein Download gefunden.',
+    season:'Staffel', episode:'Folge', noEp:'Keine Folgen gefunden.',
+    dlPrep:'Download wird vorbereitet…', dlDesc:'Sicherer Link wird erstellt.', dlSize:'Dateigröße:',
+    dlStarted:'Download gestartet ✓', dlErr:'Download-Fehler: ', dlInvalidFile:'Ungültige Datei.',
+    limitErr:'Sie haben Ihr Limit erreicht.',
   },
 };
 
@@ -1707,7 +1734,348 @@ function renderProfileModal(d){
 document.addEventListener('keydown', e => {
   if(e.key==='Escape' && document.getElementById('profile-overlay').style.display==='flex')
     closeProfileModal();
+  if(e.key==='Escape') closeModal();
 });
+</script>
+
+<!-- İNDİRME DETAY MODALI -->
+<div id="modal-overlay" class="fixed inset-0 z-50 flex items-center justify-center hidden" style="background:rgba(0,0,0,.82)" onclick="handleOverlayClick(event)">
+  <div id="modal-box" class="modal-box tc w-full max-w-2xl mx-4 shadow-2xl flex flex-col">
+    <div class="flex items-start justify-between p-5 border-b" style="border-color:var(--c-border)">
+      <div class="flex-1 pr-4">
+        <h2 id="modal-title" class="text-xl font-bold leading-snug"></h2>
+      </div>
+      <button onclick="event.stopPropagation();closeModal()" class="ts hover:text-white text-2xl leading-none flex items-center justify-center w-9 h-9 rounded-lg hover:bg-white hover:bg-opacity-10 transition shrink-0" style="cursor:pointer" aria-label="Kapat"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="p-5 overflow-y-auto flex-1">
+      <div class="flex gap-4 mb-4">
+        <img id="modal-poster" class="w-24 rounded-lg object-cover shrink-0 hidden" src="" alt="">
+      </div>
+      <div id="movie-qualities" class="hidden">
+        <h3 class="text-sm font-semibold mb-2" id="t-dl-title">İndir</h3>
+        <div id="quality-list" class="space-y-2"></div>
+      </div>
+      <div id="tv-seasons" class="hidden">
+        <div id="seasons-loading" class="py-6 text-center">
+          <div class="w-8 h-8 border-4 rounded-full spinner mx-auto" style="border-color:var(--c-border);border-top-color:var(--c-prim)"></div>
+        </div>
+        <div id="seasons-content"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- İNDİRME HAZIRLANIYOR OVERLAY -->
+<div id="dl-overlay" class="fixed inset-0 z-[60] flex items-center justify-center hidden" style="background:rgba(0,0,0,.82)">
+  <div class="tc rounded-2xl p-8 text-center max-w-sm mx-4 shadow-2xl" style="border:1px solid var(--c-border)">
+    <div class="w-12 h-12 border-4 rounded-full spinner mx-auto mb-4" style="border-color:var(--c-border);border-top-color:var(--c-prim)"></div>
+    <p class="font-semibold mb-1" id="t-dl-prep">İndirme hazırlanıyor…</p>
+    <p class="ts text-sm" id="t-dl-desc">Güvenli link oluşturuluyor.</p>
+    <div id="dl-size-info" class="hidden mt-3 px-4 py-2.5 rounded-xl" style="background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.25)">
+      <div class="flex items-center justify-center gap-2 text-sm">
+        <i class="fas fa-weight-hanging" style="color:var(--c-prim);font-size:.8rem"></i>
+        <span class="ts text-xs" id="t-dl-size">Dosya Boyutu:</span>
+        <span id="dl-size-val" class="font-bold" style="color:var(--c-prim)">—</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+// ── İndirme Detay Modalı ────────────────────────────────────────────────────
+// Hatırlatma kartındaki postere tıklanınca açılır; film/dizi kaliteleri ve
+// indirme linklerini gösterir (member_catalog.html sayfasındaki modal ile
+// aynı mantık, hatırlatma verileriyle çalışacak şekilde uyarlanmıştır).
+
+function escAttr(s){
+  return String(s==null?'':s).replace(/&/g,'&amp;').replace(/'/g,'&#39;').replace(/"/g,'&quot;');
+}
+
+async function openReminderModal(item, type){
+  document.getElementById('t-dl-title') && (document.getElementById('t-dl-title').textContent = t('dlTitle'));
+  document.getElementById('modal-title').textContent = item.title || '—';
+  const img = document.getElementById('modal-poster');
+  const posterUrl = item.poster
+    ? (item.poster.startsWith('http') ? item.poster : `https://image.tmdb.org/t/p/w300${item.poster}`)
+    : '';
+  if(posterUrl){ img.src = posterUrl; img.classList.remove('hidden'); } else { img.classList.add('hidden'); }
+
+  const isTV = type === 'tv';
+  document.getElementById('movie-qualities').classList.toggle('hidden', isTV);
+  document.getElementById('tv-seasons').classList.toggle('hidden', !isTV);
+  document.getElementById('modal-overlay').classList.remove('hidden');
+
+  if(isTV) await loadTvSeasons(item);
+  else await loadMovieQualities(item);
+}
+
+function handleOverlayClick(e){
+  const box = document.getElementById('modal-box');
+  if(e.target === document.getElementById('modal-overlay') || !box.contains(e.target)) closeModal();
+}
+function closeModal(){
+  const ov = document.getElementById('modal-overlay');
+  if(!ov) return;
+  ov.classList.add('hidden');
+  document.getElementById('tv-seasons').classList.add('hidden');
+  document.getElementById('movie-qualities').classList.add('hidden');
+}
+
+// ── Dosya sıralama yardımcıları (member_catalog.html ile aynı mantık) ──────
+function _resolutionRank(q){
+  const raw=(q.quality||q.name||"").toLowerCase();
+  if(/\b(2160p|4k|uhd)\b/.test(raw))return 4;
+  if(/\bm?1080p?\b|\bfhd\b/.test(raw))return 3;
+  if(/\bm?720p?\b|\bhd\b/.test(raw))return 2;
+  if(/\b(480p|576p)\b/.test(raw))return 1;
+  return 0;
+}
+function _sizeBytes(sizeStr){
+  if(!sizeStr)return 0;
+  const m=sizeStr.match(/([\d.,]+)\s*(TB|GB|MB|KB|B)/i);
+  if(!m)return 0;
+  const v=parseFloat(m[1].replace(",","."));
+  const u=m[2].toUpperCase();
+  const map={B:1,KB:1024,MB:1024**2,GB:1024**3,TB:1024**4};
+  return v*(map[u]||0);
+}
+function _isArchive(name){
+  const n=(name||"").toLowerCase();
+  return /\.(zip|7z|rar)(\.(\d+))?$/.test(n)||/\.z\d+$/.test(n)||/\.part\d+\.rar$/.test(n);
+}
+function cleanDownloadName(name){
+  if(!name)return name;
+  return name.replace(/\.(mkv|mp4|avi|ts|m4v|mov|wmv|webm|flv)\.\d{2,3}$/i,".$1")
+             .replace(/\.part\d+\.(\w+)$/i,".$1");
+}
+function _partNumber(name){
+  const n=(name||"").toLowerCase();
+  let m=n.match(/\.part(\d+)\./);if(m)return parseInt(m[1],10);
+  m=n.match(/\.(zip|7z|rar|z)\.(\d+)$/);if(m)return parseInt(m[2],10);
+  m=n.match(/\.z(\d+)$/);if(m)return parseInt(m[1],10);
+  return -1;
+}
+function _baseGroupKey(name){
+  const n=(name||"");
+  let s=n.replace(/\.(zip|7z|rar)\.\d+$/i,(m,ext)=>"."+ext);
+  s=s.replace(/\.z\d+$/i,".zip");
+  s=s.replace(/\.part\d+\.(\w+)$/i,".$1");
+  return s.toLowerCase();
+}
+function sortQualities(qs){
+  const annotated=qs.map(q=>{
+    const name=q.name||"";
+    return {
+      q,
+      resRank:_resolutionRank(q),
+      sizeB:_sizeBytes(q.size),
+      isArchive:_isArchive(name)?0:1,
+      groupKey:_baseGroupKey(name),
+      partNum:_partNumber(name),
+    };
+  });
+  const groupOrder={};
+  const groups={};
+  annotated.forEach(a=>{
+    if(!groups[a.groupKey])groups[a.groupKey]={items:[],resRank:0,maxSize:0};
+    groups[a.groupKey].items.push(a);
+    if(a.resRank>groups[a.groupKey].resRank)groups[a.groupKey].resRank=a.resRank;
+    if(a.sizeB>groups[a.groupKey].maxSize)groups[a.groupKey].maxSize=a.sizeB;
+  });
+  const sortedGroupKeys=Object.keys(groups).sort((ak,bk)=>{
+    const a=groups[ak],b=groups[bk];
+    if(b.resRank!==a.resRank)return b.resRank-a.resRank;
+    return b.maxSize-a.maxSize;
+  });
+  sortedGroupKeys.forEach((k,i)=>{groupOrder[k]=i;});
+  annotated.sort((a,b)=>{
+    const gDiff=groupOrder[a.groupKey]-groupOrder[b.groupKey];
+    if(gDiff!==0)return gDiff;
+    const aDiff=a.isArchive-b.isArchive;
+    if(aDiff!==0)return aDiff;
+    if(a.partNum>=0&&b.partNum>=0)return a.partNum-b.partNum;
+    return 0;
+  });
+  return annotated.map(a=>a.q);
+}
+
+// ── Film kaliteleri ─────────────────────────────────────────────────────────
+async function loadMovieQualities(item){
+  const list = document.getElementById('quality-list');
+  list.innerHTML = `<div class="py-4 text-center"><div class="w-6 h-6 border-4 rounded-full spinner mx-auto" style="border-color:var(--c-border);border-top-color:var(--c-prim)"></div></div>`;
+  try{
+    const dbIdx = (item.db_index!=null && item.db_index>=0) ? item.db_index : -1;
+    const r = await fetch(`/api/uye/film-detay?tmdb_id=${item.tmdb_id}&db_index=${dbIdx}&lang=${CUR_LANG}`);
+    if(!r.ok) throw new Error('film-detay '+r.status);
+    const data = await r.json();
+    renderMovieQualities(data.qualities || []);
+  }catch(e){
+    list.innerHTML = `<p class="ts text-sm">${t('noDownload')}</p>`;
+  }
+}
+function renderMovieQualities(qs){
+  const list=document.getElementById("quality-list");
+  if(!qs.length){list.innerHTML=`<p class="ts text-sm">${t("noDownload")}</p>`;return;}
+  const sorted=sortQualities(qs);
+  list.innerHTML=sorted.map(q=>{
+    const fn=encodeURIComponent(cleanDownloadName(q.name)||"video.mkv");
+    return `<div class="flex items-start gap-3 p-3 rounded-xl" style="border:1px solid var(--c-border)">
+      <div class="flex-1 min-w-0">
+        <div class="font-mono text-xs break-all text-gray-300 mb-1">${q.name||"—"}</div>
+        <div class="flex flex-wrap gap-2 text-xs ts">
+          ${q.quality?`<span class="chip" style="border-color:rgba(59,130,246,.5);color:#93c5fd">${q.quality}</span>`:""}
+          ${q.size?`<span><i class="fas fa-hdd mr-1"></i>${q.size}</span>`:""}
+        </div>
+      </div>
+      <div class="flex items-center gap-2 shrink-0">
+        <button onclick="startDownload('${q.id}','${fn}',${q.size?`'${escAttr(q.size)}'`:'null'})" class="btn-prim text-xs px-3 py-2 rounded-lg hover:opacity-85 transition">
+          <i class="fas fa-download mr-1"></i>${t("dlTitle")}
+        </button>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+// ── Dizi sezon/bölüm listesi ─────────────────────────────────────────────────
+let _tvLoadGen = 0;
+async function loadTvSeasons(item){
+  const myGen = ++_tvLoadGen;
+  document.getElementById("seasons-loading").classList.remove("hidden");
+  document.getElementById("seasons-content").innerHTML="";
+  try{
+    const dbIdx=(item.db_index!=null&&item.db_index>=0)?item.db_index:-1;
+    const r=await fetch(`/api/uye/tv-detay?tmdb_id=${item.tmdb_id}&db_index=${dbIdx}&lang=${CUR_LANG}`);
+    if(!r.ok)throw new Error("tv-detay "+r.status);
+    if(myGen!==_tvLoadGen)return;
+    const seasons=(await r.json()).seasons||[];
+    renderSeasons(seasons);
+  }catch(e){
+    if(myGen!==_tvLoadGen)return;
+    document.getElementById("seasons-content").innerHTML=`<p class="ts text-sm">${t("noEp")}</p>`;
+  }finally{
+    if(myGen===_tvLoadGen)document.getElementById("seasons-loading").classList.add("hidden");
+  }
+}
+function fmtDate(v){
+  if(!v)return v;
+  var d=new Date(v);
+  if(isNaN(d.getTime()))return v;
+  return String(d.getDate()).padStart(2,"0")+"."+String(d.getMonth()+1).padStart(2,"0")+"."+d.getFullYear();
+}
+function renderSeasons(seasons){
+  const cont=document.getElementById("seasons-content");
+  if(!seasons.length){cont.innerHTML=`<p class="ts text-sm">${t("noEp")}</p>`;return;}
+  const sortedSeasons=[...seasons].sort((a,b)=>(a.season_number||0)-(b.season_number||0));
+  cont.innerHTML=sortedSeasons.map((s,si)=>{
+    const sortedEps=[...(s.episodes||[])].sort((a,b)=>(a.episode_number||0)-(b.episode_number||0));
+    return `<details class="mb-3 rounded-xl overflow-hidden" style="border:1px solid var(--c-border)" ${si===0?"open":""}>
+      <summary class="px-4 py-3 font-semibold text-sm cursor-pointer tc hover:opacity-80 select-none" style="border-bottom:1px solid var(--c-border)">
+        ${t("season")} ${s.season_number} <span class="ts font-normal ml-2 text-xs">(${sortedEps.length} ${t("episode")})</span>
+      </summary>
+      <div>${sortedEps.map(ep=>renderEp(ep)).join("")}</div>
+    </details>`;
+  }).join("");
+}
+function epTitle(ep){
+  const key = 'title' + (CUR_LANG==='tr'?'_tr':CUR_LANG==='de'?'_de':'');
+  return ep[key] || ep.title || ('#'+ep.episode_number);
+}
+function renderEp(ep){
+  const qs=sortQualities(ep.qualities||[]);
+  return `<div class="px-4 py-3 tc" style="border-top:1px solid var(--c-border)">
+    <div class="text-xs ts font-mono mb-0.5">${t("episode")} ${ep.episode_number}</div>
+    <div class="text-sm font-medium leading-snug mb-1">${epTitle(ep)}</div>
+    ${ep.released?`<div class="text-xs ts mb-2">${fmtDate(ep.released)}</div>`:""}
+    ${qs.length?qs.map(q=>{
+      const fn=encodeURIComponent(cleanDownloadName(q.name)||"video.mkv");
+      return `<div class="flex items-center justify-between gap-2 mb-1.5">
+        <div class="min-w-0 flex-1">
+          <div class="font-mono text-xs break-all text-gray-300">${q.name||"—"}</div>
+          <div class="flex flex-wrap gap-2 text-xs ts mt-0.5">
+            ${q.quality?`<span class="chip" style="border-color:rgba(59,130,246,.5);color:#93c5fd">${q.quality}</span>`:""}
+            ${q.size?`<span><i class="fas fa-hdd mr-1"></i>${q.size}</span>`:""}
+          </div>
+        </div>
+        <button onclick="startDownload('${q.id}','${fn}',${q.size?`'${escAttr(q.size)}'`:'null'})" class="btn-prim text-xs px-3 py-2 rounded-lg hover:opacity-85 transition shrink-0">
+          <i class="fas fa-download mr-1"></i>${t("dlTitle")}
+        </button>
+      </div>`;
+    }).join(""):`<p class="ts text-xs">${t("noDownload")}</p>`}
+  </div>`;
+}
+
+// ── İndirme başlat ───────────────────────────────────────────────────────────
+async function startDownload(fileId,encodedFilename,fileSize){
+  if(!fileId){showToast(t("dlInvalidFile"),"err");return;}
+  let filename="video.mkv";
+  try{filename=decodeURIComponent(encodedFilename||"video.mkv");}catch(e){}
+
+  const dlOverlay=document.getElementById("dl-overlay");
+  const dlSizeInfo=document.getElementById("dl-size-info");
+  const dlSizeVal=document.getElementById("dl-size-val");
+  document.getElementById('t-dl-prep').textContent = t('dlPrep');
+  document.getElementById('t-dl-desc').textContent = t('dlDesc');
+  document.getElementById('t-dl-size').textContent = t('dlSize');
+  dlOverlay.classList.remove("hidden");
+  if(fileSize&&dlSizeInfo&&dlSizeVal){
+    dlSizeVal.textContent=fileSize;
+    dlSizeInfo.classList.remove("hidden");
+  }else if(dlSizeInfo){
+    dlSizeInfo.classList.add("hidden");
+  }
+
+  try{
+    const r=await fetch(`/api/uye/stream-url?${new URLSearchParams({file_id:fileId,filename:filename})}`);
+    if(r.status===401){location.href="/uye/giris";return;}
+    if(r.status===429){showToast(t("limitErr"),"err");return;}
+    if(!r.ok)throw new Error("stream-url "+r.status);
+    const d=await r.json();
+    if(!d.url)throw new Error("URL alınamadı");
+    if(d.url_direct){
+      const _b=document.createElement("a");
+      _b.href=d.url_direct;_b.download=filename;_b.target="_blank";_b.rel="noopener noreferrer";
+      document.body.appendChild(_b);_b.click();document.body.removeChild(_b);
+    }
+    const isCrossOrigin = d.is_gdrive||d.is_rclone||d.url.includes("drive.google")||d.gdrive_direct;
+    if(isCrossOrigin){
+      try{
+        const resp = await fetch(d.url);
+        if(!resp.ok) throw new Error("fetch "+resp.status);
+        const blob = await resp.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        const _a = document.createElement("a");
+        _a.href = blobUrl;
+        _a.download = filename;
+        document.body.appendChild(_a);
+        _a.click();
+        document.body.removeChild(_a);
+        setTimeout(()=>URL.revokeObjectURL(blobUrl), 10000);
+        showToast(t("dlStarted"),"info");
+      }catch(blobErr){
+        const _a = document.createElement("a");
+        _a.href = d.url;
+        _a.download = filename;
+        _a.target = "_blank";
+        _a.rel = "noopener noreferrer";
+        document.body.appendChild(_a);_a.click();document.body.removeChild(_a);
+        showToast(t("dlStarted"),"info");
+      }
+    }else{
+      const _a=document.createElement("a");
+      _a.href=d.url;
+      _a.download=filename;
+      document.body.appendChild(_a);_a.click();document.body.removeChild(_a);
+      showToast(t("dlStarted"),"info");
+    }
+  }catch(e){showToast(t("dlErr")+e.message,"err");}
+  finally{
+    setTimeout(()=>{
+      dlOverlay.classList.add("hidden");
+      if(dlSizeInfo)dlSizeInfo.classList.add("hidden");
+    },1200);
+  }
+}
 </script>
 
 </body>

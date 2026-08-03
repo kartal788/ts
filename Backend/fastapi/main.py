@@ -55,7 +55,7 @@ from Backend.fastapi.routes.member_routes import (
     member_login_page, member_login_post, member_logout,
     member_catalog_page, member_media_api,
     member_hatirlatmalar_page,
-    member_tv_detail_api, member_stream_url_api, member_usage_api,
+    member_tv_detail_api, member_movie_detail_api, member_stream_url_api, member_usage_api,
     member_profile_api, member_db_size_api,
 )
 from Backend.fastapi.routes.notification_routes import (
@@ -531,6 +531,15 @@ async def uye_tv_detay(
     lang:     str = Query("tr"),
 ):
     return await member_tv_detail_api(request, tmdb_id, db_index, lang)
+
+@app.get("/api/uye/film-detay")
+async def uye_film_detay(
+    request:  Request,
+    tmdb_id:  int = Query(...),
+    db_index: int = Query(-1),
+    lang:     str = Query("tr"),
+):
+    return await member_movie_detail_api(request, tmdb_id, db_index, lang)
 
 @app.get("/api/uye/stream-url")
 async def uye_stream_url(

@@ -759,6 +759,46 @@ async def member_tv_detail_api(
     }
 
 
+# ── API: Film detay (hatırlatmalar sayfası için kalite listesi) ─────────────
+
+async def member_movie_detail_api(
+    request:    Request,
+    tmdb_id:    int = Query(...),
+    db_index:   int = Query(-1),   # -1 → tüm shardlarda ara
+    lang:       str = Query("tr"),
+):
+    member = _get_member(request)
+    if not member:
+        raise HTTPException(status_code=401)
+    if not _check_website_access(member):
+        raise HTTPException(status_code=403)
+    if not await _check_subscription(member["user_id"]):
+        raise HTTPException(status_code=403)
+
+    doc = None
+    if db_index >= 0:
+        doc = await db.get_document("movie", tmdb_id, db_index)
+    else:
+        storage_keys = [k for k in db.dbs if k.startswith("storage_")]
+        for key in sorted(storage_keys):
+            idx = int(key.split("_")[1])
+            candidate = await db.get_document("movie", tmdb_id, idx)
+            if candidate:
+                doc = candidate
+                break
+
+    if not doc:
+        raise HTTPException(status_code=404)
+
+    return {
+        "tmdb_id":    doc.get("tmdb_id"),
+        "title":      doc.get("title"),
+        "title_tr":   doc.get("title_tr"),
+        "title_de":   doc.get("title_de"),
+        "qualities":  _safe_qualities(doc.get("telegram", [])) or doc.get("qualities", []),
+    }
+
+
 # ── API: Stream URL üret ─────────────────────────────────────────────────────
 
 async def member_stream_url_api(
