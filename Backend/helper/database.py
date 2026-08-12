@@ -390,6 +390,19 @@ class Database:
             }
         )
 
+        # Abonelik/finansal geçmiş kaydı
+        try:
+            await self.log_subscription_event(user_id, {
+                "type":        "payment_approved",
+                "label":       user["pending_payment"].get("label", ""),
+                "price":       user["pending_payment"].get("price", 0),
+                "currency":    user["pending_payment"].get("currency", "TRY"),
+                "duration":    duration,
+                "new_expiry":  new_expiry,
+            })
+        except Exception:
+            pass
+
         # Plan limitlerini bul — plan_id ile eşleştir (etiket boş olabilir)
         plan_id_str = user["pending_payment"].get("plan_id", "")
         plan_label  = user["pending_payment"].get("label", "")
@@ -437,6 +450,24 @@ class Database:
             {"$unset": {"pending_payment": ""}}
         )
         return result.modified_count > 0
+
+    # ── Abonelik / Finansal Geçmiş ───────────────────────────────────────────
+
+    async def log_subscription_event(self, user_id: int, event: dict) -> None:
+        """Bir üyenin abonelik/ödeme geçmişine tek bir olay kaydı ekler.
+        event içine ekstra alanlar (label, price, days, new_expiry vb.) konabilir.
+        """
+        doc = {"user_id": user_id, "date": datetime.utcnow()}
+        doc.update(event or {})
+        await self.dbs["tracking"]["subscription_history"].insert_one(doc)
+
+    async def get_subscription_history(self, user_id: int, limit: int = 50) -> List[dict]:
+        """Bir üyenin abonelik/ödeme geçmişini en yeniden en eskiye döner."""
+        cursor = self.dbs["tracking"]["subscription_history"].find(
+            {"user_id": user_id}
+        ).sort("date", DESCENDING).limit(limit)
+        docs = await cursor.to_list(None)
+        return [convert_objectid_to_str(d) for d in docs]
 
     async def ban_user(self, user_id: int) -> bool:
         await self.dbs["tracking"]["users"].update_one(
@@ -622,6 +653,15 @@ class Database:
                 {"_id": user_id},
                 {"$set": {"subscription_expiry": new_expiry, "subscription_status": status}}
             )
+            if result.modified_count > 0:
+                try:
+                    await self.log_subscription_event(user_id, {
+                        "type":       f"admin_{action}",
+                        "days":       days,
+                        "new_expiry": new_expiry,
+                    })
+                except Exception:
+                    pass
             return result.modified_count > 0
             
         elif action == "delete":
@@ -659,6 +699,11 @@ class Database:
                 await self.delete_user_content_requests(user_id)
             except Exception as e:
                 print(f"manage_subscriber delete: request count reset error: {e}")
+            if result.modified_count > 0:
+                try:
+                    await self.log_subscription_event(user_id, {"type": "admin_delete"})
+                except Exception:
+                    pass
             return result.modified_count > 0
             
         return False
@@ -2562,6 +2607,25 @@ class Database:
     async def get_api_token(self, token: str) -> Optional[dict]:
         doc = await self.dbs["tracking"]["api_tokens"].find_one({"token": token})
         return convert_objectid_to_str(doc) if doc else None
+
+    async def regenerate_api_token(self, old_token: str) -> Optional[dict]:
+        """Mevcut token kaydını (limitler, kullanım geçmişi, kullanıcı bağlantısı vb.
+        her şeyi koruyarak) yeni rastgele bir token string'i ile değiştirir.
+        Eski token anında geçersiz hale gelir; aktif cihaz oturumları temizlenir."""
+        existing = await self.dbs["tracking"]["api_tokens"].find_one({"token": old_token})
+        if not existing:
+            return None
+
+        alphabet = string.ascii_letters + string.digits
+        new_token = ''.join(secrets.choice(alphabet) for _ in range(32))
+
+        await self.dbs["tracking"]["api_tokens"].update_one(
+            {"_id": existing["_id"]},
+            {"$set": {"token": new_token, "active_devices": []}}
+        )
+        existing["token"] = new_token
+        existing["active_devices"] = []
+        return convert_objectid_to_str(existing)
 
     async def get_all_api_tokens(self) -> List[dict]:
         cursor = self.dbs["tracking"]["api_tokens"].find().sort("created_at", DESCENDING)

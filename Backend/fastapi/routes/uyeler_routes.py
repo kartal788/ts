@@ -21,6 +21,22 @@ Eklenmesi gereken route'lar (main.py'ye ekleyin):
   @app.get("/api/admin/uyeler/{member_id}/streams")
   async def admin_uye_streams(member_id: str, _: bool = Depends(require_auth)):
       return await admin_uye_stream_history_api(member_id)
+
+  @app.get("/api/admin/uyeler/{member_id}/subscription-history")
+  async def admin_uye_subscription_history(member_id: str, _: bool = Depends(require_auth)):
+      return await admin_uye_subscription_history_api(member_id)
+
+  @app.post("/api/admin/uyeler/{member_id}/ban")
+  async def admin_uye_ban(member_id: str, _: bool = Depends(require_auth)):
+      return await admin_uye_ban_api(member_id, True)
+
+  @app.post("/api/admin/uyeler/{member_id}/unban")
+  async def admin_uye_unban(member_id: str, _: bool = Depends(require_auth)):
+      return await admin_uye_ban_api(member_id, False)
+
+  @app.post("/api/admin/uyeler/{member_id}/clear-devices")
+  async def admin_uye_clear_devices(member_id: str, _: bool = Depends(require_auth)):
+      return await admin_uye_clear_devices_api(member_id)
 """
 
 from __future__ import annotations
@@ -117,6 +133,10 @@ async def _build_members_list() -> list[dict]:
             else:
                 sub_status = "active" if (not expiry or (expiry and expiry > now)) else "expired"
 
+        is_banned = bool(user and user.get("banned"))
+        if is_banned:
+            sub_status = "banned"
+
         result.append({
             "user_id":              token_user_id,
             "user_name":            name,
@@ -127,6 +147,7 @@ async def _build_members_list() -> list[dict]:
             "daily_bytes":          usage.get("daily", {}).get("bytes", 0),
             "monthly_bytes":        usage.get("monthly", {}).get("bytes", 0),
             "limits":               t.get("limits"),
+            "is_banned":            is_banned,
         })
 
     # Token'sız aboneleri de ekle
@@ -136,6 +157,9 @@ async def _build_members_list() -> list[dict]:
         sub_status = u.get("subscription_status", "expired")
         expiry     = u.get("subscription_expiry")
         name       = u.get("first_name") or u.get("username") or f"Kullanıcı {uid_str}"
+        is_banned  = bool(u.get("banned"))
+        if is_banned:
+            sub_status = "banned"
         result.append({
             "user_id":             u.get("_id"),
             "user_name":           name,
@@ -146,6 +170,7 @@ async def _build_members_list() -> list[dict]:
             "daily_bytes":         0,
             "monthly_bytes":       0,
             "limits":              None,
+            "is_banned":           is_banned,
         })
 
     # Toplam veriye göre sırala
@@ -221,48 +246,90 @@ async def admin_uyeler_list_api() -> dict:
         raise HTTPException(status_code=500, detail="Sunucu hatası")
 
 
+# ─── Yardımcı: member_id'yi token / user_id / token_doc'a çöz ────────────────
+
+async def _resolve_member(member_id: str) -> dict:
+    """
+    member_id: token string veya Telegram user_id (sayı) olabilir.
+    Döner: {"user_token": str|None, "token_doc": dict|None, "user_id": int|None}
+    """
+    token_doc = await db.dbs["tracking"]["api_tokens"].find_one({"token": member_id})
+    user_token: Optional[str] = None
+    user_id: Optional[int] = None
+
+    if token_doc:
+        user_token = member_id
+        user_id = token_doc.get("user_id")
+    else:
+        try:
+            uid = int(member_id)
+            user_id = uid
+            token_doc = await db.dbs["tracking"]["api_tokens"].find_one({"user_id": uid})
+            if token_doc:
+                user_token = token_doc.get("token")
+        except (ValueError, TypeError):
+            pass
+
+    return {"user_token": user_token, "token_doc": token_doc, "user_id": user_id}
+
+
 # ─── API: /api/admin/uyeler/{member_id}/streams ──────────────────────────────
 
 async def admin_uye_stream_history_api(member_id: str) -> dict:
     """
-    Belirli bir üyenin stream geçmişini ve istatistiklerini döner.
+    Belirli bir üyenin stream geçmişini, istatistiklerini, cihaz/limit bilgisini,
+    limit aşım geçmişini ve diğer üyelere göre karşılaştırmasını döner.
     member_id: user_id (sayı) veya token string olabilir.
     """
     try:
         col = db.dbs["tracking"]["stream_analytics"]
 
-        # Kullanıcıya ait token'ı bul
-        user_token: Optional[str] = None
+        resolved    = await _resolve_member(member_id)
+        user_token  = resolved["user_token"]
+        token_doc   = resolved["token_doc"]
+        user_id     = resolved["user_id"]
 
-        # Önce token olarak dene
-        token_doc = await db.dbs["tracking"]["api_tokens"].find_one(
-            {"token": member_id}
-        )
+        # ── Cihaz / Oturum / Limit bilgisi (token varsa) ─────────────────────
+        device_info: dict = {}
+        limits: dict = (token_doc or {}).get("limits", {}) or {}
         if token_doc:
-            user_token = member_id
-        else:
-            # user_id olarak dene
-            try:
-                uid = int(member_id)
-                token_doc = await db.dbs["tracking"]["api_tokens"].find_one(
-                    {"user_id": uid}
-                )
-                if token_doc:
-                    user_token = token_doc.get("token")
-            except (ValueError, TypeError):
-                pass
+            usage = token_doc.get("usage", {}) or {}
+            active_count = await db.get_active_device_count(user_token) if user_token else 0
+            expires_at = token_doc.get("expires_at")
+            device_info = {
+                "active_devices":       active_count,
+                "device_limit":         limits.get("device_limit", 0),
+                "ip_limit":             limits.get("ip_limit", 0),
+                "daily_limit_gb":       limits.get("daily_limit_gb", 0),
+                "monthly_limit_gb":     limits.get("monthly_limit_gb", 0),
+                "speed_limit_mbps":     limits.get("speed_limit_mbps", 0),
+                "daily_used_bytes":     usage.get("daily", {}).get("bytes", 0),
+                "monthly_used_bytes":   usage.get("monthly", {}).get("bytes", 0),
+                "total_used_bytes":     usage.get("total_bytes", 0),
+                "daily_limit_warned":   bool(token_doc.get("daily_limit_warned")),
+                "daily_limit_finished": bool(token_doc.get("daily_limit_finished")),
+                "daily_limit_disabled": bool(token_doc.get("daily_limit_disabled")),
+                "token_expires_at":     expires_at.isoformat() if isinstance(expires_at, datetime) else expires_at,
+            }
 
         # Sorgu filtresi
-        if user_token:
-            match_filter = {"user_token": user_token}
-        else:
-            # Hiç token bulamazsak boş dön
+        if not user_token:
+            # Hiç token bulamazsak, geçmiş boş ama diğer alanlar (karşılaştırma vb.) yine de dönsün
+            comparison = await _build_comparison(user_id=user_id, user_token=None, my_bytes=0)
             return {
-                "status":   "success",
-                "streams":  [],
-                "summary":  {},
-                "top_content": [],
+                "status":            "success",
+                "streams":           [],
+                "summary":           {},
+                "top_content":       [],
+                "daily_video_usage": [],
+                "device_info":       device_info,
+                "limit_overrun_days": [],
+                "comparison":        comparison,
+                "user_id":           user_id,
+                "user_token":        user_token,
             }
+
+        match_filter = {"user_token": user_token}
 
         # ── Tüm stream kayıtları (en yeni önce) ──────────────────────────────
         from pymongo import DESCENDING
@@ -285,7 +352,7 @@ async def admin_uye_stream_history_api(member_id: str) -> dict:
                 "certification_de": 1,
                 "certification_us": 1,
             }
-        ).sort("logged_at", DESCENDING).limit(20)
+        ).sort("logged_at", DESCENDING).limit(1000)
         streams_raw = await cursor.to_list(None)
 
         streams = []
@@ -357,17 +424,108 @@ async def admin_uye_stream_history_api(member_id: str) -> dict:
                 "certification_us":   r.get("certification_us"),
             })
 
+        # ── Günlük bazda, hangi video kaç GB veri çekmiş ────────────────────────
+        daily_video_pipe = [
+            {"$match": {**match_filter, "title": {"$ne": None, "$exists": True}, "logged_at": {"$ne": None, "$exists": True}}},
+            {"$group": {
+                "_id": {
+                    "day":   {"$dateToString": {"format": "%Y-%m-%d", "date": "$logged_at"}},
+                    "title": "$title",
+                },
+                "imdb_id":     {"$first": "$imdb_id"},
+                "watch_count": {"$sum": 1},
+                "total_bytes": {"$sum": "$total_bytes"},
+            }},
+            {"$sort": {"_id.day": -1, "total_bytes": -1}},
+            {"$limit": 1000},
+        ]
+        daily_video_raw = await col.aggregate(daily_video_pipe).to_list(None)
+        daily_video_usage = []
+        for r in daily_video_raw:
+            _id = r.get("_id", {})
+            daily_video_usage.append({
+                "day":         _id.get("day"),
+                "title":       _id.get("title"),
+                "imdb_id":     r.get("imdb_id"),
+                "watch_count": r.get("watch_count", 0),
+                "total_bytes": r.get("total_bytes", 0),
+            })
+
+        # ── Limit Aşım Geçmişi ────────────────────────────────────────────────
+        # Not: Geçmiş limit değerleri saklanmadığından, mevcut günlük limit
+        # eşiği geçmiş günlere de uygulanarak yaklaşık bir aşım listesi çıkarılır.
+        limit_overrun_days: list = []
+        daily_limit_bytes = float(limits.get("daily_limit_gb") or 0) * 1_073_741_824
+        if daily_limit_bytes > 0:
+            day_totals: dict = {}
+            for r in daily_video_usage:
+                d = r.get("day")
+                if not d:
+                    continue
+                day_totals[d] = day_totals.get(d, 0) + (r.get("total_bytes") or 0)
+            for day, total in day_totals.items():
+                if total > daily_limit_bytes:
+                    limit_overrun_days.append({
+                        "day":          day,
+                        "total_bytes":  total,
+                        "limit_bytes":  daily_limit_bytes,
+                        "over_pct":     round((total / daily_limit_bytes - 1) * 100, 1),
+                    })
+            limit_overrun_days.sort(key=lambda x: x["day"], reverse=True)
+            limit_overrun_days = limit_overrun_days[:60]
+
+        # ── Karşılaştırma & Bağlam (diğer üyelere göre) ─────────────────────
+        my_bytes = (token_doc or {}).get("usage", {}).get("total_bytes") if token_doc else None
+        if my_bytes is None:
+            my_bytes = summary.get("total_bytes", 0) or 0
+        comparison = await _build_comparison(user_id=user_id, user_token=user_token, my_bytes=my_bytes)
+
         return {
-            "status":      "success",
-            "streams":     streams,
-            "summary":     summary,
-            "top_content": top_content,
+            "status":             "success",
+            "streams":            streams,
+            "summary":            summary,
+            "top_content":        top_content,
+            "daily_video_usage":  daily_video_usage,
+            "device_info":        device_info,
+            "limit_overrun_days": limit_overrun_days,
+            "comparison":         comparison,
+            "user_id":            user_id,
+            "user_token":         user_token,
         }
 
     except Exception as e:
         _logger.error("Internal error", exc_info=True)
 
         raise HTTPException(status_code=500, detail="Sunucu hatası")
+
+
+# ─── Yardımcı: Diğer üyelere göre sıralama / karşılaştırma ───────────────────
+
+async def _build_comparison(user_id: Optional[int], user_token: Optional[str], my_bytes: float) -> dict:
+    try:
+        all_members = await _build_members_list()
+        if not all_members:
+            return {}
+        total_values = [m.get("total_bytes", 0) or 0 for m in all_members]
+        avg_bytes = sum(total_values) / len(total_values) if total_values else 0
+
+        rank = None
+        for idx, m in enumerate(all_members, start=1):
+            if user_token and m.get("token") == user_token:
+                rank = idx
+                break
+            if user_id is not None and m.get("user_id") == user_id:
+                rank = idx
+                break
+
+        return {
+            "rank":            rank,
+            "total_members":   len(all_members),
+            "avg_total_bytes": avg_bytes,
+            "percent_vs_avg":  round(((my_bytes - avg_bytes) / avg_bytes) * 100, 1) if avg_bytes > 0 else None,
+        }
+    except Exception:
+        return {}
 
 
 # ─── API: /api/admin/uyeler/{member_id}/reminders ────────────────────────────
@@ -427,4 +585,91 @@ async def admin_uye_reminders_api(member_id: str) -> dict:
 
     except Exception as e:
         _logger.error("admin_uye_reminders_api error", exc_info=True)
+        raise HTTPException(status_code=500, detail="Sunucu hatası")
+
+
+# ─── API: /api/admin/uyeler/{member_id}/subscription-history ────────────────
+
+async def admin_uye_subscription_history_api(member_id: str) -> dict:
+    """
+    Belirli bir üyenin abonelik/ödeme geçmişini (onaylar, admin uzatma/azaltma/
+    iptal işlemleri) döner.
+
+    main.py'ye eklenecek route:
+      @app.get("/api/admin/uyeler/{member_id}/subscription-history")
+      async def admin_uye_subscription_history(member_id: str, _: bool = Depends(require_auth)):
+          return await admin_uye_subscription_history_api(member_id)
+    """
+    try:
+        resolved = await _resolve_member(member_id)
+        user_id  = resolved["user_id"]
+        if user_id is None:
+            return {"status": "success", "history": []}
+
+        history = await db.get_subscription_history(user_id)
+        return {"status": "success", "history": history}
+    except Exception:
+        _logger.error("admin_uye_subscription_history_api error", exc_info=True)
+        raise HTTPException(status_code=500, detail="Sunucu hatası")
+
+
+# ─── API: /api/admin/uyeler/{member_id}/ban ve /unban ────────────────────────
+
+async def admin_uye_ban_api(member_id: str, ban: bool) -> dict:
+    """
+    Belirli bir üyeyi banlar/ban kaldırır. Yalnızca Telegram user_id'si çözülebilen
+    üyeler için çalışır (token'sız/subscriber kaydı olmayan üyeler banlanamaz).
+
+    main.py'ye eklenecek route'lar:
+      @app.post("/api/admin/uyeler/{member_id}/ban")
+      async def admin_uye_ban(member_id: str, _: bool = Depends(require_auth)):
+          return await admin_uye_ban_api(member_id, True)
+
+      @app.post("/api/admin/uyeler/{member_id}/unban")
+      async def admin_uye_unban(member_id: str, _: bool = Depends(require_auth)):
+          return await admin_uye_ban_api(member_id, False)
+    """
+    try:
+        resolved = await _resolve_member(member_id)
+        user_id  = resolved["user_id"]
+        if user_id is None:
+            raise HTTPException(status_code=404, detail="Üyenin Telegram ID'si bulunamadı")
+
+        if ban:
+            await db.ban_user(user_id)
+        else:
+            await db.unban_user(user_id)
+
+        return {"status": "success", "banned": ban}
+    except HTTPException:
+        raise
+    except Exception:
+        _logger.error("admin_uye_ban_api error", exc_info=True)
+        raise HTTPException(status_code=500, detail="Sunucu hatası")
+
+
+# ─── API: /api/admin/uyeler/{member_id}/clear-devices ────────────────────────
+
+async def admin_uye_clear_devices_api(member_id: str) -> dict:
+    """
+    Belirli bir üyenin aktif cihaz/oturum kayıtlarını temizler (token'daki
+    active_devices listesi sıfırlanır — cihaz limiti aşımını manuel çözmek için).
+
+    main.py'ye eklenecek route:
+      @app.post("/api/admin/uyeler/{member_id}/clear-devices")
+      async def admin_uye_clear_devices(member_id: str, _: bool = Depends(require_auth)):
+          return await admin_uye_clear_devices_api(member_id)
+    """
+    try:
+        resolved   = await _resolve_member(member_id)
+        user_token = resolved["user_token"]
+        if not user_token:
+            raise HTTPException(status_code=404, detail="Üyeye ait token bulunamadı")
+
+        await db.clear_device_sessions(user_token)
+        return {"status": "success"}
+    except HTTPException:
+        raise
+    except Exception:
+        _logger.error("admin_uye_clear_devices_api error", exc_info=True)
         raise HTTPException(status_code=500, detail="Sunucu hatası")

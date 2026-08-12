@@ -21,8 +21,7 @@ from datetime import datetime, timedelta
 logger = logging.getLogger("db_scheduler")
 
 _SIMILAR_INTERVAL = 30 * 60  # "Sana Özel" cache yenileme aralığı: 30 dakika
-_ANALYTICS_RETENTION_DAYS = 10   # stream_analytics maksimum saklama süresi
-_ANALYTICS_MAX_RECORDS    = 20   # stream_analytics maksimum kayıt sayısı
+_ANALYTICS_RETENTION_DAYS = 30   # stream_analytics maksimum saklama süresi
 _daily_timer: threading.Timer | None = None
 _similar_timer: threading.Timer | None = None
 _analytics_cleanup_timer: threading.Timer | None = None
@@ -276,49 +275,19 @@ def _schedule_next_similar() -> None:
 async def _cleanup_analytics_async() -> None:
     """
     stream_analytics koleksiyonunu temizler:
-    - 10 günden eski tüm kayıtları siler
-    - Her kullanıcı için en fazla 20 kayıt bırakır (en yeniler kalır)
+    - 30 günden eski tüm kayıtları siler
     """
     try:
         from Backend import db as _db
         col = _db.dbs["tracking"]["stream_analytics"]
 
-        # 1) 10 günden eski kayıtları sil
+        # 30 günden eski kayıtları sil
         cutoff = datetime.utcnow() - timedelta(days=_ANALYTICS_RETENTION_DAYS)
         old_result = await col.delete_many({"logged_at": {"$lt": cutoff}})
         if old_result.deleted_count:
             logger.info(
                 "[analytics-cleanup] %d eski kayıt silindi (>%d gün).",
                 old_result.deleted_count, _ANALYTICS_RETENTION_DAYS,
-            )
-
-        # 2) Her kullanıcı için en fazla 20 kayıt bırak
-        # Kullanıcı başına 20'den fazla kayıt varsa, en eskilerini sil
-        pipeline = [
-            {"$group": {"_id": "$user_token", "count": {"$sum": 1}}},
-            {"$match": {"count": {"$gt": _ANALYTICS_MAX_RECORDS}}},
-        ]
-        over_limit = await col.aggregate(pipeline).to_list(None)
-        total_trimmed = 0
-        for row in over_limit:
-            token = row["_id"]
-            # En yeni 20 kaydın _id listesini al
-            keep_cursor = col.find(
-                {"user_token": token},
-                {"_id": 1}
-            ).sort("logged_at", -1).limit(_ANALYTICS_MAX_RECORDS)
-            keep_ids = [doc["_id"] async for doc in keep_cursor]
-            # Bunlar dışındakileri sil
-            trim_result = await col.delete_many({
-                "user_token": token,
-                "_id": {"$nin": keep_ids},
-            })
-            total_trimmed += trim_result.deleted_count
-
-        if total_trimmed:
-            logger.info(
-                "[analytics-cleanup] %d fazla kayıt kırpıldı (kullanıcı başına max %d).",
-                total_trimmed, _ANALYTICS_MAX_RECORDS,
             )
 
     except Exception as e:
@@ -485,8 +454,8 @@ def start_scheduler(mongo_uri: str) -> None:
 
     ta = threading.Thread(target=_analytics_first_run, daemon=True, name="analytics-cleanup-init")
     ta.start()
-    logger.info("[analytics-cleanup] Zamanlayıcı başlatıldı (günlük, max %d kayıt, max %d gün).",
-                _ANALYTICS_MAX_RECORDS, _ANALYTICS_RETENTION_DAYS)
+    logger.info("[analytics-cleanup] Zamanlayıcı başlatıldı (günlük, max %d gün).",
+                _ANALYTICS_RETENTION_DAYS)
 
     # TMDB katalog zamanlayıcısını da başlat
     try:

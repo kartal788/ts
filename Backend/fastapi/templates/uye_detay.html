@@ -48,6 +48,126 @@
     </div>
   </div>
 
+  <!-- Cihaz / Oturum, Limit ve Karşılaştırma Kartları -->
+  <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+    <!-- Cihaz / Oturum -->
+    <div class="theme-card rounded-2xl border p-5">
+      <div class="flex items-center justify-between mb-3">
+        <div class="text-xs theme-text-secondary uppercase tracking-wide font-semibold flex items-center gap-1.5">
+          <i class="fas fa-mobile-screen-button text-primary"></i> Cihaz / Oturum
+        </div>
+        <button onclick="clearDeviceSessions()" id="btn-clear-devices"
+          class="text-xs px-2.5 py-1 rounded-lg border hover:border-primary transition theme-text-secondary hover:text-primary">
+          <i class="fas fa-broom mr-1"></i>Temizle
+        </button>
+      </div>
+      <div class="text-2xl font-bold text-text" id="device-active-count">—</div>
+      <div class="text-xs theme-text-secondary mt-1" id="device-limit-line">Aktif cihaz / limit</div>
+      <div class="text-xs theme-text-secondary mt-2 pt-2 border-t" id="device-ip-line">IP limiti: —</div>
+    </div>
+
+    <!-- Karşılaştırma & Bağlam -->
+    <div class="theme-card rounded-2xl border p-5">
+      <div class="text-xs theme-text-secondary uppercase tracking-wide font-semibold mb-3 flex items-center gap-1.5">
+        <i class="fas fa-chart-simple text-blue-400"></i> Diğer Üyelere Göre
+      </div>
+      <div class="text-2xl font-bold text-text" id="comp-rank">—</div>
+      <div class="text-xs theme-text-secondary mt-1" id="comp-rank-line">sıralamadaki yeri</div>
+      <div class="text-xs mt-2 pt-2 border-t theme-text-secondary" id="comp-avg-line">Ortalamaya göre: —</div>
+    </div>
+
+    <!-- Limit Durumu -->
+    <div class="theme-card rounded-2xl border p-5">
+      <div class="text-xs theme-text-secondary uppercase tracking-wide font-semibold mb-3 flex items-center gap-1.5">
+        <i class="fas fa-gauge-high text-yellow-400"></i> Günlük Limit Durumu
+      </div>
+      <div class="text-2xl font-bold text-text" id="limit-status-line">—</div>
+      <div class="text-xs theme-text-secondary mt-1" id="limit-status-sub">Kota bilgisi yükleniyor…</div>
+    </div>
+  </div>
+
+  <!-- Yönetimsel Aksiyonlar -->
+  <div class="theme-card rounded-2xl border p-6 mb-6">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-lg font-bold flex items-center gap-2">
+        <i class="fas fa-sliders text-primary"></i> Yönetimsel Aksiyonlar
+      </h2>
+      <span id="adm-msg" class="text-xs"></span>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <!-- Limit düzenleme -->
+      <div>
+        <div class="text-xs font-semibold theme-text-secondary uppercase tracking-wide mb-3">Limitleri Düzenle</div>
+        <div class="grid grid-cols-2 gap-2.5">
+          <label class="text-xs theme-text-secondary col-span-2 sm:col-span-1">
+            Günlük (GB)
+            <input id="adm-daily-limit" type="number" min="0" step="0.1"
+              class="mt-1 w-full text-sm px-3 py-2 rounded-xl border focus:outline-none focus:border-primary">
+          </label>
+          <label class="text-xs theme-text-secondary col-span-2 sm:col-span-1">
+            Aylık (GB)
+            <input id="adm-monthly-limit" type="number" min="0" step="0.1"
+              class="mt-1 w-full text-sm px-3 py-2 rounded-xl border focus:outline-none focus:border-primary">
+          </label>
+          <label class="text-xs theme-text-secondary col-span-2 sm:col-span-1">
+            Hız (Mbps)
+            <input id="adm-speed-limit" type="number" min="0" step="0.5"
+              class="mt-1 w-full text-sm px-3 py-2 rounded-xl border focus:outline-none focus:border-primary">
+          </label>
+          <label class="text-xs theme-text-secondary col-span-2 sm:col-span-1">
+            Cihaz Limiti
+            <input id="adm-device-limit" type="number" min="0" step="1"
+              class="mt-1 w-full text-sm px-3 py-2 rounded-xl border focus:outline-none focus:border-primary">
+          </label>
+        </div>
+        <button onclick="saveLimits()" id="adm-save-limits-btn"
+          class="mt-3 w-full px-4 py-2 bg-primary/10 hover:bg-primary/20 text-primary rounded-xl text-sm font-medium transition-all">
+          <i class="fas fa-floppy-disk mr-1.5"></i>Limitleri Kaydet
+        </button>
+      </div>
+
+      <!-- Abonelik -->
+      <div>
+        <div class="text-xs font-semibold theme-text-secondary uppercase tracking-wide mb-3">Abonelik Süresi</div>
+        <label class="text-xs theme-text-secondary">
+          Gün sayısı
+          <input id="adm-days" type="number" min="1" step="1" value="30"
+            class="mt-1 w-full text-sm px-3 py-2 rounded-xl border focus:outline-none focus:border-primary">
+        </label>
+        <div class="flex gap-2 mt-3">
+          <button onclick="manageSubscription('extend')"
+            class="flex-1 px-4 py-2 bg-green-500/10 hover:bg-green-500/20 text-green-400 rounded-xl text-sm font-medium transition-all">
+            <i class="fas fa-plus mr-1.5"></i>Uzat
+          </button>
+          <button onclick="manageSubscription('reduce')"
+            class="flex-1 px-4 py-2 bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 rounded-xl text-sm font-medium transition-all">
+            <i class="fas fa-minus mr-1.5"></i>Azalt
+          </button>
+        </div>
+      </div>
+
+      <!-- Üyelik / Erişim -->
+      <div>
+        <div class="text-xs font-semibold theme-text-secondary uppercase tracking-wide mb-3">Üyelik / Erişim</div>
+        <div class="flex flex-col gap-2">
+          <button onclick="toggleBan()" id="adm-ban-btn"
+            class="px-4 py-2 bg-gray-500/10 hover:bg-gray-500/20 text-gray-300 rounded-xl text-sm font-medium transition-all text-left">
+            <i class="fas fa-ban mr-1.5"></i><span id="adm-ban-label">Üyeyi Banla</span>
+          </button>
+          <button onclick="regenerateToken()" id="adm-regen-btn"
+            class="px-4 py-2 bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 rounded-xl text-sm font-medium transition-all text-left">
+            <i class="fas fa-arrows-rotate mr-1.5"></i>Tokeni Değiştir
+          </button>
+          <button onclick="revokeToken()" id="adm-revoke-btn"
+            class="px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-xl text-sm font-medium transition-all text-left">
+            <i class="fas fa-key mr-1.5"></i>Token'ı İptal Et
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Veri İstatistik Kartları -->
   <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
     <div class="theme-card rounded-2xl border p-5">
@@ -88,6 +208,23 @@
     </div>
   </div>
 
+  <!-- Görselleştirme: Son 30 Gün Veri Kullanımı -->
+  <div class="mb-8">
+    <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
+      <h2 class="text-lg font-bold flex items-center gap-2">
+        <i class="fas fa-chart-column text-blue-400"></i>
+        Son 30 Gün Veri Kullanımı
+      </h2>
+      <div class="flex items-center gap-4 text-xs theme-text-secondary" id="usage-chart-summary"></div>
+    </div>
+    <div class="theme-card rounded-2xl border p-5">
+      <div id="usage-chart-wrap" style="height:220px; position:relative">
+        <canvas id="usage-chart"></canvas>
+      </div>
+      <div id="usage-chart-empty" class="hidden text-center theme-text-secondary py-8 text-sm">Bu üye için henüz veri yok.</div>
+    </div>
+  </div>
+
   <!-- İzleme Geçmişi Tablosu -->
   <div class="mb-8">
     <div class="flex items-center justify-between mb-4">
@@ -115,12 +252,13 @@
               <th class="px-5 py-3.5 text-center text-xs font-semibold uppercase tracking-wide theme-text-secondary hidden md:table-cell">Süre</th>
               <th class="px-5 py-3.5 text-center text-xs font-semibold uppercase tracking-wide theme-text-secondary hidden lg:table-cell">Hız (Ort/Zirve)</th>
               <th class="px-5 py-3.5 text-center text-xs font-semibold uppercase tracking-wide theme-text-secondary hidden sm:table-cell">Durum</th>
+              <th class="px-5 py-3.5 text-center text-xs font-semibold uppercase tracking-wide theme-text-secondary hidden xl:table-cell">Cihaz/Bot</th>
               <th class="px-5 py-3.5 text-right text-xs font-semibold uppercase tracking-wide theme-text-secondary">Tarih & Saat</th>
             </tr>
           </thead>
           <tbody id="history-tbody">
             <tr>
-              <td colspan="8" class="px-6 py-12 text-center theme-text-secondary">
+              <td colspan="9" class="px-6 py-12 text-center theme-text-secondary">
                 <i class="fas fa-spinner fa-spin text-primary mr-2"></i> Geçmiş yükleniyor…
               </td>
             </tr>
@@ -155,6 +293,110 @@
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4" id="top-content-grid">
       <div class="col-span-full text-center theme-text-secondary py-8">
         <i class="fas fa-spinner fa-spin mr-2"></i> Yükleniyor…
+      </div>
+    </div>
+  </div>
+
+  <!-- Günlük Video Bazlı Veri Kullanımı -->
+  <div class="mb-8">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-lg font-bold flex items-center gap-2">
+        <i class="fas fa-calendar-day text-blue-400"></i>
+        Günlük Video Bazlı Veri Kullanımı
+        <span class="text-xs theme-text-secondary font-normal ml-1">(en yeni günden en eskiye)</span>
+      </h2>
+      <div class="flex items-center gap-2">
+        <input id="dvid-search" type="text" placeholder="Video / tarih ara…" oninput="filterDailyVideoUsage()"
+          class="text-sm px-3 py-1.5 rounded-xl border focus:outline-none focus:border-primary w-40 transition">
+        <span class="text-xs theme-text-secondary" id="dvid-count"></span>
+      </div>
+    </div>
+
+    <div class="theme-card rounded-2xl border overflow-hidden shadow-sm">
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="border-b">
+              <th class="px-5 py-3.5 text-left text-xs font-semibold uppercase tracking-wide theme-text-secondary">Tarih</th>
+              <th class="px-5 py-3.5 text-left text-xs font-semibold uppercase tracking-wide theme-text-secondary">Video</th>
+              <th class="px-5 py-3.5 text-center text-xs font-semibold uppercase tracking-wide theme-text-secondary">İzlenme</th>
+              <th class="px-5 py-3.5 text-right text-xs font-semibold uppercase tracking-wide theme-text-secondary">Günlük Veri (GB)</th>
+            </tr>
+          </thead>
+          <tbody id="daily-video-tbody">
+            <tr>
+              <td colspan="4" class="px-6 py-12 text-center theme-text-secondary">
+                <i class="fas fa-spinner fa-spin text-primary mr-2"></i> Yükleniyor…
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Sayfalama -->
+    <div class="flex flex-col sm:flex-row items-center justify-between mt-4 gap-3">
+      <span class="text-sm theme-text-secondary" id="dvid-page-info"></span>
+      <div class="flex items-center gap-2">
+        <button id="dvid-btn-prev" onclick="dvidChangePage(-1)"
+          class="px-4 py-2 rounded-xl border text-sm hover:border-primary transition disabled:opacity-40">
+          <i class="fas fa-chevron-left mr-1"></i> Önceki
+        </button>
+        <span class="text-sm font-semibold px-2" id="dvid-page-num"></span>
+        <button id="dvid-btn-next" onclick="dvidChangePage(1)"
+          class="px-4 py-2 rounded-xl border text-sm hover:border-primary transition disabled:opacity-40">
+          Sonraki <i class="fas fa-chevron-right ml-1"></i>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Limit Aşım Geçmişi -->
+  <div class="mb-8">
+    <h2 class="text-lg font-bold flex items-center gap-2 mb-1">
+      <i class="fas fa-triangle-exclamation text-orange-400"></i>
+      Limit Aşım Geçmişi
+    </h2>
+    <p class="text-xs theme-text-secondary mb-4">Mevcut günlük limit eşiği geçmiş günlere uygulanarak hesaplanan yaklaşık aşım günleri.</p>
+    <div class="theme-card rounded-2xl border overflow-hidden shadow-sm">
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="border-b">
+              <th class="px-5 py-3.5 text-left text-xs font-semibold uppercase tracking-wide theme-text-secondary">Tarih</th>
+              <th class="px-5 py-3.5 text-right text-xs font-semibold uppercase tracking-wide theme-text-secondary">Kullanım</th>
+              <th class="px-5 py-3.5 text-right text-xs font-semibold uppercase tracking-wide theme-text-secondary">Limit</th>
+              <th class="px-5 py-3.5 text-right text-xs font-semibold uppercase tracking-wide theme-text-secondary">Aşım</th>
+            </tr>
+          </thead>
+          <tbody id="overrun-tbody">
+            <tr><td colspan="4" class="px-6 py-8 text-center theme-text-secondary"><i class="fas fa-spinner fa-spin text-primary mr-2"></i>Yükleniyor…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Abonelik / Finansal Geçmiş -->
+  <div class="mb-8">
+    <h2 class="text-lg font-bold flex items-center gap-2 mb-4">
+      <i class="fas fa-receipt text-green-400"></i>
+      Abonelik / Finansal Geçmiş
+    </h2>
+    <div class="theme-card rounded-2xl border overflow-hidden shadow-sm">
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="border-b">
+              <th class="px-5 py-3.5 text-left text-xs font-semibold uppercase tracking-wide theme-text-secondary">Tarih</th>
+              <th class="px-5 py-3.5 text-left text-xs font-semibold uppercase tracking-wide theme-text-secondary">Olay</th>
+              <th class="px-5 py-3.5 text-right text-xs font-semibold uppercase tracking-wide theme-text-secondary">Detay</th>
+            </tr>
+          </thead>
+          <tbody id="subhist-tbody">
+            <tr><td colspan="3" class="px-6 py-8 text-center theme-text-secondary"><i class="fas fa-spinner fa-spin text-primary mr-2"></i>Yükleniyor…</td></tr>
+          </tbody>
+        </table>
       </div>
     </div>
   </div>
@@ -218,15 +460,25 @@
 
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <script>
   // ─── URL'den kullanıcı ID veya token al ───────────────────────────────────
   const pathParts = window.location.pathname.split("/");
   const MEMBER_ID = decodeURIComponent(pathParts[pathParts.length - 1]);
 
+  let MEMBER_TOKEN   = null;   // API'den dönen gerçek token
+  let MEMBER_USER_ID = null;   // API'den dönen gerçek Telegram user_id
+  let MEMBER_BANNED  = false;
+
   let ALL_HISTORY  = [];
   let FILT_HISTORY = [];
   let histPage     = 1;
   const HIST_PAGE_SIZE = 25;
+
+  let ALL_DAILY_VIDEO  = [];
+  let FILT_DAILY_VIDEO = [];
+  let dvidPage          = 1;
+  const DVID_PAGE_SIZE  = 25;
 
   // ─── Yardımcı fonksiyonlar ────────────────────────────────────────────────
   function fmtGB(bytes) {
@@ -353,6 +605,11 @@
       const status = member?.subscription_status || "unknown";
       const expiry = member?.subscription_expiry || null;
 
+      MEMBER_TOKEN   = token || null;
+      MEMBER_USER_ID = uid || null;
+      MEMBER_BANNED  = !!member?.is_banned;
+      updateBanButton();
+
       document.getElementById("header-name").textContent = name;
       document.getElementById("member-name").textContent = name;
       document.getElementById("avatar-letter").textContent = (name.charAt(0) || "?").toUpperCase();
@@ -383,9 +640,15 @@
         const dLim = limits.daily_limit_gb   || "∞";
         const mLim = limits.monthly_limit_gb || "∞";
         document.getElementById("stat-limits").textContent = `${dLim} GB/gün · ${mLim} GB/ay`;
+        document.getElementById("adm-daily-limit").value   = limits.daily_limit_gb   ?? "";
+        document.getElementById("adm-monthly-limit").value = limits.monthly_limit_gb ?? "";
+        document.getElementById("adm-speed-limit").value   = limits.speed_limit_mbps ?? "";
+        document.getElementById("adm-device-limit").value  = limits.device_limit     ?? "";
       } else {
         document.getElementById("stat-limits").textContent = "Limitsiz";
       }
+
+      loadSubscriptionHistory();
 
       // ── Stream geçmişi ──────────────────────────────────────────────────
       if (streamRes.ok) {
@@ -397,7 +660,9 @@
         document.getElementById("stat-peakspeed").textContent = "—";
         document.getElementById("stat-duration").textContent  = "—";
         document.getElementById("history-tbody").innerHTML =
-          `<tr><td colspan="8" class="px-6 py-8 text-center theme-text-secondary">Stream geçmişi alınamadı</td></tr>`;
+          `<tr><td colspan="9" class="px-6 py-8 text-center theme-text-secondary">Stream geçmişi alınamadı</td></tr>`;
+        document.getElementById("overrun-tbody").innerHTML =
+          `<tr><td colspan="4" class="px-6 py-8 text-center theme-text-secondary">Veri alınamadı</td></tr>`;
       }
 
     } catch (e) {
@@ -451,6 +716,399 @@
     FILT_HISTORY = [...ALL_HISTORY];
     histPage = 1;
     renderHistoryTable();
+
+    // Günlük video bazlı veri kullanımı
+    ALL_DAILY_VIDEO  = data.daily_video_usage || [];
+    FILT_DAILY_VIDEO = [...ALL_DAILY_VIDEO];
+    dvidPage = 1;
+    renderDailyVideoTable();
+
+    // API'nin çözdüğü gerçek token/user_id (üye listesindeki eşleştirmeden daha güvenilir)
+    if (data.user_token) MEMBER_TOKEN   = data.user_token;
+    if (data.user_id)    MEMBER_USER_ID = data.user_id;
+
+    renderUsageChart(ALL_DAILY_VIDEO);
+    renderDeviceInfo(data.device_info || {});
+    renderComparison(data.comparison || {});
+    renderOverrunTable(data.limit_overrun_days || []);
+  }
+
+  // ─── Cihaz / Limit Durumu ─────────────────────────────────────────────────
+  function renderDeviceInfo(info) {
+    const active = info.active_devices ?? null;
+    const devLim = info.device_limit || 0;
+    document.getElementById("device-active-count").textContent =
+      active == null ? "—" : `${active}${devLim ? " / " + devLim : ""}`;
+    document.getElementById("device-limit-line").textContent =
+      devLim ? "Aktif cihaz / limit" : "Aktif cihaz (limitsiz)";
+    document.getElementById("device-ip-line").textContent =
+      `IP limiti: ${info.ip_limit ? info.ip_limit : "∞"}`;
+
+    const dailyLimBytes = (info.daily_limit_gb || 0) * 1073741824;
+    const dailyUsed     = info.daily_used_bytes || 0;
+    const statusEl    = document.getElementById("limit-status-line");
+    const statusSubEl = document.getElementById("limit-status-sub");
+    if (info.daily_limit_finished) {
+      statusEl.textContent = "Doldu";
+      statusEl.className = "text-2xl font-bold text-red-400";
+      statusSubEl.textContent = "Bugünkü günlük limit tamamen kullanıldı.";
+    } else if (info.daily_limit_warned) {
+      statusEl.textContent = "Uyarı";
+      statusEl.className = "text-2xl font-bold text-yellow-400";
+      statusSubEl.textContent = "Günlük limite yaklaşılıyor.";
+    } else if (dailyLimBytes > 0) {
+      const pct = Math.min(100, Math.round((dailyUsed / dailyLimBytes) * 100));
+      statusEl.textContent = `%${pct}`;
+      statusEl.className = "text-2xl font-bold text-text";
+      statusSubEl.textContent = `${fmtGB(dailyUsed)} / ${fmtGB(dailyLimBytes)} kullanıldı`;
+    } else {
+      statusEl.textContent = "Limitsiz";
+      statusEl.className = "text-2xl font-bold text-text";
+      statusSubEl.textContent = `Bugün: ${fmtGB(dailyUsed)}`;
+    }
+  }
+
+  // ─── Karşılaştırma & Bağlam ────────────────────────────────────────────────
+  function renderComparison(comp) {
+    if (!comp || comp.rank == null) {
+      document.getElementById("comp-rank").textContent = "—";
+      document.getElementById("comp-rank-line").textContent = "Karşılaştırma verisi yok";
+      document.getElementById("comp-avg-line").textContent = "";
+      return;
+    }
+    document.getElementById("comp-rank").textContent = `#${comp.rank}`;
+    document.getElementById("comp-rank-line").textContent =
+      `${comp.total_members} üye içindeki sıralaması`;
+    if (comp.percent_vs_avg == null) {
+      document.getElementById("comp-avg-line").textContent = "Ortalama verisi yok";
+    } else {
+      const sign = comp.percent_vs_avg >= 0 ? "+" : "";
+      const color = comp.percent_vs_avg >= 0 ? "text-green-400" : "text-red-400";
+      document.getElementById("comp-avg-line").innerHTML =
+        `Ortalamaya göre: <span class="font-semibold ${color}">${sign}${comp.percent_vs_avg}%</span> ` +
+        `(ort. ${fmtGB(comp.avg_total_bytes)})`;
+    }
+  }
+
+  // ─── Görselleştirme: Son 30 Gün Kullanım Grafiği (Chart.js) ────────────────
+  let usageChartInstance = null;
+
+  function renderUsageChart(dailyVideoRows) {
+    const canvas = document.getElementById("usage-chart");
+    const wrap   = document.getElementById("usage-chart-wrap");
+    const empty  = document.getElementById("usage-chart-empty");
+    const summary = document.getElementById("usage-chart-summary");
+
+    if (typeof Chart === "undefined") {
+      // Chart.js CDN'den yüklenemedi (ağ engeli, adblocker vb.) — sayfanın
+      // geri kalanını bozmadan grafiği sessizce atla.
+      console.error("Chart.js yüklenemedi; grafik gösterilemiyor.");
+      wrap.classList.add("hidden");
+      empty.classList.remove("hidden");
+      empty.textContent = "Grafik kütüphanesi yüklenemedi.";
+      summary.innerHTML = "";
+      return;
+    }
+
+    // Gün bazında toplamları grupla
+    const byDay = {};
+    (dailyVideoRows || []).forEach(r => {
+      const d = r.day;
+      if (!d) return;
+      byDay[d] = (byDay[d] || 0) + (r.total_bytes || 0);
+    });
+
+    if (Object.keys(byDay).length === 0) {
+      wrap.classList.add("hidden");
+      empty.classList.remove("hidden");
+      summary.innerHTML = "";
+      return;
+    }
+    wrap.classList.remove("hidden");
+    empty.classList.add("hidden");
+
+    // Son 30 takvim gününü (bugünden geriye) oluştur; veri olmayan
+    // günler 0 olarak eklenir, böylece grafik veri olsun olmasın her
+    // zaman tam 30 günlük bir zaman çizelgesi gösterir.
+    const days = [];
+    const cursor = new Date();
+    cursor.setHours(0, 0, 0, 0);
+    for (let i = 29; i >= 0; i--) {
+      const d = new Date(cursor);
+      d.setDate(d.getDate() - i);
+      days.push(d.toISOString().slice(0, 10));
+    }
+
+    const values   = days.map(d => byDay[d] || 0);
+    const labels   = days.map(d => new Date(d).toLocaleDateString("tr-TR", { day: "2-digit", month: "2-digit" }));
+    const total    = values.reduce((a, b) => a + b, 0);
+    const avg      = total / values.length;
+    const peakIdx  = values.indexOf(Math.max(...values));
+
+    summary.innerHTML = `
+      <span><span class="theme-text-secondary">Toplam:</span> <span class="font-semibold text-text">${fmtGB(total)}</span></span>
+      <span><span class="theme-text-secondary">Günlük Ort.:</span> <span class="font-semibold text-text">${fmtGB(avg)}</span></span>
+      <span><span class="theme-text-secondary">Zirve:</span> <span class="font-semibold text-text">${fmtGB(values[peakIdx])} (${labels[peakIdx]})</span></span>`;
+
+    // Tema renklerini CSS değişkenlerinden oku
+    const style      = getComputedStyle(document.documentElement);
+    const cPrimary   = style.getPropertyValue("--primary").trim()  || "#6366f1";
+    const cText      = style.getPropertyValue("--text").trim()     || "#e5e7eb";
+    const cTextSec   = style.getPropertyValue("--text-sec").trim() || "#9ca3af";
+    const cGrid      = "rgba(128,128,128,0.12)";
+
+    // Hex → rgba yardımcı (renk color-mix ile gelmiş olabilir; canvas context ile çözümle)
+    const toRgba = (color, alpha) => {
+      const probe = document.createElement("span");
+      probe.style.color = color;
+      document.body.appendChild(probe);
+      const computed = getComputedStyle(probe).color; // "rgb(r, g, b)"
+      probe.remove();
+      const m = computed.match(/\d+/g);
+      if (!m) return `rgba(99,102,241,${alpha})`;
+      return `rgba(${m[0]}, ${m[1]}, ${m[2]}, ${alpha})`;
+    };
+
+    const gradient = canvas.getContext("2d").createLinearGradient(0, 0, 0, 220);
+    gradient.addColorStop(0, toRgba(cPrimary, 0.45));
+    gradient.addColorStop(1, toRgba(cPrimary, 0.02));
+
+    const data = {
+      labels,
+      datasets: [{
+        label: "Kullanım",
+        data: values,
+        borderColor: cPrimary,
+        backgroundColor: gradient,
+        pointBackgroundColor: cPrimary,
+        pointBorderColor: toRgba(cText, 1),
+        pointHoverBackgroundColor: cPrimary,
+        pointRadius: values.length > 20 ? 0 : 3,
+        pointHoverRadius: 5,
+        borderWidth: 2.5,
+        fill: true,
+        tension: 0.35,
+      }]
+    };
+
+    const options = {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: toRgba(cText, 0.95),
+          titleColor: (getComputedStyle(document.documentElement).getPropertyValue("--bg").trim() || "#0b0f1a"),
+          bodyColor: (getComputedStyle(document.documentElement).getPropertyValue("--bg").trim() || "#0b0f1a"),
+          borderColor: cGrid,
+          borderWidth: 1,
+          padding: 10,
+          displayColors: false,
+          callbacks: {
+            title: (items) => items[0]?.label ?? "",
+            label: (item) => `Kullanım: ${fmtGB(item.parsed.y)}`,
+          }
+        }
+      },
+      scales: {
+        x: {
+          grid: { display: false },
+          ticks: { color: cTextSec, font: { size: 10 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 10 },
+          border: { color: cGrid },
+        },
+        y: {
+          beginAtZero: true,
+          grid: { color: cGrid },
+          border: { display: false },
+          ticks: {
+            color: cTextSec, font: { size: 10 }, maxTicksLimit: 5,
+            callback: (v) => fmtGB(v),
+          }
+        }
+      }
+    };
+
+    if (usageChartInstance) {
+      usageChartInstance.data = data;
+      usageChartInstance.options = options;
+      usageChartInstance.update();
+    } else {
+      usageChartInstance = new Chart(canvas.getContext("2d"), { type: "line", data, options });
+    }
+  }
+
+  // ─── Limit Aşım Geçmişi Tablosu ────────────────────────────────────────────
+  function renderOverrunTable(rows) {
+    const tbody = document.getElementById("overrun-tbody");
+    if (!rows || rows.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="4" class="px-6 py-8 text-center theme-text-secondary">Kayıtlı bir aşım bulunmuyor</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = rows.map(r => `
+      <tr class="border-b last:border-0 hover:bg-black/5 transition-colors">
+        <td class="px-5 py-3 text-sm">${fmtDate(r.day)}</td>
+        <td class="px-5 py-3 text-right text-sm font-medium">${fmtGB(r.total_bytes)}</td>
+        <td class="px-5 py-3 text-right text-sm theme-text-secondary">${fmtGB(r.limit_bytes)}</td>
+        <td class="px-5 py-3 text-right text-sm font-semibold text-orange-400">+${r.over_pct}%</td>
+      </tr>`).join("");
+  }
+
+  // ─── Abonelik / Finansal Geçmiş ────────────────────────────────────────────
+  const SUB_EVENT_LABELS = {
+    payment_approved: ["Ödeme Onaylandı", "fa-circle-check", "text-green-400"],
+    admin_extend:     ["Admin: Süre Uzatıldı", "fa-plus", "text-green-400"],
+    admin_reduce:     ["Admin: Süre Azaltıldı", "fa-minus", "text-orange-400"],
+    admin_delete:     ["Admin: Abonelik İptal Edildi", "fa-ban", "text-red-400"],
+  };
+
+  async function loadSubscriptionHistory() {
+    const tbody = document.getElementById("subhist-tbody");
+    try {
+      const r = await fetch(`/api/admin/uyeler/${encodeURIComponent(MEMBER_ID)}/subscription-history`);
+      if (!r.ok) throw new Error("İstek başarısız");
+      const data = await r.json();
+      const rows = data.history || [];
+      if (rows.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="3" class="px-6 py-8 text-center theme-text-secondary">Henüz bir kayıt yok</td></tr>`;
+        return;
+      }
+      tbody.innerHTML = rows.map(ev => {
+        const [label, icon, color] = SUB_EVENT_LABELS[ev.type] || [ev.type || "Olay", "fa-circle", "theme-text-secondary"];
+        const detailParts = [];
+        if (ev.label)      detailParts.push(escHtml(ev.label));
+        if (ev.price)      detailParts.push(`${ev.price} ${ev.currency || ""}`.trim());
+        if (ev.days)       detailParts.push(`${ev.days} gün`);
+        if (ev.new_expiry) detailParts.push(`Yeni bitiş: ${fmtDate(ev.new_expiry)}`);
+        return `
+        <tr class="border-b last:border-0 hover:bg-black/5 transition-colors">
+          <td class="px-5 py-3 text-sm theme-text-secondary whitespace-nowrap">${fmtDateTime(ev.date)}</td>
+          <td class="px-5 py-3 text-sm font-medium ${color}"><i class="fas ${icon} mr-1.5"></i>${label}</td>
+          <td class="px-5 py-3 text-sm text-right theme-text-secondary">${detailParts.join(" · ") || "—"}</td>
+        </tr>`;
+      }).join("");
+    } catch (e) {
+      tbody.innerHTML = `<tr><td colspan="3" class="px-6 py-8 text-center theme-text-secondary">Geçmiş alınamadı</td></tr>`;
+    }
+  }
+
+  // ─── Yönetimsel Aksiyonlar ──────────────────────────────────────────────────
+  function admMsg(text, ok) {
+    const el = document.getElementById("adm-msg");
+    el.textContent = text;
+    el.className = "text-xs " + (ok ? "text-green-400" : "text-red-400");
+    setTimeout(() => { el.textContent = ""; }, 4000);
+  }
+
+  function updateBanButton() {
+    const btn = document.getElementById("adm-ban-label");
+    if (!btn) return;
+    btn.textContent = MEMBER_BANNED ? "Ban Kaldır" : "Üyeyi Banla";
+  }
+
+  async function saveLimits() {
+    if (!MEMBER_TOKEN) { admMsg("Bu üyenin token'ı yok", false); return; }
+    const body = {
+      daily_limit_gb:   parseFloat(document.getElementById("adm-daily-limit").value)   || 0,
+      monthly_limit_gb: parseFloat(document.getElementById("adm-monthly-limit").value) || 0,
+      speed_limit_mbps: parseFloat(document.getElementById("adm-speed-limit").value)   || 0,
+      device_limit:     parseInt(document.getElementById("adm-device-limit").value)    || 0,
+    };
+    try {
+      const r = await fetch(`/api/tokens/${encodeURIComponent(MEMBER_TOKEN)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      if (!r.ok) throw new Error();
+      admMsg("Limitler kaydedildi", true);
+      loadMemberDetail();
+    } catch {
+      admMsg("Limitler kaydedilemedi", false);
+    }
+  }
+
+  async function manageSubscription(action) {
+    if (!MEMBER_USER_ID) { admMsg("Kullanıcı ID bulunamadı", false); return; }
+    const days = parseInt(document.getElementById("adm-days").value) || 0;
+    if (days <= 0) { admMsg("Geçerli bir gün sayısı girin", false); return; }
+    try {
+      const r = await fetch(`/api/admin/subscriptions/users/${encodeURIComponent(MEMBER_USER_ID)}/manage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, days })
+      });
+      if (!r.ok) throw new Error();
+      admMsg(action === "extend" ? "Abonelik uzatıldı" : "Abonelik azaltıldı", true);
+      loadMemberDetail();
+      loadSubscriptionHistory();
+    } catch {
+      admMsg("İşlem başarısız", false);
+    }
+  }
+
+  async function toggleBan() {
+    if (!MEMBER_USER_ID) { admMsg("Kullanıcı ID bulunamadı", false); return; }
+    const nextBanned = !MEMBER_BANNED;
+    if (!confirm(nextBanned ? "Bu üyeyi banlamak istediğinize emin misiniz?" : "Bu üyenin banını kaldırmak istediğinize emin misiniz?")) return;
+    try {
+      const endpoint = nextBanned ? "ban" : "unban";
+      const r = await fetch(`/api/admin/uyeler/${encodeURIComponent(MEMBER_ID)}/${endpoint}`, { method: "POST" });
+      if (!r.ok) throw new Error();
+      MEMBER_BANNED = nextBanned;
+      updateBanButton();
+      admMsg(nextBanned ? "Üye banlandı" : "Ban kaldırıldı", true);
+      loadMemberDetail();
+    } catch {
+      admMsg("İşlem başarısız", false);
+    }
+  }
+
+  async function revokeToken() {
+    if (!MEMBER_TOKEN) { admMsg("Bu üyenin token'ı yok", false); return; }
+    if (!confirm("Token'ı iptal etmek istediğinize emin misiniz? Üye erişimi anında kesilir.")) return;
+    try {
+      const r = await fetch(`/api/tokens/${encodeURIComponent(MEMBER_TOKEN)}`, { method: "DELETE" });
+      if (!r.ok) throw new Error();
+      admMsg("Token iptal edildi", true);
+      loadMemberDetail();
+    } catch {
+      admMsg("Token iptal edilemedi", false);
+    }
+  }
+
+  async function regenerateToken() {
+    if (!MEMBER_TOKEN) { admMsg("Bu üyenin token'ı yok", false); return; }
+    if (!confirm("Bu üyenin token'ını değiştirmek istediğinize emin misiniz? Eski token anında geçersiz olur, üye yeni token ile tekrar bağlanmalıdır.")) return;
+    const btn = document.getElementById("adm-regen-btn");
+    const originalHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = `<i class="fas fa-spinner fa-spin mr-1.5"></i>Değiştiriliyor…`;
+    try {
+      const r = await fetch(`/api/tokens/${encodeURIComponent(MEMBER_TOKEN)}/regenerate`, { method: "POST" });
+      if (!r.ok) throw new Error();
+      const data = await r.json();
+      if (data.token) MEMBER_TOKEN = data.token;
+      admMsg("Token değiştirildi", true);
+      loadMemberDetail();
+    } catch {
+      admMsg("Token değiştirilemedi", false);
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = originalHtml;
+    }
+  }
+
+  async function clearDeviceSessions() {
+    if (!confirm("Bu üyenin tüm aktif cihaz oturumlarını temizlemek istediğinize emin misiniz?")) return;
+    try {
+      const r = await fetch(`/api/admin/uyeler/${encodeURIComponent(MEMBER_ID)}/clear-devices`, { method: "POST" });
+      if (!r.ok) throw new Error();
+      admMsg("Cihaz oturumları temizlendi", true);
+      loadMemberDetail();
+    } catch {
+      admMsg("Cihazlar temizlenemedi", false);
+    }
   }
 
   function filterHistory() {
@@ -479,7 +1137,7 @@
     document.getElementById("hist-btn-next").disabled       = histPage === pages;
 
     if (slice.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="8" class="px-6 py-8 text-center theme-text-secondary">Kayıt bulunamadı</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="9" class="px-6 py-8 text-center theme-text-secondary">Kayıt bulunamadı</td></tr>`;
       return;
     }
 
@@ -509,6 +1167,9 @@
           <span>${fmtSpeed(peak)}</span>
         </td>
         <td class="px-5 py-3.5 text-center hidden sm:table-cell">${streamStatusBadge(stat)}</td>
+        <td class="px-5 py-3.5 text-center text-xs theme-text-secondary hidden xl:table-cell font-mono">
+          ${s.client_index != null ? `Bot ${Number(s.client_index) + 1}` : "—"}${s.dc_id != null ? ` · DC${s.dc_id}` : ""}
+        </td>
         <td class="px-5 py-3.5 text-right text-xs theme-text-secondary whitespace-nowrap">
           ${fmtDateTime(logAt)}
         </td>
@@ -520,6 +1181,65 @@
     histPage += dir;
     renderHistoryTable();
     document.getElementById("history-tbody").closest("div.theme-card").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  // ─── Günlük Video Bazlı Veri Kullanımı ─────────────────────────────────────
+  function fmtDayTr(dayStr) {
+    if (!dayStr) return "—";
+    const [y, m, d] = dayStr.split("-");
+    return `${d}.${m}.${y}`;
+  }
+
+  function filterDailyVideoUsage() {
+    const q = document.getElementById("dvid-search").value.trim().toLowerCase();
+    FILT_DAILY_VIDEO = q
+      ? ALL_DAILY_VIDEO.filter(v => (v.title || "").toLowerCase().includes(q) ||
+                                    (v.imdb_id || "").toLowerCase().includes(q) ||
+                                    (v.day || "").toLowerCase().includes(q))
+      : [...ALL_DAILY_VIDEO];
+    dvidPage = 1;
+    renderDailyVideoTable();
+  }
+
+  function renderDailyVideoTable() {
+    const tbody = document.getElementById("daily-video-tbody");
+    const total = FILT_DAILY_VIDEO.length;
+    const pages = Math.max(1, Math.ceil(total / DVID_PAGE_SIZE));
+    dvidPage = Math.min(Math.max(dvidPage, 1), pages);
+
+    const start = (dvidPage - 1) * DVID_PAGE_SIZE;
+    const slice = FILT_DAILY_VIDEO.slice(start, start + DVID_PAGE_SIZE);
+
+    document.getElementById("dvid-count").textContent     = `${total} kayıt`;
+    document.getElementById("dvid-page-info").textContent = `${total} kayıt • Sayfa ${dvidPage} / ${pages}`;
+    document.getElementById("dvid-page-num").textContent  = `${dvidPage} / ${pages}`;
+    document.getElementById("dvid-btn-prev").disabled     = dvidPage === 1;
+    document.getElementById("dvid-btn-next").disabled     = dvidPage === pages;
+
+    if (slice.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="4" class="px-6 py-8 text-center theme-text-secondary">Kayıt bulunamadı</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = slice.map(v => {
+      const title = v.title || v.imdb_id || "İsimsiz İçerik";
+      const bytes = v.total_bytes || 0;
+      return `<tr class="border-b border-white/5 hover:bg-primary/5 transition-colors">
+        <td class="px-5 py-3.5 text-xs theme-text-secondary whitespace-nowrap">${fmtDayTr(v.day)}</td>
+        <td class="px-5 py-3.5">
+          <div class="font-medium text-text text-sm leading-tight">${escHtml(title)}</div>
+          ${v.imdb_id ? `<div class="text-xs theme-text-secondary mt-0.5 font-mono">${escHtml(v.imdb_id)}</div>` : ""}
+        </td>
+        <td class="px-5 py-3.5 text-center text-xs theme-text-secondary">${v.watch_count ?? 0}</td>
+        <td class="px-5 py-3.5 text-right font-semibold text-sm text-primary">${fmtGB(bytes)}</td>
+      </tr>`;
+    }).join("");
+  }
+
+  function dvidChangePage(dir) {
+    dvidPage += dir;
+    renderDailyVideoTable();
+    document.getElementById("daily-video-tbody").closest("div.theme-card").scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   // ─── Başlat ──────────────────────────────────────────────────────────────

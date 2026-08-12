@@ -323,10 +323,19 @@ async def update_token_limits_api(token: str, payload: dict):
         validity_days = payload.get("validity_days")
         monthly_request_limit = payload.get("monthly_request_limit")
         telegram_user_id = payload.get("telegram_user_id")
+        device_limit = payload.get("device_limit")
+        ip_limit = payload.get("ip_limit")
 
         def parse_limit(val):
             try:
                 v = float(val)
+                return v if v > 0 else None
+            except (ValueError, TypeError, AttributeError):
+                return None
+
+        def parse_int_limit(val):
+            try:
+                v = int(val)
                 return v if v > 0 else None
             except (ValueError, TypeError, AttributeError):
                 return None
@@ -386,6 +395,8 @@ async def update_token_limits_api(token: str, payload: dict):
             validity_days=int(validity_days) if validity_days is not None else None,
             telegram_user_id=int(telegram_user_id) if telegram_user_id else None,
             monthly_request_limit=int(monthly_request_limit) if monthly_request_limit is not None else None,
+            device_limit=parse_int_limit(device_limit),
+            ip_limit=parse_int_limit(ip_limit),
         )
 
         # Telegram ID varsa abonelik kaydını da güncelle/oluştur
@@ -421,6 +432,23 @@ async def revoke_token_api(token: str, delete_subscription: bool = False, user_i
                 await db.manage_subscriber(user_id, "delete")
                 await db.delete_user_reminders(user_id)
             return {"message": "Token revoked successfully"}
+        else:
+            raise HTTPException(status_code=404, detail="Token not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        _logger.error("Internal error", exc_info=True)
+
+        raise HTTPException(status_code=500, detail="Sunucu hatası")
+
+
+async def regenerate_token_api(token: str):
+    """Aynı üyeye ait tüm limit/kullanım verilerini koruyarak token string'ini
+    yeniler; eski token anında geçersiz olur."""
+    try:
+        result = await db.regenerate_api_token(token)
+        if result:
+            return result
         else:
             raise HTTPException(status_code=404, detail="Token not found")
     except HTTPException:

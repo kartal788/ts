@@ -75,7 +75,7 @@ from Backend.fastapi.routes.api_routes import (
     delete_movie_quality_api, delete_tv_quality_api,
     delete_tv_episode_api, delete_tv_season_api,
     rename_movie_quality_api, rename_tv_quality_api,
-    create_token_api, revoke_token_api, update_token_limits_api,
+    create_token_api, revoke_token_api, update_token_limits_api, regenerate_token_api,
     speed_test_api, speed_test_stream_api,
     get_admin_stats_api, clear_cache_api, get_dead_links_api,
     get_stream_analytics_api, clear_analytics_api,
@@ -95,6 +95,9 @@ from Backend.fastapi.routes.uyeler_routes import (
     admin_uyeler_list_api,
     admin_uye_stream_history_api,
     admin_uye_reminders_api,
+    admin_uye_subscription_history_api,
+    admin_uye_ban_api,
+    admin_uye_clear_devices_api,
 )
 
 app = FastAPI(
@@ -1128,6 +1131,10 @@ async def update_token(token: str, payload: dict, _: bool = Depends(require_auth
 async def revoke_token(token: str, delete_subscription: bool = False, user_id: int = None, _: bool = Depends(require_auth)):
     return await revoke_token_api(token, delete_subscription=delete_subscription, user_id=user_id)
 
+@app.post("/api/tokens/{token}/regenerate")
+async def regenerate_token(token: str, _: bool = Depends(require_auth)):
+    return await regenerate_token_api(token)
+
 @app.get("/api/system/stats")
 async def get_system_stats(_: bool = Depends(require_auth)):
     from Backend.fastapi.routes.api_routes import get_system_stats_api
@@ -1275,6 +1282,22 @@ async def admin_uye_streams_api(member_id: str, _: bool = Depends(require_auth))
 @app.get("/api/admin/uyeler/{member_id}/reminders")
 async def admin_uye_reminders(member_id: str, _: bool = Depends(require_auth)):
     return await admin_uye_reminders_api(member_id)
+
+@app.get("/api/admin/uyeler/{member_id}/subscription-history")
+async def admin_uye_subscription_history(member_id: str, _: bool = Depends(require_auth)):
+    return await admin_uye_subscription_history_api(member_id)
+
+@app.post("/api/admin/uyeler/{member_id}/ban")
+async def admin_uye_ban(member_id: str, _: bool = Depends(require_auth)):
+    return await admin_uye_ban_api(member_id, True)
+
+@app.post("/api/admin/uyeler/{member_id}/unban")
+async def admin_uye_unban(member_id: str, _: bool = Depends(require_auth)):
+    return await admin_uye_ban_api(member_id, False)
+
+@app.post("/api/admin/uyeler/{member_id}/clear-devices")
+async def admin_uye_clear_devices(member_id: str, _: bool = Depends(require_auth)):
+    return await admin_uye_clear_devices_api(member_id)
 # ─────────────────────────────────────────────────────────────────────────────
 
 @app.get("/istatistik", response_class=HTMLResponse)

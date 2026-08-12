@@ -50,10 +50,10 @@ async def send_start_message(client: Client, message: Message):
 
             await message.reply_text(
                 f'🎉 <b>{Telegram.ISIM} Medya Sunucusuna Hoş Geldiniz</b>\n\n'
-                'Kişisel Stremio Eklenti bağlantınız aşağıdadır:\n\n'
+                'Kişisel Nuvio eklenti bağlantınız aşağıdadır:\n\n'
                 '🎬 <b>Stremio Eklentisi:</b>\n'
                 f'<code>{addon_url}</code>\n\n'
-                'Dizi ve filmleri izlemek için yukarıdaki linki kopyalayıp Stremio eklentilerine yapıştırın.',
+                'Dizi ve filmleri izlemek için yukarıdaki linki kopyalayıp Nuvio eklentilerine yapıştırın.',
                 quote=True,
                 parse_mode=enums.ParseMode.HTML
             )
@@ -120,7 +120,7 @@ async def send_start_message(client: Client, message: Message):
             #----- İçindeki {isim} ifadesi bot adıyla değiştirilir.
             message_template = SettingsManager.current().uye_olmayan_mesaji or (
                 f'<b>{Telegram.ISIM} ile sinema keyfine hazır mısın?</b>\n\n'
-                'Stremio üzerinden sunduğumuz özel içeriklere erişebilmen için aktif bir aboneliğin olması gerekiyor. '
+                'Nuvio üzerinden sunduğumuz özel içeriklere erişebilmen için aktif bir aboneliğin olması gerekiyor. '
                 'Merak etme, senin için en avantajlı planları aşağıda listeledik.\n\n'
                 '🚀 Hemen başlamak için bir plan seç:'
             )
@@ -202,7 +202,7 @@ async def send_start_message(client: Client, message: Message):
                 f'<code>{de_url}</code>\n\n'
                 '🇬🇧 <b>English:</b>\n'
                 f'<code>{en_url}</code>\n\n'
-                'Dizi ve filmleri izlemek için yukarıdaki linki kopyalayıp Stremio eklentilerine yapıştırın.'
+                'Dizi ve filmleri izlemek için yukarıdaki linki kopyalayıp Nuvio eklentilerine yapıştırın.'
                 f'{otp_text}',
                 quote=True,
                 parse_mode=enums.ParseMode.HTML
