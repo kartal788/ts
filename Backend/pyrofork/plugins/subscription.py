@@ -233,7 +233,7 @@ async def admin_review(client: Client, callback_query: CallbackQuery):
                     f"<code>{de_url}</code>\n\n"
                     f"🇬🇧 <b>English:</b>\n"
                     f"<code>{en_url}</code>\n\n"
-                    f"Dizi ve filmleri izlemek için yukarıdaki linki kopyalayıp Stremio eklentilerine yapıştırın."
+                    f"Dizi ve filmleri izlemek için yukarıdaki linki kopyalayıp Nuvio eklentilerine yapıştırın."
                     f"{otp_text}"
                 )
             else:
