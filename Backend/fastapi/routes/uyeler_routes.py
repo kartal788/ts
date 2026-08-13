@@ -425,11 +425,14 @@ async def admin_uye_stream_history_api(member_id: str) -> dict:
             })
 
         # ── Günlük bazda, hangi video kaç GB veri çekmiş ────────────────────────
+        # Not: "day" alanı Europe/Istanbul (UTC+3) takvim gününe göre hesaplanır,
+        # yoksa Mongo varsayılan olarak UTC gün sınırını kullanır ve saat 00:00-03:00
+        # (İstanbul) arasındaki izlemeler bir önceki güne yazılır.
         daily_video_pipe = [
             {"$match": {**match_filter, "title": {"$ne": None, "$exists": True}, "logged_at": {"$ne": None, "$exists": True}}},
             {"$group": {
                 "_id": {
-                    "day":   {"$dateToString": {"format": "%Y-%m-%d", "date": "$logged_at"}},
+                    "day":   {"$dateToString": {"format": "%Y-%m-%d", "date": "$logged_at", "timezone": "Europe/Istanbul"}},
                     "title": "$title",
                 },
                 "imdb_id":     {"$first": "$imdb_id"},
@@ -474,10 +477,8 @@ async def admin_uye_stream_history_api(member_id: str) -> dict:
             limit_overrun_days.sort(key=lambda x: x["day"], reverse=True)
             limit_overrun_days = limit_overrun_days[:60]
 
-        # ── Karşılaştırma & Bağlam (diğer üyelere göre) ─────────────────────
-        my_bytes = (token_doc or {}).get("usage", {}).get("total_bytes") if token_doc else None
-        if my_bytes is None:
-            my_bytes = summary.get("total_bytes", 0) or 0
+        # ── Karşılaştırma & Bağlam (diğer üyelere göre, aylık veriye göre) ───
+        my_bytes = device_info.get("monthly_used_bytes", 0) if device_info else 0
         comparison = await _build_comparison(user_id=user_id, user_token=user_token, my_bytes=my_bytes)
 
         return {
@@ -502,15 +503,24 @@ async def admin_uye_stream_history_api(member_id: str) -> dict:
 # ─── Yardımcı: Diğer üyelere göre sıralama / karşılaştırma ───────────────────
 
 async def _build_comparison(user_id: Optional[int], user_token: Optional[str], my_bytes: float) -> dict:
+    """
+    Üyeyi diğer üyelerle AYLIK veri kullanımına göre karşılaştırır.
+    `my_bytes` çağıran tarafından aylık kullanım (bytes) olarak verilmelidir.
+    """
     try:
         all_members = await _build_members_list()
         if not all_members:
             return {}
-        total_values = [m.get("total_bytes", 0) or 0 for m in all_members]
-        avg_bytes = sum(total_values) / len(total_values) if total_values else 0
+
+        # Aylık kullanıma göre büyükten küçüğe sırala (genel üye listesi
+        # toplam veriye göre sıralı geldiği için burada ayrıca sıralıyoruz)
+        ranked_members = sorted(all_members, key=lambda m: m.get("monthly_bytes", 0) or 0, reverse=True)
+
+        monthly_values = [m.get("monthly_bytes", 0) or 0 for m in ranked_members]
+        avg_bytes = sum(monthly_values) / len(monthly_values) if monthly_values else 0
 
         rank = None
-        for idx, m in enumerate(all_members, start=1):
+        for idx, m in enumerate(ranked_members, start=1):
             if user_token and m.get("token") == user_token:
                 rank = idx
                 break
@@ -520,7 +530,7 @@ async def _build_comparison(user_id: Optional[int], user_token: Optional[str], m
 
         return {
             "rank":            rank,
-            "total_members":   len(all_members),
+            "total_members":   len(ranked_members),
             "avg_total_bytes": avg_bytes,
             "percent_vs_avg":  round(((my_bytes - avg_bytes) / avg_bytes) * 100, 1) if avg_bytes > 0 else None,
         }

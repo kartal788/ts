@@ -1121,18 +1121,30 @@ async def member_profile_api(request: Request):
     try:
         col = db.dbs["tracking"]["stream_analytics"]
         from datetime import timedelta as _td
-        thirty_days_ago = datetime.now(timezone.utc) - _td(days=29)
+
+        # Gün listesi Europe/Istanbul (UTC+3) takvim gününe göre üretilir; bu,
+        # aşağıdaki aggregation'ın "timezone: Europe/Istanbul" ile ürettiği
+        # gün anahtarlarıyla birebir eşleşmesi için gerekli (yoksa UTC/Istanbul
+        # gün sınırı farkı yüzünden day_map eşleşmeleri kayar).
+        today_ist = datetime.now(_TZ).replace(hour=0, minute=0, second=0, microsecond=0)
+        thirty_days_ago_ist = today_ist - _td(days=29)
+        # Mongo sorgusu için UTC eşiği: Istanbul gün başlangıcının 3 saat öncesi (UTC karşılığı)
+        thirty_days_ago_utc = thirty_days_ago_ist.astimezone(timezone.utc)
 
         # Kullanıcıya ait token ile filtrele — tüm platform verisi sızmasın
+        # Not: stream_analytics kayıtlarında token alanı üst seviyede "user_token"
+        # olarak tutulur ("meta.user_token" değil — kayıt bu şekilde saklanmaz).
         _user_token = token_doc.get("token") if token_doc else None
-        _match: dict = {"logged_at": {"$gte": thirty_days_ago}}
+        _match: dict = {"logged_at": {"$gte": thirty_days_ago_utc}}
         if _user_token:
-            _match["meta.user_token"] = _user_token
+            _match["user_token"] = _user_token
 
         pipe = [
             {"$match": _match},
             {"$group": {
-                "_id": {"$dateToString": {"format": "%Y-%m-%d", "date": "$logged_at"}},
+                # Gün sınırı Europe/Istanbul (UTC+3) takvimine göre hesaplanır,
+                # yoksa Mongo varsayılan olarak UTC gün sınırını kullanır.
+                "_id": {"$dateToString": {"format": "%Y-%m-%d", "date": "$logged_at", "timezone": "Europe/Istanbul"}},
                 "bytes": {"$sum": "$total_bytes"},
                 "streams": {"$sum": 1}
             }},
@@ -1143,12 +1155,50 @@ async def member_profile_api(request: Request):
         # Tüm 30 günü doldur (veri olmayan günler 0)
         day_map = {r["_id"]: r for r in raw}
         for i in range(30):
-            d = (thirty_days_ago + _td(days=i)).strftime("%Y-%m-%d")
+            d = (thirty_days_ago_ist + _td(days=i)).strftime("%Y-%m-%d")
             entry = day_map.get(d, {"_id": d, "bytes": 0, "streams": 0})
             daily_30.append({
                 "date":    d,
                 "gb":      round(entry["bytes"] / (1024**3), 3),
                 "streams": entry.get("streams", 0)
+            })
+    except Exception:
+        pass
+
+    # ── Son 30 gün, günlük bazda hangi video kaç GB veri çekmiş ──────────────
+    daily_video_usage = []
+    try:
+        col = db.dbs["tracking"]["stream_analytics"]
+        from datetime import timedelta as _td2
+        _today_ist = datetime.now(_TZ).replace(hour=0, minute=0, second=0, microsecond=0)
+        _thirty_ago_utc = (_today_ist - _td2(days=29)).astimezone(timezone.utc)
+        _dv_user_token = token_doc.get("token") if token_doc else None
+        _dv_match: dict = {"logged_at": {"$gte": _thirty_ago_utc}, "title": {"$ne": None, "$exists": True}}
+        if _dv_user_token:
+            _dv_match["user_token"] = _dv_user_token
+        _dv_pipe = [
+            {"$match": _dv_match},
+            {"$group": {
+                "_id": {
+                    "day":   {"$dateToString": {"format": "%Y-%m-%d", "date": "$logged_at", "timezone": "Europe/Istanbul"}},
+                    "title": "$title",
+                },
+                "imdb_id":     {"$first": "$imdb_id"},
+                "watch_count": {"$sum": 1},
+                "total_bytes": {"$sum": "$total_bytes"},
+            }},
+            {"$sort": {"_id.day": -1, "total_bytes": -1}},
+            {"$limit": 500},
+        ]
+        _dv_raw = await col.aggregate(_dv_pipe).to_list(None)
+        for r in _dv_raw:
+            _id = r.get("_id", {})
+            daily_video_usage.append({
+                "day":         _id.get("day"),
+                "title":       _id.get("title"),
+                "imdb_id":     r.get("imdb_id"),
+                "watch_count": r.get("watch_count", 0),
+                "total_bytes": r.get("total_bytes", 0),
             })
     except Exception:
         pass
@@ -1183,6 +1233,8 @@ async def member_profile_api(request: Request):
         "reset_clock_min":  _rm,
         # Son 30 gün
         "daily_30":         daily_30,
+        # Son 30 gün — günlük video bazlı veri kullanımı
+        "daily_video_usage": daily_video_usage,
     }
 
 

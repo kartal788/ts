@@ -236,6 +236,10 @@
       <div class="flex items-center gap-2">
         <input id="hist-search" type="text" placeholder="İçerik ara…" oninput="filterHistory()"
           class="text-sm px-3 py-1.5 rounded-xl border focus:outline-none focus:border-primary w-40 transition">
+        <button onclick="exportHistoryCsv()" id="hist-export-btn"
+          class="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-xl border hover:border-primary transition theme-text-secondary hover:text-primary whitespace-nowrap">
+          <i class="fas fa-file-csv"></i> CSV İndir
+        </button>
         <span class="text-xs theme-text-secondary" id="hist-count"></span>
       </div>
     </div>
@@ -505,10 +509,36 @@
     return `${s}s`;
   }
 
+  // "Şu an" itibariyle Europe/Istanbul (UTC+3) takviminde bugünün
+  // gece yarısını, UTC Date nesnesi olarak döner. Sadece gün bazlı
+  // gruplama/etiketleme için kullanılır (ör. son 30 gün grafiği).
+  function istanbulTodayMidnightUTC() {
+    const now = new Date();
+    const istParts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Europe/Istanbul",
+      year: "numeric", month: "2-digit", day: "2-digit"
+    }).formatToParts(now).reduce((acc, p) => { acc[p.type] = p.value; return acc; }, {});
+    return new Date(Date.UTC(+istParts.year, +istParts.month - 1, +istParts.day));
+  }
+
+  // Backend'ten gelen ISO tarih string'leri zone bilgisi TAŞIMAZ
+  // (Python datetime.isoformat() naive UTC datetime'dan üretilir, örn.
+  // "2026-08-13T04:17:14.123456"). Zone eki olmadan JS bunu tarayıcının
+  // yerel saati sanır; tarayıcı zaten UTC+3'te ise Europe/Istanbul'a
+  // tekrar çevirince +3 saat hiç eklenmemiş gibi görünür. Bu yüzden
+  // zone eki yoksa açıkça 'Z' (UTC) ekleyip Date'i doğru instant'tan kuruyoruz.
+  function parseUtcIso(iso) {
+    if (!iso) return null;
+    const hasTz = /[zZ]|[+-]\d{2}:?\d{2}$/.test(iso);
+    const d = new Date(hasTz ? iso : iso + "Z");
+    return isNaN(d.getTime()) ? null : d;
+  }
+
   function fmtDateTime(iso) {
     if (!iso) return "—";
+    const d = parseUtcIso(iso);
+    if (!d) return iso;
     try {
-      const d = new Date(iso);
       // UTC+3 sabit saat dilimi (sunucu logged_at UTC olarak kaydeder)
       return d.toLocaleString("tr-TR", {
         day: "2-digit", month: "2-digit", year: "numeric",
@@ -520,9 +550,12 @@
 
   function fmtDate(iso) {
     if (!iso) return "—";
+    const d = parseUtcIso(iso);
+    if (!d) return "—";
     try {
-      return new Date(iso).toLocaleDateString("tr-TR", {
-        day: "2-digit", month: "2-digit", year: "numeric"
+      return d.toLocaleDateString("tr-TR", {
+        day: "2-digit", month: "2-digit", year: "numeric",
+        timeZone: "Europe/Istanbul"
       });
     } catch { return "—"; }
   }
@@ -830,17 +863,18 @@
     // Son 30 takvim gününü (bugünden geriye) oluştur; veri olmayan
     // günler 0 olarak eklenir, böylece grafik veri olsun olmasın her
     // zaman tam 30 günlük bir zaman çizelgesi gösterir.
+    // "Bugün" UTC+3 (Europe/Istanbul) baz alınarak hesaplanır, admin panelini
+    // farklı bir saat diliminden açan biri için de günler tutarlı kalsın diye.
     const days = [];
-    const cursor = new Date();
-    cursor.setHours(0, 0, 0, 0);
+    const cursor = istanbulTodayMidnightUTC();
     for (let i = 29; i >= 0; i--) {
       const d = new Date(cursor);
-      d.setDate(d.getDate() - i);
+      d.setUTCDate(d.getUTCDate() - i);
       days.push(d.toISOString().slice(0, 10));
     }
 
     const values   = days.map(d => byDay[d] || 0);
-    const labels   = days.map(d => new Date(d).toLocaleDateString("tr-TR", { day: "2-digit", month: "2-digit" }));
+    const labels   = days.map(d => new Date(d + "T00:00:00Z").toLocaleDateString("tr-TR", { day: "2-digit", month: "2-digit", timeZone: "UTC" }));
     const total    = values.reduce((a, b) => a + b, 0);
     const avg      = total / values.length;
     const peakIdx  = values.indexOf(Math.max(...values));
@@ -1175,6 +1209,63 @@
         </td>
       </tr>`;
     }).join("");
+  }
+
+  // ─── İzleme Geçmişi CSV Dışa Aktarma ────────────────────────────────────
+  function csvEscape(val) {
+    const s = String(val ?? "");
+    if (/[",\n;]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+    return s;
+  }
+
+  function exportHistoryCsv() {
+    const rows = FILT_HISTORY;
+    if (!rows || rows.length === 0) {
+      admMsg("İndirilecek kayıt yok", false);
+      return;
+    }
+
+    const headers = [
+      "#", "İçerik", "IMDB ID", "Sertifika (TR)", "Sertifika (DE)", "Sertifika (US)",
+      "Veri (Bytes)", "Veri (GB)", "Süre (sn)", "Ort. Hız (Mbps)", "Zirve Hız (Mbps)",
+      "Durum", "Cihaz/Bot", "DC", "Tarih & Saat (UTC+3)"
+    ];
+
+    const lines = [headers.map(csvEscape).join(";")];
+    rows.forEach((s, i) => {
+      const bytes = s.total_bytes || 0;
+      lines.push([
+        i + 1,
+        s.title || s.imdb_id || "İsimsiz İçerik",
+        s.imdb_id || "",
+        s.certification_tr || "",
+        s.certification_de || "",
+        s.certification_us || s.certification || "",
+        bytes,
+        (bytes / 1073741824).toFixed(3),
+        s.duration_sec || 0,
+        s.avg_mbps || 0,
+        s.peak_mbps || 0,
+        s.status || "",
+        s.client_index != null ? `Bot ${Number(s.client_index) + 1}` : "",
+        s.dc_id != null ? `DC${s.dc_id}` : "",
+        fmtDateTime(s.logged_at)
+      ].map(csvEscape).join(";"));
+    });
+
+    // BOM ekle: Excel'in UTF-8 karakterleri (ör. Türkçe harfler) doğru göstermesi için
+    const csvContent = "\uFEFF" + lines.join("\r\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    const namePart = (document.getElementById("member-name")?.textContent || MEMBER_ID || "uye")
+      .toString().trim().replace(/[^a-zA-Z0-9_-]+/g, "_");
+    a.href = url;
+    a.download = `izleme_gecmisi_${namePart}_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
   }
 
   function histChangePage(dir) {
