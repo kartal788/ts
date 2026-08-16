@@ -1,5 +1,6 @@
 import logging
 import re
+import random
 _logger = logging.getLogger(__name__)
 import math
 import secrets
@@ -173,6 +174,14 @@ def select_best_client(target_dc: int) -> int:
     is deprioritised even if its current workload is low.
     DC-aware selection is kept but currently commented out (uncomment to
     prefer same-DC bots).
+
+    ÖNEMLİ: work_loads/client_failures çoğu zaman birçok client için aynı
+    (ör. hepsi 0) olur — bu durumda Python'ın min() fonksiyonu HER ZAMAN
+    iterasyon sırasındaki İLK client'ı döndürür (deterministik), yani en
+    düşük index'li client (genelde client 1) kalıcı olarak "en iyi" seçilir
+    ve tüm yük ona yığılır. Bu, tek bir client'ta sürekli FloodWait'e yol
+    açan asıl sebeptir. Bunun yerine, en düşük skora sahip TÜM client'lar
+    arasından rastgele seçim yapılarak yük gerçek anlamda dağıtılır.
     """
     def _score(idx: int) -> int:
         return work_loads.get(idx, 0) + 3 * client_failures.get(idx, 0)
@@ -183,16 +192,20 @@ def select_best_client(target_dc: int) -> int:
     #     if dc == target_dc and idx in multi_clients
     # ]
     # if matching:
-    #     selected = min(matching, key=_score)
+    #     best_score = min(_score(i) for i in matching)
+    #     tied = [i for i in matching if _score(i) == best_score]
+    #     selected = random.choice(tied)
     #     LOGGER.debug("DC-match client %s (DC %s) score=%s", selected, target_dc, _score(selected))
     #     return selected
     # ------------------------------------------------------------------------
 
     if multi_clients:
-        selected = min(multi_clients.keys(), key=_score)
+        best_score = min(_score(i) for i in multi_clients.keys())
+        tied = [i for i in multi_clients.keys() if _score(i) == best_score]
+        selected = random.choice(tied)
         LOGGER.debug(
-            "Selected client %s (DC %s) score=%s",
-            selected, client_dc_map.get(selected, "?"), _score(selected),
+            "Selected client %s (DC %s) score=%s (%d client eşit skorda)",
+            selected, client_dc_map.get(selected, "?"), _score(selected), len(tied),
         )
         return selected
 
@@ -244,13 +257,17 @@ async def track_usage_from_stats(stream_id: str, token: str, token_data: dict):
     await asyncio.sleep(2)
     
     limits = token_data.get("limits", {}) if token_data else {}
-    usage = token_data.get("usage", {}) if token_data else {}
     
     daily_limit_gb = limits.get("daily_limit_gb")
     monthly_limit_gb = limits.get("monthly_limit_gb")
     
-    initial_daily_bytes = usage.get("daily", {}).get("bytes", 0)
-    initial_monthly_bytes = usage.get("monthly", {}).get("bytes", 0)
+    # Baz kullanım: stream_analytics'ten (güvenilir kaynak) alınır — bu
+    # stream başlamadan önce o gün/ay için zaten tamamlanmış kullanım.
+    # token.usage.daily/monthly.bytes yerine bu kullanılır çünkü o alanlar
+    # arka planda asenkron güncellenir ve veri kaybına açıktır.
+    _analytics_baseline = await db.get_analytics_usage_for_token(token)
+    initial_daily_bytes = _analytics_baseline["daily_bytes"]
+    initial_monthly_bytes = _analytics_baseline["monthly_bytes"]
     
     last_tracked_bytes = 0
     update_interval = 10
@@ -387,9 +404,9 @@ async def stream_handler(
             # Bayrağa körü körüne güvenme: gerçek kullanımı da doğrula.
             # Limit artırıldıysa, sıfırlama çalışmadıysa veya bayrak yanlış
             # set edildiyse kullanıcı haksız yere bloke olabilir.
-            _tok_doc = await db.get_api_token(token)
-            _real_daily_bytes = (_tok_doc or {}).get("usage", {}).get("daily", {}).get("bytes", 0)
-            _real_daily_gb = _real_daily_bytes / (1024 ** 3)
+            # Gerçek kullanım stream_analytics'ten (güvenilir kaynak) alınır.
+            _analytics = await db.get_analytics_usage_for_token(token)
+            _real_daily_gb = _analytics["daily_bytes"] / (1024 ** 3)
             if _real_daily_gb < _daily_limit_gb:
                 # Gerçek kullanım limitin altında → bayrağı temizle ve geç
                 LOGGER.warning(
@@ -555,8 +572,8 @@ async def virtual_media_streamer(
         "split_parts": len(parts),
     }
 
-    prefetch_count = Telegram.PARALLEL
-    parallelism = Telegram.PRE_FETCH
+    parallelism = Telegram.CONCURRENT_REQUESTS
+    prefetch_count = Telegram.PREFETCH_QUEUE_DEPTH
 
     if token and token_data:
         asyncio.create_task(track_usage_from_stats(stream_id, token, token_data))
@@ -1318,7 +1335,7 @@ async def media_streamer(
     stream_id_hash: str = None,
     force_download: bool = False,
 ):
-    temp_client = multi_clients[min(multi_clients.keys(), key=lambda i: work_loads.get(i, 0) + 3 * client_failures.get(i, 0))]
+    temp_client = multi_clients[select_best_client(target_dc=0)]
     if temp_client not in _streamer_by_client:
         idx = next((i for i, c in multi_clients.items() if c is temp_client), -1)
         _streamer_by_client[temp_client] = ByteStreamer(temp_client, idx)
@@ -1394,8 +1411,8 @@ async def media_streamer(
         "user_token": token,  # Kullanıcı bazlı hız dengeleme için
     }
 
-    prefetch_count = Telegram.PARALLEL
-    parallelism = Telegram.PRE_FETCH
+    parallelism = Telegram.CONCURRENT_REQUESTS
+    prefetch_count = Telegram.PREFETCH_QUEUE_DEPTH
 
     # ── Hız limiti: kullanıcı bazlı > global config ──────────────────
     # token_data["limits"]["speed_limit_mbps"] varsa kullanıcıya özel limit,

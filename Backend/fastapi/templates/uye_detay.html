@@ -658,7 +658,9 @@
       if (token)  document.getElementById("meta-token").textContent = `Token: ${token.substring(0,12)}…`;
       if (expiry) document.getElementById("meta-expiry").textContent = `Bitiş: ${fmtDate(expiry)}`;
 
-      // Kullanım istatistikleri (token tablosundan)
+      // Kullanım istatistikleri (token tablosundan) — stream geçmişi (analytics)
+      // yüklenene kadar geçici gösterim; asıl doğru değerler populateStreamData()
+      // içinde stream_analytics'ten hesaplanan summary ile güncellenir.
       document.getElementById("stat-daily").textContent   = fmtGB(member?.daily_bytes   || 0);
       document.getElementById("stat-monthly").textContent = fmtGB(member?.monthly_bytes || 0);
       document.getElementById("stat-total").textContent   = fmtGB(member?.total_bytes   || 0);
@@ -714,6 +716,12 @@
     document.getElementById("stat-avgspeed").textContent   = fmtSpeed(summary.avg_speed  || 0);
     document.getElementById("stat-peakspeed").textContent  = fmtSpeed(summary.peak_speed || 0);
     document.getElementById("stat-duration").textContent   = fmtDuration(summary.avg_duration || 0);
+
+    // Bugün / Bu Ay / Toplam — stream_analytics'ten (güvenilir kaynak),
+    // token.usage bucket'larının yerine geçer (bkz. backend yorumu).
+    document.getElementById("stat-daily").textContent   = fmtGB(summary.today_bytes || 0);
+    document.getElementById("stat-monthly").textContent = fmtGB(summary.month_bytes || 0);
+    document.getElementById("stat-total").textContent   = fmtGB(summary.total_bytes || 0);
 
     // En çok izlenen içerikler (API'den gelir)
     const grid = document.getElementById("top-content-grid");

@@ -46,6 +46,9 @@ _logger = logging.getLogger(__name__)
 
 from datetime import datetime, timezone
 from typing import Optional
+from zoneinfo import ZoneInfo
+
+_TZ_IST = ZoneInfo("Europe/Istanbul")
 
 from fastapi import Request, HTTPException
 from fastapi.responses import HTMLResponse
@@ -77,6 +80,7 @@ async def _build_members_list() -> list[dict]:
     try:
         tokens      = await db.get_all_api_tokens()
         subscribers = await db.get_all_subscribers()
+        analytics_usage = await db.get_analytics_usage_by_token()
     except Exception as e:
         return []
 
@@ -137,15 +141,20 @@ async def _build_members_list() -> list[dict]:
         if is_banned:
             sub_status = "banned"
 
+        # Kullanım verisi: stream_analytics'ten (güvenilir kaynak) alınır;
+        # token.usage.* alanları arka planda asenkron güncellendiği için
+        # yoğun/paralel kısa stream'lerde veri kaybına açıktır.
+        token_usage = analytics_usage.get(token_str, {})
+
         result.append({
             "user_id":              token_user_id,
             "user_name":            name,
             "token":                token_str,
             "subscription_status":  sub_status,
             "subscription_expiry":  expiry.isoformat() if isinstance(expiry, datetime) else expiry,
-            "total_bytes":          usage.get("total_bytes", 0),
-            "daily_bytes":          usage.get("daily", {}).get("bytes", 0),
-            "monthly_bytes":        usage.get("monthly", {}).get("bytes", 0),
+            "total_bytes":          token_usage.get("total_bytes",   usage.get("total_bytes", 0)),
+            "daily_bytes":          token_usage.get("daily_bytes",   usage.get("daily", {}).get("bytes", 0)),
+            "monthly_bytes":        token_usage.get("monthly_bytes", usage.get("monthly", {}).get("bytes", 0)),
             "limits":               t.get("limits"),
             "is_banned":            is_banned,
         })
@@ -392,6 +401,45 @@ async def admin_uye_stream_history_api(member_id: str) -> dict:
         agg_result = await col.aggregate(agg_pipe).to_list(1)
         summary    = agg_result[0] if agg_result else {}
         summary.pop("_id", None)
+
+        # ── Bugün / Bu ay kullanımı — stream_analytics'ten hesaplanır ─────────
+        # Not: token.usage.daily/monthly bytes, arka planda asenkron bir
+        # tracker (track_usage_from_stats) tarafından güncelleniyor ve
+        # yoğun/paralel kısa stream'lerde veri kaybına açık. stream_analytics
+        # ise her stream bittiğinde doğrudan ve güvenilir şekilde yazılıyor
+        # (bkz. /gecmis komutu), bu yüzden "Bugün"/"Bu Ay" burada bu
+        # koleksiyondan, Europe/Istanbul takvim gününe/ayına göre hesaplanır.
+        now_ist = datetime.now(_TZ_IST)
+        today_start_utc = (
+            now_ist.replace(hour=0, minute=0, second=0, microsecond=0)
+            .astimezone(timezone.utc)
+            .replace(tzinfo=None)
+        )
+        month_start_utc = (
+            now_ist.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            .astimezone(timezone.utc)
+            .replace(tzinfo=None)
+        )
+        today_month_pipe = [
+            {"$match": {**match_filter, "logged_at": {"$gte": month_start_utc}}},
+            {"$group": {
+                "_id":         None,
+                "month_bytes": {"$sum": "$total_bytes"},
+                "today_bytes": {
+                    "$sum": {
+                        "$cond": [
+                            {"$gte": ["$logged_at", today_start_utc]},
+                            "$total_bytes",
+                            0,
+                        ]
+                    }
+                },
+            }},
+        ]
+        tm_result = await col.aggregate(today_month_pipe).to_list(1)
+        tm        = tm_result[0] if tm_result else {}
+        summary["today_bytes"] = tm.get("today_bytes", 0)
+        summary["month_bytes"] = tm.get("month_bytes", 0)
 
         # ── En çok izlenen içerikler ──────────────────────────────────────────
         top_pipe = [

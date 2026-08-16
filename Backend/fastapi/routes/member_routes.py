@@ -354,12 +354,12 @@ async def member_catalog_page(request: Request):
             (t for t in all_tokens if t.get("user_id") == member["user_id"]), None
         )
         if token_doc:
-            usage  = token_doc.get("usage", {})
             limits = token_doc.get("limits", {})
+            analytics_usage = await db.get_analytics_usage_for_token(token_doc["token"])
             usage_info = {
-                "daily_gb":      _bytes_to_gb(usage.get("daily",   {}).get("bytes", 0)),
-                "monthly_gb":    _bytes_to_gb(usage.get("monthly", {}).get("bytes", 0)),
-                "total_gb":      _bytes_to_gb(usage.get("total_bytes", 0)),
+                "daily_gb":      _bytes_to_gb(analytics_usage["daily_bytes"]),
+                "monthly_gb":    _bytes_to_gb(analytics_usage["monthly_bytes"]),
+                "total_gb":      _bytes_to_gb(analytics_usage["total_bytes"]),
                 "daily_limit":   limits.get("daily_limit_gb",   0) or 0,
                 "monthly_limit": limits.get("monthly_limit_gb", 0) or 0,
             }
@@ -822,17 +822,18 @@ async def member_stream_url_api(
     if not token:
         raise HTTPException(status_code=403, detail="Token bulunamadı")
 
-    # Limit kontrolü
+    # Limit kontrolü — gerçek kullanım stream_analytics'ten (güvenilir kaynak) alınır.
     token_doc = await db.get_api_token(token)
     if token_doc:
         limits = token_doc.get("limits", {})
-        usage  = token_doc.get("usage", {})
         dl = limits.get("daily_limit_gb", 0) or 0
         ml = limits.get("monthly_limit_gb", 0) or 0
-        if dl > 0 and _bytes_to_gb(usage.get("daily", {}).get("bytes", 0)) >= dl:
-            raise HTTPException(status_code=429, detail="daily_limit")
-        if ml > 0 and _bytes_to_gb(usage.get("monthly", {}).get("bytes", 0)) >= ml:
-            raise HTTPException(status_code=429, detail="monthly_limit")
+        if dl > 0 or ml > 0:
+            analytics_usage = await db.get_analytics_usage_for_token(token)
+            if dl > 0 and _bytes_to_gb(analytics_usage["daily_bytes"]) >= dl:
+                raise HTTPException(status_code=429, detail="daily_limit")
+            if ml > 0 and _bytes_to_gb(analytics_usage["monthly_bytes"]) >= ml:
+                raise HTTPException(status_code=429, detail="monthly_limit")
 
     from Backend.helper.stream_token import media_token_manager
     from Backend.helper.encrypt import encode_string
@@ -974,8 +975,9 @@ async def member_usage_api(request: Request):
 
     usage  = token_doc.get("usage", {})
     limits = token_doc.get("limits", {})
-    d_gb   = _bytes_to_gb(usage.get("daily",   {}).get("bytes", 0))
-    m_gb   = _bytes_to_gb(usage.get("monthly", {}).get("bytes", 0))
+    analytics_usage = await db.get_analytics_usage_for_token(token_doc["token"])
+    d_gb   = _bytes_to_gb(analytics_usage["daily_bytes"])
+    m_gb   = _bytes_to_gb(analytics_usage["monthly_bytes"])
     dl     = limits.get("daily_limit_gb",   0) or 0
     ml     = limits.get("monthly_limit_gb", 0) or 0
 
@@ -992,7 +994,7 @@ async def member_usage_api(request: Request):
     return {
         "daily_gb":          d_gb,
         "monthly_gb":        m_gb,
-        "total_gb":          _bytes_to_gb(usage.get("total_bytes", 0)),
+        "total_gb":          _bytes_to_gb(analytics_usage["total_bytes"]),
         "daily_limit":       dl,
         "monthly_limit":     ml,
         "daily_remaining":   max(0, round(dl - d_gb, 3)) if dl > 0 else None,
@@ -1267,16 +1269,16 @@ async def member_hatirlatmalar_page(request: Request):
             (t for t in all_tokens if t.get("user_id") == member["user_id"]), None
         )
         if token_doc:
-            usage  = token_doc.get("usage", {})
             limits = token_doc.get("limits", {})
-            d_gb = _bytes_to_gb(usage.get("daily",   {}).get("bytes", 0))
-            m_gb = _bytes_to_gb(usage.get("monthly", {}).get("bytes", 0))
+            analytics_usage = await db.get_analytics_usage_for_token(token_doc["token"])
+            d_gb = _bytes_to_gb(analytics_usage["daily_bytes"])
+            m_gb = _bytes_to_gb(analytics_usage["monthly_bytes"])
             dl   = limits.get("daily_limit_gb",   0) or 0
             ml   = limits.get("monthly_limit_gb", 0) or 0
             usage_info = {
                 "daily_gb":         d_gb,
                 "monthly_gb":       m_gb,
-                "total_gb":         _bytes_to_gb(usage.get("total_bytes", 0)),
+                "total_gb":         _bytes_to_gb(analytics_usage["total_bytes"]),
                 "daily_limit":      dl,
                 "monthly_limit":    ml,
                 "daily_remaining":  max(0, round(dl - d_gb, 3)) if dl > 0 else None,

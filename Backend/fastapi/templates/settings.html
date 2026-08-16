@@ -274,7 +274,7 @@
                 </div>
                 <div>
                     <label class="s-label">Stream Eşzamanlı İstek Sayısı</label>
-                    <input class="s-input" type="number" min="1" max="10" id="s-pre_fetch" value="{{ settings.pre_fetch }}">
+                    <input class="s-input" type="number" min="1" max="10" id="s-concurrent_requests" value="{{ settings.concurrent_requests }}">
                     <p class="text-xs opacity-60 mt-1">
                         Bir video oynatılırken Telegram'a AYNI ANDA gönderilen chunk isteği sayısı.
                         Yüksek değer daha hızlı başlatma sağlar ama Telegram'ın FloodWait
@@ -284,7 +284,7 @@
                 </div>
                 <div>
                     <label class="s-label">Stream Prefetch Kuyruk Derinliği</label>
-                    <input class="s-input" type="number" min="1" max="20" id="s-parallel" value="{{ settings.parallel }}">
+                    <input class="s-input" type="number" min="1" max="20" id="s-prefetch_queue_depth" value="{{ settings.prefetch_queue_depth }}">
                     <p class="text-xs opacity-60 mt-1">
                         Oynatıcı henüz tüketmeden önceden hazırlanıp bellekte bekletilen chunk
                         sayısı (buffer derinliği). Genelde varsayılan değer yeterlidir; çok
@@ -636,8 +636,8 @@ function renderSettings(s) {
     document.getElementById('s-default_device_limit').value = s.default_device_limit ?? '';
     document.getElementById('s-max_concurrent_downloads').value = s.max_concurrent_downloads || '';
     document.getElementById('s-max_concurrent_uploads').value = s.max_concurrent_uploads || '';
-    document.getElementById('s-pre_fetch').value = s.pre_fetch ?? 3;
-    document.getElementById('s-parallel').value = s.parallel ?? 4;
+    document.getElementById('s-concurrent_requests').value = s.concurrent_requests ?? 3;
+    document.getElementById('s-prefetch_queue_depth').value = s.prefetch_queue_depth ?? 4;
 
     document.getElementById('s-proxy').checked = !!s.proxy;
     document.getElementById('s-proxy_type').value = s.proxy_type || 'HTTPS';
@@ -702,8 +702,8 @@ function buildPayload() {
         default_device_limit: toInt('s-default_device_limit', 0),
         max_concurrent_downloads: document.getElementById('s-max_concurrent_downloads').value.trim(),
         max_concurrent_uploads: document.getElementById('s-max_concurrent_uploads').value.trim(),
-        pre_fetch: toInt('s-pre_fetch', 3),
-        parallel: toInt('s-parallel', 4),
+        concurrent_requests: toInt('s-concurrent_requests', 3),
+        prefetch_queue_depth: toInt('s-prefetch_queue_depth', 4),
 
         proxy: document.getElementById('s-proxy').checked,
         proxy_type: document.getElementById('s-proxy_type').value,

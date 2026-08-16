@@ -31,7 +31,7 @@ def _daily_key() -> str:
         return (now + _td(days=1)).strftime("%Y-%m-%d")
     return now.strftime("%Y-%m-%d")
 from pydantic import ValidationError
-from pymongo import ASCENDING, DESCENDING
+from pymongo import ASCENDING, DESCENDING, TEXT
 from typing import Dict, List, Optional, Tuple, Any
 
 from Backend.logger import LOGGER
@@ -182,7 +182,8 @@ class Database:
             except Exception as idx_err:
                 LOGGER.warning(f"ip_bans index: {idx_err}")
 
-            # stream_analytics: TTL'yi 10 güne düşür, mevcut eski index'i yeniden oluştur
+            # stream_analytics: TTL'yi 30 güne ayarla, mevcut eski index'i yeniden oluştur
+            # (Temizlik işlemi artık sadece db_scheduler.py üzerinden yapılır)
             try:
                 col_analytics = self.dbs["tracking"]["stream_analytics"]
                 # Eski TTL index'ini sil (farklı expireAfterSeconds ile yeniden oluşturmak için)
@@ -192,19 +193,73 @@ class Database:
                     pass
                 await col_analytics.create_index(
                     "logged_at",
-                    expireAfterSeconds=10 * 24 * 3600,  # 10 gün
+                    expireAfterSeconds=30 * 24 * 3600,  # 30 gün
                     background=True,
                 )
-                # Mevcut 10 günden eski kayıtları hemen temizle
-                cutoff = datetime.utcnow() - _td(days=10)
-                deleted = await col_analytics.delete_many({"logged_at": {"$lt": cutoff}})
-                if deleted.deleted_count:
-                    LOGGER.info(f"stream_analytics: {deleted.deleted_count} eski kayıt temizlendi (>10 gün)")
             except Exception as idx_err:
                 LOGGER.warning(f"stream_analytics TTL index: {idx_err}")
 
+            # tv/movie arama text index'leri — her storage DB için ayrı ayrı
+            for index in range(1, len(self.db_uris)):
+                db_key = f"storage_{index}"
+                if db_key in self.dbs:
+                    await self._ensure_search_indexes(self.dbs[db_key])
+
         except Exception as e:
             LOGGER.error(f"Database connection error: {e}")
+
+    async def _ensure_search_indexes(self, db) -> None:
+        """
+        tv ve movie koleksiyonlarına arama (search_documents) için text index
+        oluşturur. default_language="none" ile stemming/stop-word filtresi
+        kapatılır — çok dilli (tr/de/en) başlıklarda yanlış kelime kökü
+        eşleştirmesi yapılmaması için. Index zaten varsa create_index no-op'tur.
+        """
+        try:
+            await db["tv"].create_index(
+                [
+                    ("title", TEXT),
+                    ("title_tr", TEXT),
+                    ("title_de", TEXT),
+                    ("cast", TEXT),
+                    ("seasons.episodes.telegram.name", TEXT),
+                ],
+                name="search_text_idx",
+                weights={
+                    "title": 10,
+                    "title_tr": 10,
+                    "title_de": 8,
+                    "cast": 3,
+                    "seasons.episodes.telegram.name": 1,
+                },
+                default_language="none",
+                background=True,
+            )
+        except Exception as idx_err:
+            LOGGER.warning(f"tv search_text_idx: {idx_err}")
+
+        try:
+            await db["movie"].create_index(
+                [
+                    ("title", TEXT),
+                    ("title_tr", TEXT),
+                    ("title_de", TEXT),
+                    ("cast", TEXT),
+                    ("telegram.name", TEXT),
+                ],
+                name="search_text_idx",
+                weights={
+                    "title": 10,
+                    "title_tr": 10,
+                    "title_de": 8,
+                    "cast": 3,
+                    "telegram.name": 1,
+                },
+                default_language="none",
+                background=True,
+            )
+        except Exception as idx_err:
+            LOGGER.warning(f"movie search_text_idx: {idx_err}")
 
     async def disconnect(self):
         for client in self.clients.values():
@@ -274,6 +329,10 @@ class Database:
             db_type = "Tracking" if index == 0 else f"Storage {index}"
             masked_uri = re.sub(r"://(.*?):.*?@", r"://\1:*****@", uri).split('?')[0]
             LOGGER.info(f"{db_type} veritabanı bağlandı: {masked_uri}")
+
+            if index != 0:
+                await self._ensure_search_indexes(self.dbs[db_key])
+
             return True
         except Exception as e:
             LOGGER.error(f"connect_storage_db hatası (index {index}): {e}")
@@ -1596,25 +1655,169 @@ class Database:
             "tv_shows": [convert_objectid_to_str(result) for result in results],
         }
 
+    def _search_words_all_present(self, doc: dict, words: List[str]) -> bool:
+        """
+        $text sorgusu kelimeleri OR mantığıyla eşleştirir (herhangi biri
+        geçerse belge döner). Orijinal davranışı (tüm kelimeler geçmeli,
+        sıra önemsiz) korumak için, $text index'inin ön elediği küçük aday
+        kümesi üzerinde bu ek AND kontrolü uygulanır — artık tüm koleksiyon
+        değil, sadece indexten dönen adaylar taranıyor.
+        """
+        parts = [
+            str(doc.get("title") or ""),
+            str(doc.get("title_tr") or ""),
+            str(doc.get("title_de") or ""),
+        ]
+        cast = doc.get("cast") or []
+        if isinstance(cast, list):
+            parts.extend(str(c) for c in cast)
+        else:
+            parts.append(str(cast))
+
+        tg = doc.get("telegram")
+        if isinstance(tg, dict) and tg.get("name"):
+            parts.append(str(tg["name"]))
+        for season in (doc.get("seasons") or []):
+            for ep in (season.get("episodes") or []):
+                ep_tg = (ep or {}).get("telegram") or {}
+                if ep_tg.get("name"):
+                    parts.append(str(ep_tg["name"]))
+
+        haystack = " ".join(parts).lower()
+        return all(w in haystack for w in words)
+
     async def search_documents(
-            self, 
-            query: str, 
-            page: int, 
+            self,
+            query: str,
+            page: int,
             page_size: int
         ) -> dict:
 
             skip = (page - 1) * page_size
 
-            # ── ReDoS & Regex Injection koruması ─────────────────────────────
-            # Kullanıcı girdisindeki tüm regex özel karakterleri escape edilir
-            # (re.escape → ".", "*", "+", "(", ")", "[" vb. → "\.", "\*" ...).
-            # Boş/sadece-boşluk girdi reddedilir; kelime başına uzunluk sınırı
-            # uygulanarak aşırı uzun token'larla tetiklenen ReDoS önlenir.
-            import re as _re
-
             _MAX_QUERY_LEN  = 100   # toplam girdi karakter sınırı
             _MAX_WORD_LEN   = 40    # tek kelime karakter sınırı
             _MAX_WORD_COUNT = 10    # maksimum kelime sayısı
+
+            query = query.strip()[:_MAX_QUERY_LEN]
+            if not query:
+                return {"total_count": 0, "results": []}
+
+            words = [
+                w[:_MAX_WORD_LEN].lower()
+                for w in query.split()
+                if w.strip()
+            ][:_MAX_WORD_COUNT]
+
+            if not words:
+                return {"total_count": 0, "results": []}
+
+            # $text $search söz diziminde çift tırnak ifade eşleşmesi
+            # (phrase match) ve "-" hariç tutma anlamı taşır; kullanıcı
+            # girdisinde bunlar özel anlam kazanmasın diye temizlenir.
+            text_search = " ".join(
+                w.replace('"', '').replace("-", " ") for w in words
+            ).strip()
+
+            if not text_search:
+                return {"total_count": 0, "results": []}
+
+            base_stage = [
+                {"$match": {"$text": {"$search": text_search}}},
+                {"$sort": {"score": {"$meta": "textScore"}}},
+            ]
+
+            tv_pipeline = base_stage + [
+                {"$project": {
+                    "_id": 1, "tmdb_id": 1, "title": 1, "title_tr": 1, "title_de": 1,
+                    "genres": 1, "genres_tr": 1, "genres_de": 1, "rating": 1, "imdb_id": 1,
+                    "release_year": 1, "poster": 1, "backdrop": 1,
+                    "description": 1, "description_tr": 1, "description_de": 1, "logo": 1,
+                    "poster_tr": 1, "backdrop_tr": 1, "logo_tr": 1,
+                    "poster_de": 1, "backdrop_de": 1, "logo_de": 1,
+                    "media_type": 1, "db_index": 1,
+                    "cast": 1, "language": 1,
+                    "certification_tr": 1, "certification_de": 1, "certification_us": 1,
+                    "seasons": 1
+                }}
+            ]
+
+            movie_pipeline = base_stage + [
+                {"$project": {
+                    "_id": 1, "tmdb_id": 1, "title": 1, "title_tr": 1, "title_de": 1,
+                    "genres": 1, "genres_tr": 1, "genres_de": 1, "rating": 1,
+                    "release_year": 1, "poster": 1, "backdrop": 1,
+                    "description": 1, "description_tr": 1, "description_de": 1,
+                    "media_type": 1, "db_index": 1, "imdb_id": 1, "logo": 1,
+                    "poster_tr": 1, "backdrop_tr": 1, "logo_tr": 1,
+                    "poster_de": 1, "backdrop_de": 1, "logo_de": 1,
+                    "cast": 1, "language": 1,
+                    "certification_tr": 1, "certification_de": 1, "certification_us": 1,
+                    "telegram": 1
+                }}
+            ]
+
+            try:
+                results: List[dict] = []
+                dbs_checked = []
+
+                active_db_key = f"storage_{self.current_db_index}"
+                active_db = self.dbs[active_db_key]
+                dbs_checked.append(self.current_db_index)
+
+                tv_results = await active_db["tv"].aggregate(tv_pipeline).to_list(None)
+                movie_results = await active_db["movie"].aggregate(movie_pipeline).to_list(None)
+                results.extend(
+                    r for r in (tv_results + movie_results)
+                    if self._search_words_all_present(r, words)
+                )
+
+                if len(results) < page_size:
+                    previous_db_index = self.current_db_index - 1
+                    while previous_db_index > 0 and len(results) < page_size:
+                        prev_db_key = f"storage_{previous_db_index}"
+                        prev_db = self.dbs[prev_db_key]
+                        tv_results_prev = await prev_db["tv"].aggregate(tv_pipeline).to_list(None)
+                        movie_results_prev = await prev_db["movie"].aggregate(movie_pipeline).to_list(None)
+                        results.extend(
+                            r for r in (tv_results_prev + movie_results_prev)
+                            if self._search_words_all_present(r, words)
+                        )
+                        dbs_checked.append(previous_db_index)
+                        previous_db_index -= 1
+
+                # total_count sadece taranan (dbs_checked) veritabanlarını
+                # kapsar — orijinal davranışla aynı sınırlama.
+                total_count = len(results)
+                paged_results = results[skip:skip + page_size]
+
+                return {
+                    "total_count": total_count,
+                    "results": [convert_objectid_to_str(doc) for doc in paged_results]
+                }
+
+            except Exception as text_err:
+                # Text index henüz oluşturulmadıysa (ör. arka planda build
+                # sürüyorsa) veya $text kullanılamıyorsa eski regex tabanlı
+                # aramaya düş — böylece arama hiçbir zaman tamamen kesilmez.
+                LOGGER.warning(f"search_documents $text hatası, regex'e düşülüyor: {text_err}")
+                return await self._search_documents_regex_fallback(query, page, page_size)
+
+    async def _search_documents_regex_fallback(
+            self,
+            query: str,
+            page: int,
+            page_size: int
+        ) -> dict:
+            """$text index kullanılamadığında devreye giren eski regex tabanlı arama."""
+
+            skip = (page - 1) * page_size
+
+            import re as _re
+
+            _MAX_QUERY_LEN  = 100
+            _MAX_WORD_LEN   = 40
+            _MAX_WORD_COUNT = 10
 
             query = query.strip()[:_MAX_QUERY_LEN]
             if not query:
@@ -1629,16 +1832,9 @@ class Database:
             if not words:
                 return {"total_count": 0, "results": []}
 
-            # Her kelime bağımsız lookahead ile eşleştirilir:
-            # (?=.*kelime1)(?=.*kelime2)... → kelime sırası önemli değil,
-            # hepsi metinde geçmeli. Tek .* yerine lookahead kullanmak
-            # MongoDB regex motorundaki backtracking yükünü önemli ölçüde azaltır.
             pattern = "".join(f"(?=.*{w})" for w in words)
-            regex_query = {
-                '$regex': pattern,
-                '$options': 'i'
-            }
-            
+            regex_query = {'$regex': pattern, '$options': 'i'}
+
             tv_pipeline = [
                 {"$match": {"$or": [
                     {"title": regex_query},
@@ -1682,19 +1878,18 @@ class Database:
                     "telegram": 1
                 }}
             ]
-            
+
             results = []
             dbs_checked = []
-            
+
             active_db_key = f"storage_{self.current_db_index}"
             active_db = self.dbs[active_db_key]
             dbs_checked.append(self.current_db_index)
-            
+
             tv_results = await active_db["tv"].aggregate(tv_pipeline).to_list(None)
             movie_results = await active_db["movie"].aggregate(movie_pipeline).to_list(None)
-            combined = tv_results + movie_results
-            results.extend(combined)
-            
+            results.extend(tv_results + movie_results)
+
             if len(results) < page_size:
                 previous_db_index = self.current_db_index - 1
                 while previous_db_index > 0 and len(results) < page_size:
@@ -1702,8 +1897,7 @@ class Database:
                     prev_db = self.dbs[prev_db_key]
                     tv_results_prev = await prev_db["tv"].aggregate(tv_pipeline).to_list(None)
                     movie_results_prev = await prev_db["movie"].aggregate(movie_pipeline).to_list(None)
-                    combined_prev = tv_results_prev + movie_results_prev
-                    results.extend(combined_prev)
+                    results.extend(tv_results_prev + movie_results_prev)
                     dbs_checked.append(previous_db_index)
                     previous_db_index -= 1
 
@@ -1715,7 +1909,7 @@ class Database:
                     "$or": [
                         {"title": regex_query},
                         {"title_de": regex_query},
-                    {"title_tr": regex_query},
+                        {"title_tr": regex_query},
                         {"cast": regex_query},
                         {"seasons.episodes.telegram.name": regex_query}
                     ]
@@ -1724,13 +1918,13 @@ class Database:
                     "$or": [
                         {"title": regex_query},
                         {"title_de": regex_query},
-                    {"title_tr": regex_query},
+                        {"title_tr": regex_query},
                         {"cast": regex_query},
                         {"telegram.name": regex_query}
                     ]
                 })
                 total_count += (tv_count + movie_count)
-            
+
             paged_results = results[skip:skip + page_size]
 
             return {
@@ -3066,20 +3260,8 @@ class Database:
             col = self.dbs["tracking"]["stream_analytics"]
             await col.insert_one(record)
 
-            # Kullanıcı başına maksimum 100 kayıt — eskiden fazlası silinir
-            # + 30 günden eski kayıtlar (kullanıcı fark etmeksizin) silinir
-            user_token = record.get("user_token")
-            if user_token:
-                count = await col.count_documents({"user_token": user_token})
-                if count > 100:
-                    oldest = await col.find(
-                        {"user_token": user_token},
-                        {"_id": 1}
-                    ).sort("logged_at", 1).limit(count - 100).to_list(None)
-                    old_ids = [d["_id"] for d in oldest]
-                    await col.delete_many({"_id": {"$in": old_ids}})
-
-            # 30 günden eski tüm kayıtları temizle (yaş bazlı retention)
+            # Kayıt sayısı sınırı yok — sadece 30 günden eski kayıtlar
+            # (yaş bazlı retention, TTL index ile de destekleniyor) silinir
             age_cutoff = datetime.utcnow() - _td(days=30)
             await col.delete_many({"logged_at": {"$lt": age_cutoff}})
         except Exception as e:
@@ -3428,6 +3610,134 @@ class Database:
             LOGGER.warning(f"get_similar_items failed: {e}")
             return []
 
+
+    async def get_analytics_usage_for_token(self, token: str) -> dict:
+        """
+        Tek bir token için stream_analytics'ten bugünkü/bu ayki/toplam byte
+        kullanımını hesaplar (Europe/Istanbul takvim gün/ay sınırlarına göre).
+        get_analytics_usage_by_token()'ın tüm token'lar için toplu hâlinin
+        aksine, tek token'a filtrelenmiş — sık çağrılan (stream başına bir
+        kez) limit-kontrolü noktaları için ucuzdur.
+        Döner: {"daily_bytes": int, "monthly_bytes": int, "total_bytes": int}
+        """
+        empty = {"daily_bytes": 0, "monthly_bytes": 0, "total_bytes": 0}
+        if not token:
+            return empty
+        try:
+            col = self.dbs["tracking"]["stream_analytics"]
+
+            now_ist = datetime.now(_TZ_IST)
+            today_start_utc = (
+                now_ist.replace(hour=0, minute=0, second=0, microsecond=0)
+                .astimezone(timezone.utc)
+                .replace(tzinfo=None)
+            )
+            month_start_utc = (
+                now_ist.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+                .astimezone(timezone.utc)
+                .replace(tzinfo=None)
+            )
+
+            pipeline = [
+                {"$match": {"user_token": token}},
+                {"$group": {
+                    "_id":           None,
+                    "total_bytes":   {"$sum": "$total_bytes"},
+                    "monthly_bytes": {
+                        "$sum": {
+                            "$cond": [
+                                {"$gte": ["$logged_at", month_start_utc]},
+                                "$total_bytes",
+                                0,
+                            ]
+                        }
+                    },
+                    "daily_bytes": {
+                        "$sum": {
+                            "$cond": [
+                                {"$gte": ["$logged_at", today_start_utc]},
+                                "$total_bytes",
+                                0,
+                            ]
+                        }
+                    },
+                }},
+            ]
+            rows = await col.aggregate(pipeline).to_list(1)
+            if not rows:
+                return empty
+            r = rows[0]
+            return {
+                "daily_bytes":   r.get("daily_bytes", 0),
+                "monthly_bytes": r.get("monthly_bytes", 0),
+                "total_bytes":   r.get("total_bytes", 0),
+            }
+        except Exception as e:
+            LOGGER.warning(f"get_analytics_usage_for_token failed: {e}")
+            return empty
+
+    async def get_analytics_usage_by_token(self) -> dict:
+        """
+        stream_analytics koleksiyonundan, her user_token için bugünkü,
+        bu ayki ve toplam byte kullanımını hesaplar (Europe/Istanbul takvim
+        gün/ay sınırlarına göre). token.usage.daily/monthly/total_bytes
+        alanları arka planda asenkron bir tracker tarafından güncellenir ve
+        yoğun/paralel kısa stream'lerde veri kaybına açıktır; stream_analytics
+        ise her stream bittiğinde doğrudan ve güvenilir şekilde yazılır.
+        Döner: {user_token: {"daily_bytes": int, "monthly_bytes": int, "total_bytes": int}}
+        """
+        try:
+            col = self.dbs["tracking"]["stream_analytics"]
+
+            now_ist = datetime.now(_TZ_IST)
+            today_start_utc = (
+                now_ist.replace(hour=0, minute=0, second=0, microsecond=0)
+                .astimezone(timezone.utc)
+                .replace(tzinfo=None)
+            )
+            month_start_utc = (
+                now_ist.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+                .astimezone(timezone.utc)
+                .replace(tzinfo=None)
+            )
+
+            pipeline = [
+                {"$match": {"user_token": {"$ne": None, "$exists": True}}},
+                {"$group": {
+                    "_id":           "$user_token",
+                    "total_bytes":   {"$sum": "$total_bytes"},
+                    "monthly_bytes": {
+                        "$sum": {
+                            "$cond": [
+                                {"$gte": ["$logged_at", month_start_utc]},
+                                "$total_bytes",
+                                0,
+                            ]
+                        }
+                    },
+                    "daily_bytes": {
+                        "$sum": {
+                            "$cond": [
+                                {"$gte": ["$logged_at", today_start_utc]},
+                                "$total_bytes",
+                                0,
+                            ]
+                        }
+                    },
+                }},
+            ]
+            rows = await col.aggregate(pipeline).to_list(None)
+            return {
+                r["_id"]: {
+                    "daily_bytes":   r.get("daily_bytes", 0),
+                    "monthly_bytes": r.get("monthly_bytes", 0),
+                    "total_bytes":   r.get("total_bytes", 0),
+                }
+                for r in rows if r.get("_id")
+            }
+        except Exception as e:
+            LOGGER.warning(f"get_analytics_usage_by_token failed: {e}")
+            return {}
 
     async def get_stream_analytics(self, limit: int = 20) -> dict:
         """Return summary stats + recent stream records from the tracking DB."""
