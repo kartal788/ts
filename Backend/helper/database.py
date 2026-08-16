@@ -1961,6 +1961,7 @@ class Database:
                                         "certification_tr": tv_show.get("certification_tr"),
                                         "certification_de": tv_show.get("certification_de"),
                                         "certification_us": tv_show.get("certification_us"),
+                                        "runtime": tv_show.get("runtime"),
                                     })
                                     return details
             
