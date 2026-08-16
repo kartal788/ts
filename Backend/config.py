@@ -12,12 +12,8 @@ class Telegram:
     BASE_URL = getenv("BASE_URL", "").rstrip('/')
     PORT = int(getenv("PORT", "8001"))
 
-    # Stream chunk indirme davranışı (Backend.helper.custom_dl.prefetch_stream)
-    # Eski adlar (PARALLEL / PRE_FETCH) gerçek işlevleriyle ters düşüyordu;
-    # yeni adlar doğrudan ne yaptıklarını anlatıyor. Eski config.env'lerle
-    # geriye dönük uyumluluk için eski değişken adları fallback olarak okunuyor.
-    CONCURRENT_REQUESTS = int(getenv("CONCURRENT_REQUESTS", getenv("PRE_FETCH", "3")))
-    PREFETCH_QUEUE_DEPTH = int(getenv("PREFETCH_QUEUE_DEPTH", getenv("PARALLEL", "4")))
+    PARALLEL = int(getenv("PARALLEL", "4"))
+    PRE_FETCH = int(getenv("PRE_FETCH", "3"))
 
     AUTH_CHANNEL = [channel.strip() for channel in (getenv("AUTH_CHANNEL") or "").split(",") if channel.strip()]
     DATABASE = [db.strip() for db in (getenv("DATABASE") or "").split(",") if db.strip()]

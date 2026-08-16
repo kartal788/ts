@@ -20,17 +20,6 @@ async def get_system_stats_api():
         total_movies = sum(stat.get("movie_count", 0) for stat in db_stats)
         total_tv_shows = sum(stat.get("tv_count", 0) for stat in db_stats)
         api_tokens = await db.get_all_api_tokens()
-        # Kullanım verisi: stream_analytics'ten (güvenilir kaynak) alınır;
-        # token.usage.daily/monthly.bytes arka planda asenkron güncellendiği
-        # için yoğun/paralel kısa stream'lerde veri kaybına açıktır.
-        analytics_usage = await db.get_analytics_usage_by_token()
-        for tok in api_tokens:
-            tok_usage = analytics_usage.get(tok.get("token"))
-            if tok_usage:
-                tok.setdefault("usage", {})
-                tok["usage"]["daily"] = {**tok["usage"].get("daily", {}), "bytes": tok_usage["daily_bytes"]}
-                tok["usage"]["monthly"] = {**tok["usage"].get("monthly", {}), "bytes": tok_usage["monthly_bytes"]}
-                tok["usage"]["total_bytes"] = tok_usage["total_bytes"]
         
         return {
             "server_status": "running",

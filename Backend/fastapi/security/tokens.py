@@ -36,6 +36,7 @@ async def verify_token(token: str):
         raise HTTPException(status_code=401, detail="Invalid or expired API token")
 
     limits = token_data.get("limits", {})
+    usage  = token_data.get("usage", {})
 
     token_data["limit_exceeded"]       = None
     token_data["limit_video"]          = None
@@ -95,19 +96,10 @@ async def verify_token(token: str):
         token_data["limit_video"]    = _configure_url(token)
         return token_data
 
-    # --- Günlük / Aylık limit kontrolü ───────────────────────────────────
-    # Not: usage.daily/monthly.bytes yerine stream_analytics'ten (güvenilir
-    # kaynak) hesaplanan gerçek kullanım baz alınır — token.usage bucket'ları
-    # arka planda asenkron güncellenir ve yoğun/paralel kısa stream'lerde
-    # veri kaybına açıktır.
-    if limits.get("daily_limit_gb") or limits.get("monthly_limit_gb"):
-        analytics_usage = await db.get_analytics_usage_for_token(token)
-    else:
-        analytics_usage = None
-
+    # --- Günlük / Aylık limit kontrolü ---
     if daily_limit := limits.get("daily_limit_gb"):
         if daily_limit > 0:
-            current_daily_gb = analytics_usage["daily_bytes"] / (1024 ** 3)
+            current_daily_gb = usage.get("daily", {}).get("bytes", 0) / (1024 ** 3)
             if current_daily_gb >= daily_limit:
                 token_data["limit_exceeded"] = "daily"
                 token_data["limit_video"]    = _configure_url(token)
@@ -115,7 +107,7 @@ async def verify_token(token: str):
 
     if monthly_limit := limits.get("monthly_limit_gb"):
         if monthly_limit > 0:
-            current_monthly_gb = analytics_usage["monthly_bytes"] / (1024 ** 3)
+            current_monthly_gb = usage.get("monthly", {}).get("bytes", 0) / (1024 ** 3)
             if current_monthly_gb >= monthly_limit:
                 token_data["limit_exceeded"] = "monthly"
                 token_data["limit_video"]    = _configure_url(token)

@@ -15,9 +15,6 @@ pinger.py
    • Kullanım ≥ %100           → Üyeye "Günlük limit bitti" bir kez gönderilir.
      (DB'de daily_limit_finished = True olarak işaretlenir)
    • UTC+3 00:00'da her iki bayrak da False'a döner — hergün tekrar çalışır.
-   • Kullanım verisi stream_analytics'ten (güvenilir kaynak) hesaplanır —
-     token.usage.daily.bytes yerine, çünkü o alan arka planda asenkron
-     güncellenir ve yoğun/paralel kısa stream'lerde veri kaybına açıktır.
 
    Token'da user_id yoksa veya daily_limit_gb = 0 ise o token atlanır.
 """
@@ -138,13 +135,10 @@ async def _limit_monitor_loop() -> None:
             from Backend import db
 
             tokens = await db.get_all_api_tokens()
-            # Tek bir toplu sorguyla tüm token'ların analytics tabanlı
-            # kullanımını al — döngü başına 1 aggregation, N değil.
-            analytics_usage = await db.get_analytics_usage_by_token()
 
             for token_doc in tokens:
                 try:
-                    await _check_token(db, token_doc, analytics_usage)
+                    await _check_token(db, token_doc)
                 except Exception:
                     LOGGER.error(
                         f"[limit-monitor] Token kontrolü hatası ({token_doc.get('token', '?')[:8]}):\n"
@@ -155,7 +149,7 @@ async def _limit_monitor_loop() -> None:
             LOGGER.error("[limit-monitor] Döngü hatası:\n" + traceback.format_exc())
 
 
-async def _check_token(db, token_doc: dict, analytics_usage: dict) -> None:
+async def _check_token(db, token_doc: dict) -> None:
     """Tek bir token için limit kontrolü yapar ve gerekirse bildirim gönderir."""
 
     # ── Ön filtreler ─────────────────────────────────────────────────────────
@@ -173,15 +167,12 @@ async def _check_token(db, token_doc: dict, analytics_usage: dict) -> None:
         return
 
     # ── Günlük kullanımı oku ─────────────────────────────────────────────────
-    # Not: token.usage.daily.bytes yerine stream_analytics'ten (güvenilir
-    # kaynak) hesaplanan gerçek kullanım baz alınır — token.usage bucket'ları
-    # arka planda asenkron güncellenir ve yoğun/paralel kısa stream'lerde
-    # veri kaybına açıktır; bu da %80 uyarısının hiç gönderilmemesine yol açar.
-    token_str = token_doc.get("token", "")
-    daily_bytes: int = int(analytics_usage.get(token_str, {}).get("daily_bytes") or 0)
+    usage = token_doc.get("usage", {})
+    daily_bytes: int = int(usage.get("daily", {}).get("bytes") or 0)
     limit_bytes: float = daily_limit_gb * 1024 ** 3
 
     ratio = daily_bytes / limit_bytes if limit_bytes > 0 else 0.0
+    token_str = token_doc.get("token", "")
     name      = token_doc.get("name") or f"User {user_id}"
     used_str  = _format_bytes(daily_bytes)
     limit_str = _format_bytes(int(limit_bytes))

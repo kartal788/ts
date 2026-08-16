@@ -1,7 +1,6 @@
 import asyncio
 import time
 import secrets
-import random
 from collections import deque
 from typing import Dict, List, Union, Optional, Tuple
 import traceback
@@ -17,13 +16,7 @@ from Backend import db
 from Backend.pyrofork.bot import work_loads, multi_clients, client_dc_map, client_failures, client_avg_mbps
 
 ACTIVE_STREAMS: Dict[str, Dict] = {}
-# NOT: Bu tampon, biten stream'lerin son kaydını `track_usage_from_stats()`
-# tarafından okunana kadar tutar (bkz. stream_routes.py). Yoğun/paralel
-# (ör. video seek'lerinden kaynaklanan çok sayıda kısa stream) trafikte
-# maxlen küçük olursa kayıtlar okunmadan tampondan düşer ve o stream'in
-# byte'ları usage.daily/monthly/total_bytes'a hiç eklenmez ("Bugün" 0 B
-# görünür) — bu yüzden yeterince büyük tutuluyor.
-RECENT_STREAMS = deque(maxlen=500)
+RECENT_STREAMS = deque(maxlen=3)
 
 
 def get_adaptive_chunk_size(client_index: int) -> int:
@@ -228,18 +221,14 @@ class ByteStreamer:
                     use_session = media_session  # fallback: ilk session
                 use_client_idx = client_index
                 if tries >= 2 and len(multi_clients) > 1:
-                    # Pick the best *other* client by score = workload + 3×failures.
-                    # Eşit skorlu birden fazla client varsa (sık rastlanan durum),
-                    # min() her zaman aynı (en düşük index'li) client'ı seçer —
-                    # bunun yerine eşit skordakiler arasından rastgele seçilir.
+                    # Pick the best *other* client by score = workload + 3×failures
                     def _score(idx):
                         return work_loads.get(idx, 0) + 3 * client_failures.get(idx, 0)
-                    candidates = [i for i in multi_clients if i != client_index]
-                    fallback_idx = None
-                    if candidates:
-                        best_score = min(_score(i) for i in candidates)
-                        tied = [i for i in candidates if _score(i) == best_score]
-                        fallback_idx = random.choice(tied)
+                    fallback_idx = min(
+                        (i for i in multi_clients if i != client_index),
+                        key=_score,
+                        default=None,
+                    )
                     if fallback_idx is not None:
                         fb_streamer = ByteStreamer._instances.get(fallback_idx)
                         if fb_streamer is None:

@@ -545,7 +545,41 @@ def _hdr_badge(parsed: dict, filename: str) -> str:
     return ""
 
 
-def format_stream_details(filename: str, quality: str, size: str, file_id: str, certification: str = "", is_split: bool = False) -> tuple[str, str]:
+def parse_runtime_minutes(runtime_str: str) -> float:
+    """
+    "120 min", "120", "over 100 minutes" gibi TMDB kaynaklı süre string'lerinden
+    dakika değerini sayısal olarak çıkarır. Ayrıştırılamazsa 0 döner.
+    """
+    import re as _re_runtime
+    if not runtime_str:
+        return 0.0
+    m = _re_runtime.search(r'(\d+(?:[.,]\d+)?)', str(runtime_str))
+    if not m:
+        return 0.0
+    try:
+        return float(m.group(1).replace(",", "."))
+    except ValueError:
+        return 0.0
+
+
+def format_bitrate(size_str: str, runtime_str: str) -> str:
+    """
+    Dosya boyutunu TMDB'den alınan süreye bölerek ortalama bitrate'i hesaplar.
+    Boyut veya süre bilinmiyorsa/ayrıştırılamıyorsa boş string döner
+    (bu durumda stream detaylarına bitrate satırı eklenmez).
+    """
+    size_bytes = parse_size_to_bytes(size_str)
+    minutes = parse_runtime_minutes(runtime_str)
+    if size_bytes <= 0 or minutes <= 0:
+        return ""
+    seconds = minutes * 60
+    mbps = (size_bytes * 8) / seconds / 1_000_000
+    if mbps <= 0:
+        return ""
+    return f"{mbps:.1f} Mbps"
+
+
+def format_stream_details(filename: str, quality: str, size: str, file_id: str, certification: str = "", is_split: bool = False, runtime: str = "") -> tuple[str, str]:
     # Kaynak: Link mi Telegram mı?
     source_prefix = "Link" if file_id.startswith(("http://", "https://")) else Telegram.ISIM
 
@@ -679,6 +713,11 @@ def format_stream_details(filename: str, quality: str, size: str, file_id: str, 
         line4.append(f"💬 {sub_flags}")
     if year:
         line4.append(f"📅 {year}")
+    # Bayrak/sertifika/yıldan sonra: TMDB süresi biliniyorsa boyut/süre oranından bitrate ekle
+    if lang_flags or certification or year:
+        bitrate = format_bitrate(size, runtime)
+        if bitrate:
+            line4.append(f"⚡ {bitrate}")
     if extended:
         line4.append("✂️ Extended")
     if container:
@@ -2376,6 +2415,9 @@ async def get_streams(
 
     streams = []
 
+    # TMDB kaynaklı süre (bitrate hesaplaması için: boyut / süre)
+    media_runtime = media_details.get("runtime") or ""
+
     # Dile göre sertifikayı seç
     if lang == "de":
         cert = media_details.get("certification_de") or media_details.get("certification_us") or ""
@@ -2429,7 +2471,7 @@ async def get_streams(
             quality_str = quality.get("quality", "HD")
             size = quality.get("size", "")
             stream_name, stream_title = format_stream_details(
-                filename_clean, quality_str, size, _encoded_parts_id, certification=cert, is_split=True
+                filename_clean, quality_str, size, _encoded_parts_id, certification=cert, is_split=True, runtime=media_runtime
             )
             _safe_fn = __import__("urllib.parse", fromlist=["quote"]).quote(filename_clean or "video.mkv", safe=".-_")
             url = f"{_base_url}/dl/{token}/{_encoded_parts_id}/{_vtok}/{_safe_fn}"
@@ -2476,7 +2518,7 @@ async def get_streams(
             filename_for_display = filename
 
         stream_name, stream_title = format_stream_details(
-            filename_for_display, quality_str, size, file_id, certification=cert, is_split=_is_split
+            filename_for_display, quality_str, size, file_id, certification=cert, is_split=_is_split, runtime=media_runtime
         )
 
         if file_id.startswith(("http://", "https://")) and "/api/sunucu/indir" in file_id:

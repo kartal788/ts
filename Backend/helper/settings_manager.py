@@ -57,12 +57,11 @@ _DEFAULTS: Dict[str, Any] = {
     "brute_max": 5,
     "brute_ban": 1800,
     #----- Stream chunk indirme davranışı (Backend.helper.custom_dl.prefetch_stream)
-    #----- Eski adlar ("parallel" / "pre_fetch") gerçek işlevleriyle ters
-    #----- düşüyordu (bkz. git geçmişi); yeni adlar doğrudan ne yaptıklarını
-    #----- anlatıyor. Eski DB kayıtları SettingsManager.initialize() içindeki
-    #----- migrasyon adımıyla otomatik olarak bu yeni anahtarlara taşınır.
-    "concurrent_requests": 3,   # Telegram'a AYNI ANDA gönderilen chunk istek sayısı
-    "prefetch_queue_depth": 4,  # Önceden hazırlanıp bellekte bekletilen chunk sayısı (buffer derinliği)
+    #----- "parallel" -> Telegram.PARALLEL -> aslında prefetch KUYRUK derinliği
+    #----- "pre_fetch" -> Telegram.PRE_FETCH -> aslında Telegram'a giden EŞZAMANLI istek sayısı
+    #----- (İsimler config.env'deki eski adlandırmayla ters eşleşiyor, bkz. stream_routes.py)
+    "parallel": 4,
+    "pre_fetch": 3,
     #----- Brute-force korumasının X-Forwarded-For'a güvendiği proxy CIDR'ları.
     #----- Boş = header'a hiç güvenilmez (bkz. Backend.fastapi.security.brute_force).
     "trusted_proxy_cidrs": "",
@@ -121,34 +120,10 @@ _SETTINGS_TO_TELEGRAM_ATTR: Dict[str, str] = {
     "brute_window": "BRUTE_WINDOW",
     "brute_max": "BRUTE_MAX",
     "brute_ban": "BRUTE_BAN",
-    "concurrent_requests": "CONCURRENT_REQUESTS",
-    "prefetch_queue_depth": "PREFETCH_QUEUE_DEPTH",
+    "parallel": "PARALLEL",
+    "pre_fetch": "PRE_FETCH",
     "trusted_proxy_cidrs": "TRUSTED_PROXY_CIDRS",
 }
-
-
-#----- Eski "parallel"/"pre_fetch" DB kayıtlarını yeni, gerçek işlevi
-#----- yansıtan "prefetch_queue_depth"/"concurrent_requests" anahtarlarına
-#----- taşır. Eski isimler ters eşleşiyordu (bkz. yukarıdaki not); bu
-#----- fonksiyon var olan kullanıcı ayarlarını (özelleştirilmiş değerleri)
-#----- kaybetmeden yeni adlara devrettirir.
-def _migrate_legacy_keys(raw: Dict[str, Any]) -> tuple[Dict[str, Any], bool]:
-    raw = dict(raw)
-    changed = False
-
-    if "pre_fetch" in raw:
-        if "concurrent_requests" not in raw:
-            raw["concurrent_requests"] = raw["pre_fetch"]
-        del raw["pre_fetch"]
-        changed = True
-
-    if "parallel" in raw:
-        if "prefetch_queue_depth" not in raw:
-            raw["prefetch_queue_depth"] = raw["parallel"]
-        del raw["parallel"]
-        changed = True
-
-    return raw, changed
 
 
 #----- İlk açılışta config.env / ortam değişkenlerinden tohumlama
@@ -184,8 +159,8 @@ def _seed_from_env() -> Dict[str, Any]:
         "brute_window":         Telegram.BRUTE_WINDOW,
         "brute_max":            Telegram.BRUTE_MAX,
         "brute_ban":            Telegram.BRUTE_BAN,
-        "concurrent_requests":  Telegram.CONCURRENT_REQUESTS,
-        "prefetch_queue_depth": Telegram.PREFETCH_QUEUE_DEPTH,
+        "parallel":             Telegram.PARALLEL,
+        "pre_fetch":            Telegram.PRE_FETCH,
         "trusted_proxy_cidrs":  Telegram.TRUSTED_PROXY_CIDRS,
         "extra_databases":      list(Telegram.DATABASE[2:]) if len(Telegram.DATABASE) > 2 else [],
         "multi_tokens":         [],
@@ -259,17 +234,7 @@ class SettingsManager:
                 LOGGER.error(f"SettingsManager.initialize: DB kayıt hatası: {exc}")
             cls._current = Settings(seed)
         else:
-            migrated_raw, changed = _migrate_legacy_keys(raw)
-            cls._current = Settings(migrated_raw)
-            if changed:
-                try:
-                    await db.save_settings(cls._current.to_dict())
-                    LOGGER.info(
-                        "SettingsManager: eski 'parallel'/'pre_fetch' ayarları "
-                        "'prefetch_queue_depth'/'concurrent_requests' adlarına taşındı."
-                    )
-                except Exception as exc:
-                    LOGGER.error(f"SettingsManager.initialize: migrasyon kayıt hatası: {exc}")
+            cls._current = Settings(raw)
 
         #----- Yüklenen değerleri Telegram sınıfına uygula (mevcut kod tabanı bunları kullanıyor)
         cls._apply_to_telegram(cls._current.to_dict())
@@ -279,8 +244,7 @@ class SettingsManager:
     async def reload(cls, db) -> None:
         raw = await db.get_settings()
         if raw:
-            migrated_raw, _ = _migrate_legacy_keys(raw)
-            cls._current = Settings(migrated_raw)
+            cls._current = Settings(raw)
             cls._apply_to_telegram(cls._current.to_dict())
 
     @classmethod
