@@ -386,44 +386,8 @@
                             </div>
                         </div>
 
-                        <!-- Satır 1b: Telegram User ID -->
-                        <div class="flex flex-col md:flex-row gap-4 items-end">
-                            <div class="w-full md:w-60">
-                                <label class="block text-sm font-medium theme-text-secondary mb-1">📱 Telegram Kullanıcı ID</label>
-                                <input type="number" id="create-telegram-user-id" placeholder="Boş bırakılabilir"
-                                    class="w-full theme-card border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:border-primary text-sm">
-                            </div>
-                            <div class="flex-1">
-                                <p class="text-xs theme-text-secondary mt-1">
-                                    💡 Telegram ID girilirse bu eklenti belirtilen kullanıcıya bağlanır ve bot üzerinden erişim kontrolü yapılabilir.
-                                </p>
-                            </div>
-                        </div>
-
-                        <!-- Satır 2: Portal Bilgileri + Butonlar -->
-                        <div class="flex flex-col md:flex-row gap-4 items-end">
-                            <div class="w-full">
-                                <p class="text-xs theme-text-secondary mb-2">🌐 Üye Portal Giriş Bilgileri (isteğe bağlı)</p>
-                                <div class="flex flex-col md:flex-row gap-3">
-                                    <div class="flex-1">
-                                        <label class="block text-sm font-medium theme-text-secondary mb-1">👤 Kullanıcı Adı</label>
-                                        <input type="text" id="create-portal-username" placeholder="Boş bırakılabilir" autocomplete="off"
-                                            class="w-full theme-card border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:border-primary text-sm">
-                                    </div>
-                                    <div class="flex-1">
-                                        <label class="block text-sm font-medium theme-text-secondary mb-1">🔑 Şifre</label>
-                                        <div class="relative">
-                                            <input type="password" id="create-portal-password" placeholder="Boş bırakılabilir" autocomplete="new-password"
-                                                class="w-full theme-card border border-gray-300 rounded-lg px-4 py-3 pr-10 focus:outline-none focus:border-primary text-sm">
-                                            <button type="button" onclick="toggleCreatePass()" tabindex="-1"
-                                                class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-                                                <i class="fas fa-eye text-sm" id="create-pass-eye"></i>
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
+                        <!-- Satır 2: Butonlar -->
+                        <div class="flex flex-col md:flex-row gap-4 items-end justify-end">
                             <div class="flex gap-2 w-full md:w-auto flex-shrink-0">
                                 <button type="button" onclick="toggleCreateForm()"
                                     class="w-full md:w-auto bg-gray-200 text-gray-700 px-6 py-3 rounded-lg font-semibold hover:bg-gray-300 transition-colors duration-200">
@@ -638,30 +602,6 @@
                         </div>
                         <p class="text-xs theme-text-secondary mt-1">0 = sınırsız. /istek komutuyla ayda kaç içerik talep edebileceği.</p>
                     </div>
-                    <div>
-                        <label class="block text-sm font-medium theme-text-secondary mb-1">📱 Telegram Kullanıcı ID</label>
-                        <input type="number" id="edit-telegram-user-id" placeholder="Boş bırakılırsa değişmez"
-                            class="w-full theme-card border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:border-primary text-sm">
-                        <p class="text-xs theme-text-secondary mt-1">Bu eklentiyi belirtilen Telegram kullanıcısına bağlar.</p>
-                    </div>
-                    <hr class="border-gray-200">
-                    <p class="text-xs theme-text-secondary">🌐 Üye Portal Giriş Bilgileri (isteğe bağlı)</p>
-                    <div>
-                        <label class="block text-sm font-medium theme-text-secondary mb-1">👤 Kullanıcı Adı</label>
-                        <input type="text" id="edit-portal-username" placeholder="Boş bırakılırsa değişmez" autocomplete="off"
-                            class="w-full theme-card border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:border-primary text-sm">
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium theme-text-secondary mb-1">🔑 Şifre</label>
-                        <div class="relative">
-                            <input type="password" id="edit-portal-password" placeholder="Boş bırakılırsa değişmez" autocomplete="new-password"
-                                class="w-full theme-card border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:border-primary text-sm pr-10">
-                            <button type="button" onclick="toggleEditPass()" tabindex="-1"
-                                class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-                                <i class="fas fa-eye text-sm" id="edit-pass-eye"></i>
-                            </button>
-                        </div>
-                    </div>
                 </div>
 
                 <div class="mt-6 flex justify-end space-x-3">
@@ -700,10 +640,7 @@
         document.getElementById('edit-daily').value = daily == 'None' ? 0 : daily;
         document.getElementById('edit-monthly').value = monthly == 'None' ? 0 : monthly;
         document.getElementById('edit-speed').value = (speed == 'None' || speed == '0') ? '' : speed;
-        document.getElementById('edit-portal-username').value = portalUsername || '';
-        document.getElementById('edit-portal-password').value = portalPassword || '';
         document.getElementById('edit-validity-days').value = 1;
-        document.getElementById('edit-telegram-user-id').value = (telegramUserId && telegramUserId != 'None') ? telegramUserId : '';
         document.getElementById('edit-request-limit').value = (requestLimit && requestLimit != 'None') ? requestLimit : 0;
 
         document.getElementById('edit-modal').classList.remove('hidden');
@@ -714,39 +651,12 @@
         currentEditToken = null;
     }
 
-    function toggleEditPass() {
-        const inp = document.getElementById('edit-portal-password');
-        const eye = document.getElementById('edit-pass-eye');
-        if (inp.type === 'password') {
-            inp.type = 'text';
-            eye.className = 'fas fa-eye-slash text-sm';
-        } else {
-            inp.type = 'password';
-            eye.className = 'fas fa-eye text-sm';
-        }
-    }
-
-    function toggleCreatePass() {
-        const inp = document.getElementById('create-portal-password');
-        const eye = document.getElementById('create-pass-eye');
-        if (inp.type === 'password') {
-            inp.type = 'text';
-            eye.className = 'fas fa-eye-slash text-sm';
-        } else {
-            inp.type = 'password';
-            eye.className = 'fas fa-eye text-sm';
-        }
-    }
-
     async function saveTokenLimits() {
         if (!currentEditToken) return;
 
         const daily = document.getElementById('edit-daily').value;
         const monthly = document.getElementById('edit-monthly').value;
-        const portalUsername = document.getElementById('edit-portal-username').value;
-        const portalPassword = document.getElementById('edit-portal-password').value;
         const validityDays = document.getElementById('edit-validity-days').value;
-        const telegramUserId = document.getElementById('edit-telegram-user-id').value;
         const requestLimit = document.getElementById('edit-request-limit').value;
 
         try {
@@ -757,10 +667,7 @@
                     daily_limit_gb: daily,
                     monthly_limit_gb: monthly,
                     speed_limit_mbps: document.getElementById('edit-speed').value || 0,
-                    portal_username: portalUsername || null,
-                    portal_password: portalPassword || null,
                     validity_days: validityDays ? parseInt(validityDays) : 1,
-                    telegram_user_id: telegramUserId ? parseInt(telegramUserId) : null,
                     monthly_request_limit: requestLimit !== '' ? parseInt(requestLimit) : 0,
                 })
             });
@@ -994,7 +901,6 @@
         const dailyInput = document.getElementById('daily-limit');
         const monthlyInput = document.getElementById('monthly-limit');
         const validityDays = document.getElementById('validity-days').value;
-        const telegramUserId = document.getElementById('create-telegram-user-id').value;
 
         {% if subscription_mode %}
         if (!validityDays || parseInt(validityDays) < 1) {
@@ -1009,10 +915,7 @@
             daily_limit_gb: dailyInput.value,
             monthly_limit_gb: monthlyInput.value,
             speed_limit_mbps: document.getElementById('speed-limit').value || 0,
-            portal_username: document.getElementById('create-portal-username').value || null,
-            portal_password: document.getElementById('create-portal-password').value || null,
             validity_days: validityDays ? parseInt(validityDays) : null,
-            telegram_user_id: telegramUserId ? parseInt(telegramUserId) : null,
         };
 
         try {
@@ -1023,8 +926,6 @@
             });
 
             if (response.ok) {
-                document.getElementById('create-portal-username').value = '';
-                document.getElementById('create-portal-password').value = '';
                 showToast('Token başarıyla oluşturuldu!');
                 setTimeout(() => window.location.reload(), 1000);
             } else {
