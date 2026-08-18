@@ -1,7 +1,7 @@
 from pyrogram import Client, filters, enums
 from pyrogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from Backend.config import Telegram
-from Backend import db
+from Backend import db, __version__
 from datetime import datetime, timedelta
 import pathlib, re as _re
 
@@ -395,7 +395,7 @@ def _fmt_requests(val: int) -> str:
     return str(val)
 
 
-@Client.on_message(filters.command("abonelik"))
+@Client.on_message(filters.command("uyelik"))
 async def check_status(client: Client, message: Message):
     if not Telegram.SUBSCRIPTION:
         return
@@ -503,7 +503,7 @@ async def check_status(client: Client, message: Message):
     # ── Mesaj oluştur ───────────────────────────────────────────────────
     lines = [
         "━━━━━━━━━━━━━━━━━━━━━━━━━",
-        "        📋 <b>ABONELİK BİLGİLERİ</b>",
+        "        📋 <b>ÜYELİK BİLGİLERİ</b>",
         "━━━━━━━━━━━━━━━━━━━━━━━━━",
         "",
         "🗓 <b>Üyelik Dönemi</b>",
@@ -526,8 +526,9 @@ async def check_status(client: Client, message: Message):
         f"  ▫️ Kalan      : <b>{'Sınırsız ♾️' if req_remaining is None else req_remaining}</b>",
         "",
         "━━━━━━━━━━━━━━━━━━━━━━━━━",
-        "✅ <b>Aboneliğiniz aktif</b>",
+        "✅ <b>Üyeliğiniz aktif</b>",
         "━━━━━━━━━━━━━━━━━━━━━━━━━",
+        f"Versiyon: {__version__}",
     ]
 
     await message.reply_text(

@@ -167,18 +167,47 @@ LANG_LABELS_YEAR = {
     "en": "Year",
 }
 
-# ── Admin panelinden açılıp kapatılabilen hazır (built-in) kataloglar ─────────
+# ── Admin panelinden yönetilen TÜM hazır (built-in) kataloglar ────────────────
 # Sözlük anahtarı: manifest'teki lang-bağımsız temel katalog id'si (_base_id).
-# "tmdb_trending" ve "similar" film+dizi karışık olduğundan type=movie,
-# platform katalogları ise sadece dizi (mevcut davranışla aynı).
-TOGGLEABLE_BUILTIN_CATALOGS: dict = {
-    "tmdb_trending": {"label": "🔥 Trendler", "type": "movie"},
-    "similar":       {"label": "🎯 Sana Özel", "type": "movie"},
+# Sıra, manifest'te (get_manifest) kataloğun oluşturulduğu varsayılan sıra ile
+# AYNI olmalıdır — admin panelindeki varsayılan katalog sıralaması buradan gelir.
+# "toggleable=True" olanlar admin tarafından global olarak açılıp kapatılabilir;
+# diğerleri her zaman açıktır ve sadece sıralanabilir.
+ALL_BUILTIN_CATALOGS: dict = {
+    "similar":            {"label": "🎯 Sana Özel", "type": "movie", "toggleable": True},
+    "tmdb_trending":      {"label": "🔥 Trendler", "type": "movie", "toggleable": True},
+    "latest_movies":      {"label": "🎬 Yeni Eklenen Filmler", "type": "movie", "toggleable": False},
+    "top_movies":         {"label": "🎬 Popüler Filmler", "type": "movie", "toggleable": False},
+    "collcat":            {"label": "🎬 Seriler", "type": "movie", "toggleable": False},
+    "latest_series":      {"label": "📺 Yeni Eklenen Diziler", "type": "series", "toggleable": False},
+    "top_series":         {"label": "📺 Popüler Diziler", "type": "series", "toggleable": False},
     **{
-        f"platform_{key}": {"label": PLATFORM_LABELS[key], "type": "series"}
+        f"platform_{key}": {"label": PLATFORM_LABELS[key], "type": "series", "toggleable": True}
         for key in PLATFORM_LABELS
     },
+    "yearcatalog_movie":  {"label": "📅 Yıla Göre Filmler", "type": "movie", "toggleable": False},
+    "yearcatalog_series": {"label": "📅 Yıla Göre Diziler", "type": "series", "toggleable": False},
+    "yerli_movies":       {"label": "🇹🇷 Yerli Filmler", "type": "movie", "toggleable": False},
+    "yerli_series":       {"label": "🇹🇷 Yerli Diziler", "type": "series", "toggleable": False},
+    "live":               {"label": "📡 Canlı Yayın", "type": "channel", "toggleable": False},
 }
+
+# Geriye dönük uyumluluk: yalnızca global açıp/kapatılabilen kataloglar.
+TOGGLEABLE_BUILTIN_CATALOGS: dict = {
+    cat_id: {"label": info["label"], "type": info["type"]}
+    for cat_id, info in ALL_BUILTIN_CATALOGS.items()
+    if info["toggleable"]
+}
+
+
+def strip_catalog_lang_suffix(cat_id: str) -> str:
+    """Katalog id'sinden dil son ekini çıkarır (örn. 'similar_tr' -> 'similar',
+    'custom_507f_en' -> 'custom_507f'). Hem hazır hem özel kataloglar için
+    kullanılabilen, lang-bağımsız temel id'yi döndürür."""
+    for sfx in ("_tr", "_de", "_en", "_original"):
+        if cat_id.endswith(sfx):
+            return cat_id[:-len(sfx)]
+    return cat_id
 
 
 def format_released_date(media):
@@ -949,6 +978,7 @@ async def get_manifest(token: str, lang: str = "en", token_data: dict = Depends(
         # --- Admin: globalde kapatılmış hazır katalogları çıkar ---
         _global_settings = await _db_cat.get_catalog_global_settings()
         _globally_disabled = set(_global_settings.get("disabled", []))
+        _global_order = _global_settings.get("order", [])
 
         def _builtin_base_id(cat_id: str, cat_lang: str) -> str:
             suffix = f"_{cat_lang}"
@@ -973,25 +1003,39 @@ async def get_manifest(token: str, lang: str = "en", token_data: dict = Depends(
                 "extraSupported": ["skip"],
             })
 
+        # --- Admin: TÜM üyeler için geçerli varsayılan katalog sırasını uygula ---
+        # (Bir üye kendi Stremio ayarlar sayfasından kişisel bir sıra belirlerse,
+        # aşağıdaki adımda bu varsayılanın üzerine yazılır.)
+        if _global_order:
+            _order_map = {bid: idx for idx, bid in enumerate(_global_order)}
+            _default_start = len(_global_order)
+            _original_positions = {id(c): i for i, c in enumerate(all_catalogs)}
+            all_catalogs.sort(
+                key=lambda c: _order_map.get(
+                    strip_catalog_lang_suffix(c["id"]),
+                    _default_start + _original_positions[id(c)],
+                )
+            )
+
         # --- Kullanıcının gizlediği ve sıraladığı katalogları uygula ---
         cat_doc = await _db_cat.get_catalog_prefs_full(token)
         hidden = cat_doc.get("hidden_catalogs", []) if isinstance(cat_doc, dict) else (cat_doc or [])
         catalog_order = cat_doc.get("catalog_order", []) if isinstance(cat_doc, dict) else []
 
-        def _base_id(cat_id: str) -> str:
-            for sfx in ("_tr", "_de", "_en", "_original"):
-                if cat_id.endswith(sfx):
-                    return cat_id[:-len(sfx)]
-            return cat_id
-
         # Gizli katalogları çıkar
-        filtered = [c for c in all_catalogs if _base_id(c["id"]) not in hidden]
+        filtered = [c for c in all_catalogs if strip_catalog_lang_suffix(c["id"]) not in hidden]
 
-        # Kullanıcının özel sırasını uygula (varsa)
+        # Kullanıcının özel sırasını uygula (varsa) — admin varsayılanının önüne geçer
         if catalog_order:
             order_map = {base_id: idx for idx, base_id in enumerate(catalog_order)}
             default_start = len(catalog_order)
-            filtered.sort(key=lambda c: order_map.get(_base_id(c["id"]), default_start + all_catalogs.index(c)))
+            _original_positions = {id(c): i for i, c in enumerate(filtered)}
+            filtered.sort(
+                key=lambda c: order_map.get(
+                    strip_catalog_lang_suffix(c["id"]),
+                    default_start + _original_positions[id(c)],
+                )
+            )
 
         catalogs = filtered
 
@@ -2833,11 +2877,14 @@ admin_catalog_router = APIRouter(prefix="/api/admin/catalogs", tags=["Admin - Ka
 
 @admin_catalog_router.get("")
 async def admin_list_catalogs(_: bool = Depends(require_auth)):
-    """Hazır (built-in) katalogların açık/kapalı durumu + tüm özel katalogları döndürür."""
+    """Hazır (built-in) katalogların açık/kapalı durumu + tüm özel katalogları,
+    ayrıca tüm üyeler için geçerli varsayılan sırasıyla birleştirilmiş tam
+    katalog listesini döndürür."""
     from Backend import db as _db
 
     global_settings = await _db.get_catalog_global_settings()
     disabled = set(global_settings.get("disabled", []))
+    saved_order = global_settings.get("order", [])
 
     builtin = [
         {
@@ -2863,7 +2910,40 @@ async def admin_list_catalogs(_: bool = Depends(require_auth)):
         for c in custom_raw
     ]
 
-    return {"builtin": builtin, "custom": custom}
+    # --- Sıralama sayfası için: TÜM kataloglar (hazır + özel), tek liste ---
+    _type_label = {"movie": "Film", "series": "Dizi", "channel": "Kanal"}
+    all_items = [
+        {
+            "id": cat_id,
+            "label": info["label"],
+            "type": info["type"],
+            "type_label": _type_label.get(info["type"], info["type"]),
+            "kind": "builtin",
+            "enabled": (cat_id not in disabled) if info["toggleable"] else True,
+            "toggleable": info["toggleable"],
+        }
+        for cat_id, info in ALL_BUILTIN_CATALOGS.items()
+    ]
+    all_items += [
+        {
+            "id": f"custom_{c['_id']}",
+            "label": c.get("name", "Katalog"),
+            "type": "series" if c.get("media_type") == "series" else "movie",
+            "type_label": "Özel Katalog",
+            "kind": "custom",
+            "enabled": c.get("active", True),
+            "toggleable": False,
+        }
+        for c in custom_raw
+    ]
+
+    if saved_order:
+        order_map = {bid: idx for idx, bid in enumerate(saved_order)}
+        default_start = len(saved_order)
+        _original_positions = {id(it): i for i, it in enumerate(all_items)}
+        all_items.sort(key=lambda it: order_map.get(it["id"], default_start + _original_positions[id(it)]))
+
+    return {"builtin": builtin, "custom": custom, "all": all_items}
 
 
 @admin_catalog_router.post("/builtin/toggle")
@@ -2879,6 +2959,27 @@ async def admin_toggle_builtin_catalog(payload: dict, _: bool = Depends(require_
 
     await _db.set_builtin_catalog_enabled(catalog_id, enabled)
     return {"ok": True, "catalog_id": catalog_id, "enabled": enabled}
+
+
+@admin_catalog_router.put("/order")
+async def admin_save_catalog_order(payload: dict, _: bool = Depends(require_auth)):
+    """Admin panelinden sürükle-bırak ile belirlenen, TÜM üyeler için geçerli
+    olacak varsayılan katalog sırasını kaydeder."""
+    from Backend import db as _db
+
+    order = payload.get("order")
+    if not isinstance(order, list) or not all(isinstance(x, str) for x in order):
+        raise HTTPException(status_code=400, detail="Geçersiz sıra listesi")
+
+    # Geçerli id'ler: hazır kataloglar + var olan özel kataloglar
+    valid_ids = set(ALL_BUILTIN_CATALOGS.keys())
+    custom_raw = await _db.get_custom_catalogs(active_only=False)
+    valid_ids |= {f"custom_{c['_id']}" for c in custom_raw}
+
+    order = [cat_id for cat_id in order if cat_id in valid_ids]
+
+    await _db.save_catalog_global_order(order)
+    return {"ok": True, "order": order}
 
 
 @admin_catalog_router.get("/media-search")

@@ -1066,24 +1066,32 @@ async def member_profile_api(request: Request):
         expiry_raw  = live_user.get("subscription_expiry")
 
     def _fmt_dt(v):
+        """Verilen datetime'ı Europe/Istanbul saatine çevirip formatlar."""
         if not v:
             return None
-        if isinstance(v, datetime):
-            return v.strftime("%d.%m.%Y %H:%M")
-        try:
-            return datetime.fromisoformat(str(v).replace("Z", "+00:00")).strftime("%d.%m.%Y %H:%M")
-        except Exception:
-            return str(v)
+        dt = v
+        if not isinstance(dt, datetime):
+            try:
+                dt = datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+            except Exception:
+                return str(v)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(_TZ).strftime("%d.%m.%Y %H:%M")
 
     def _fmt_date_only(v):
+        """Verilen datetime'ı Europe/Istanbul saatine çevirip sadece tarih olarak formatlar."""
         if not v:
             return None
-        if isinstance(v, datetime):
-            return v.strftime("%d.%m.%Y")
-        try:
-            return datetime.fromisoformat(str(v).replace("Z", "+00:00")).strftime("%d.%m.%Y")
-        except Exception:
-            return str(v)
+        dt = v
+        if not isinstance(dt, datetime):
+            try:
+                dt = datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+            except Exception:
+                return str(v)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(_TZ).strftime("%d.%m.%Y")
 
     # Kalan gün hesapla
     if expiry_raw:
@@ -1303,7 +1311,7 @@ async def member_hatirlatmalar_page(request: Request):
     except Exception:
         pass
 
-    return templates.TemplateResponse("hatırlatmalar.html", {
+    return templates.TemplateResponse("hatirlatmalar.html", {
         "request":          request,
         "theme":            theme,
         "current_theme":    theme_name,
@@ -1314,3 +1322,92 @@ async def member_hatirlatmalar_page(request: Request):
         "lang":             lang,
         "subscription_end": subscription_end_str,
     })
+
+
+# ── Sayfa: Bilgilerim ──────────────────────────────────────────────────────────
+
+async def member_bilgiler_page(request: Request):
+    """Üyenin kendi üyelik/kullanım bilgilerini ve izleme geçmişini gösteren sayfa."""
+    member = _get_member(request)
+    if not member:
+        return RedirectResponse(url="/uye/giris", status_code=302)
+
+    if member.get("is_admin"):
+        request.session.pop("member", None)
+        return RedirectResponse(url="/uye/giris", status_code=302)
+
+    if not await _check_subscription(member["user_id"]):
+        request.session.pop("member", None)
+        return RedirectResponse(url="/uye/giris?expired=1", status_code=302)
+
+    theme_name = request.session.get("theme", "purple_gradient")
+    theme = get_theme(theme_name)
+    lang  = request.query_params.get("lang", member.get("lang", "tr"))
+
+    return templates.TemplateResponse("bilgiler.html", {
+        "request":       request,
+        "theme":         theme,
+        "current_theme": theme_name,
+        "app_name":      Telegram.ISIM,
+        "member":        member,
+        "member_name":   member.get("name", ""),
+        "lang":          lang,
+    })
+
+
+# ── API: Üyenin kendi izleme geçmişi ───────────────────────────────────────────
+
+async def member_watch_history_api(request: Request):
+    """Oturumdaki üyenin kendi stream/izleme geçmişini döner (en yeni önce, en fazla 300 kayıt)."""
+    member = _get_member(request)
+    if not member:
+        raise HTTPException(status_code=401)
+    if not _check_website_access(member):
+        raise HTTPException(status_code=403)
+
+    uid = int(member["user_id"])
+
+    try:
+        all_tokens = await db.get_all_api_tokens()
+        token_doc  = next((t for t in all_tokens if t.get("user_id") == uid), None)
+        user_token = token_doc.get("token") if token_doc else None
+
+        if not user_token:
+            return {"status": "success", "history": []}
+
+        from pymongo import DESCENDING
+        col = db.dbs["tracking"]["stream_analytics"]
+        cursor = col.find(
+            {"user_token": user_token},
+            {
+                "_id":          0,
+                "title":        1,
+                "imdb_id":      1,
+                "total_bytes":  1,
+                "duration_sec": 1,
+                "avg_mbps":     1,
+                "logged_at":    1,
+            }
+        ).sort("logged_at", DESCENDING).limit(300)
+        raw = await cursor.to_list(None)
+
+        history = []
+        for r in raw:
+            logged = r.get("logged_at")
+            if isinstance(logged, datetime):
+                if logged.tzinfo is None:
+                    logged = logged.replace(tzinfo=timezone.utc)
+                logged = logged.isoformat()
+            history.append({
+                "title":        r.get("title") or "—",
+                "imdb_id":      r.get("imdb_id"),
+                "total_bytes":  r.get("total_bytes", 0),
+                "duration_sec": r.get("duration_sec", 0),
+                "avg_mbps":     round(r.get("avg_mbps", 0) or 0, 3),
+                "logged_at":    logged,
+            })
+
+        return {"status": "success", "history": history}
+    except Exception:
+        _logger.error("Internal error", exc_info=True)
+        raise HTTPException(status_code=500, detail="Sunucu hatası")

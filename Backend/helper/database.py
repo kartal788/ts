@@ -2532,12 +2532,25 @@ class Database:
     # ─── Katalog Yönetimi (Admin: platform/trend/öneri açıp-kapama + özel katalog CRUD) ──
 
     async def get_catalog_global_settings(self) -> dict:
-        """Global olarak kapatılmış (disabled) hazır katalog ID'lerini döndürür.
-        Örn: ['tmdb_trending', 'similar', 'platform_netflix']"""
+        """Global olarak kapatılmış (disabled) hazır katalog ID'lerini ve admin'in
+        belirlediği varsayılan katalog sırasını (order) döndürür.
+        Örn: {'disabled': ['tmdb_trending'], 'order': ['similar', 'tmdb_trending', ...]}"""
         doc = await self.dbs["tracking"]["catalog_settings"].find_one({"_id": "global"})
         if not doc:
-            return {"disabled": []}
-        return {"disabled": doc.get("disabled", [])}
+            return {"disabled": [], "order": []}
+        return {"disabled": doc.get("disabled", []), "order": doc.get("order", [])}
+
+    async def save_catalog_global_order(self, order: list) -> bool:
+        """Admin panelinden belirlenen, TÜM üyeler için geçerli olacak varsayılan
+        katalog sırasını kaydeder. Bir üye kendi Stremio ayarlar sayfasından
+        kendi sırasını belirlerse, bu üye için o kişisel sıra bu varsayılanın
+        önüne geçer."""
+        result = await self.dbs["tracking"]["catalog_settings"].update_one(
+            {"_id": "global"},
+            {"$set": {"order": order}},
+            upsert=True,
+        )
+        return bool(result.acknowledged)
 
     async def set_builtin_catalog_enabled(self, catalog_id: str, enabled: bool) -> bool:
         """Hazır (built-in) bir kataloğu global olarak açar/kapatır."""

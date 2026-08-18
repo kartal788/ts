@@ -21,6 +21,34 @@
         </div>
     </div>
 
+    <!-- Katalog Sıralaması -->
+    <div class="mb-10">
+        <div class="flex items-center justify-between mb-4 gap-3 flex-wrap">
+            <div>
+                <h2 class="text-xl font-semibold text-text">Katalog Sıralaması</h2>
+                <p class="text-sm theme-text-secondary mt-1">Üyelerin Stremio eklentisinde göreceği varsayılan katalog sırasını buradan sürükleyip bırakarak belirleyin. Bir üye kendi Stremio ayarlar sayfasından kişisel bir sıra belirlerse, o kişi için burada belirlediğiniz varsayılan sıranın yerine kendi sırası kullanılır.</p>
+            </div>
+            <div class="flex flex-col items-end gap-1 shrink-0">
+                <button onclick="saveCatalogOrder()"
+                    class="bg-primary hover:opacity-90 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors shadow-sm flex items-center gap-2 shrink-0">
+                    <i class="fas fa-save"></i> Sırayı Kaydet
+                </button>
+                <p id="order-save-msg" class="text-xs"></p>
+            </div>
+        </div>
+
+        <div id="order-list" class="space-y-2 max-h-[28rem] overflow-y-auto pr-1">
+            <div class="theme-card border rounded-xl p-6 text-center theme-text-secondary text-sm">
+                <i class="fas fa-spinner fa-spin mr-2"></i> Yükleniyor...
+            </div>
+        </div>
+    </div>
+
+    <!-- Not: Kaydedilen sıra Stremio uygulamanızda hemen görünmeyebilir; Stremio
+         eklenti manifestini önbelleğe alır. Değişikliği görmek için eklentiyi
+         Stremio'da kaldırıp "configure" linkinden tekrar ekleyin ya da
+         Stremio'yu yeniden başlatın. -->
+
     <!-- Özel Kataloglar -->
     <div>
         <div class="flex items-center justify-between mb-4">
@@ -141,11 +169,89 @@
             const data = await res.json();
             renderBuiltin(data.builtin || []);
             renderCustom(data.custom || []);
+            renderOrderList(data.all || []);
         } catch (err) {
             document.getElementById('builtin-grid').innerHTML =
                 '<div class="theme-card border rounded-xl p-5 text-center text-red-500 text-sm col-span-full">Katalog bilgileri yüklenemedi.</div>';
             document.getElementById('custom-list').innerHTML =
                 '<div class="theme-card border rounded-xl p-6 text-center text-red-500 text-sm">Katalog bilgileri yüklenemedi.</div>';
+            document.getElementById('order-list').innerHTML =
+                '<div class="theme-card border rounded-xl p-6 text-center text-red-500 text-sm">Katalog bilgileri yüklenemedi.</div>';
+        }
+    }
+
+    // ── Katalog Sıralaması ───────────────────────────────────────────────
+    function renderOrderList(list) {
+        const wrap = document.getElementById('order-list');
+        if (!list.length) {
+            wrap.innerHTML = '<div class="theme-card border rounded-xl p-6 text-center theme-text-secondary text-sm">Sıralanacak katalog bulunamadı.</div>';
+            return;
+        }
+        wrap.innerHTML = list.map(it => `
+            <div class="order-item theme-card border rounded-lg px-3 py-2.5 flex items-center gap-3 ${it.enabled ? '' : 'opacity-50'}"
+                draggable="true" data-id="${escapeAttr(it.id)}">
+                <span class="drag-handle theme-text-secondary cursor-grab select-none" title="Sürükle">⠿</span>
+                <span class="text-sm font-medium text-text flex-1 truncate">${escapeHtml(it.label)}</span>
+                ${it.kind === 'custom' ? '<span class="text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary shrink-0">Özel</span>' : ''}
+                <span class="text-xs px-2 py-0.5 rounded-full bg-white/5 theme-text-secondary shrink-0">${escapeHtml(it.type_label)}</span>
+                ${it.enabled ? '' : '<span class="text-xs px-2 py-0.5 rounded-full bg-gray-500/10 theme-text-secondary shrink-0">Kapalı</span>'}
+            </div>
+        `).join('');
+        _initOrderDrag(wrap);
+    }
+
+    function _initOrderDrag(list) {
+        let dragSrc = null;
+        list.querySelectorAll('.order-item').forEach(item => {
+            item.addEventListener('dragstart', () => {
+                dragSrc = item;
+                item.classList.add('opacity-30');
+            });
+            item.addEventListener('dragend', () => {
+                item.classList.remove('opacity-30');
+                list.querySelectorAll('.order-item').forEach(i => i.classList.remove('ring-2', 'ring-primary'));
+                dragSrc = null;
+            });
+        });
+        list.addEventListener('dragover', e => {
+            e.preventDefault();
+            const target = e.target.closest('.order-item');
+            if (!target || target === dragSrc) return;
+            list.querySelectorAll('.order-item').forEach(i => i.classList.remove('ring-2', 'ring-primary'));
+            target.classList.add('ring-2', 'ring-primary');
+        });
+        list.addEventListener('drop', e => {
+            e.preventDefault();
+            const target = e.target.closest('.order-item');
+            if (!target || !dragSrc || target === dragSrc) return;
+            target.classList.remove('ring-2', 'ring-primary');
+            const items = [...list.querySelectorAll('.order-item')];
+            const srcIdx = items.indexOf(dragSrc);
+            const tgtIdx = items.indexOf(target);
+            if (srcIdx < tgtIdx) {
+                list.insertBefore(dragSrc, target.nextSibling);
+            } else {
+                list.insertBefore(dragSrc, target);
+            }
+        });
+    }
+
+    async function saveCatalogOrder() {
+        const msg = document.getElementById('order-save-msg');
+        const order = [...document.querySelectorAll('#order-list .order-item')].map(el => el.dataset.id);
+        msg.textContent = '';
+        try {
+            const res = await fetch('/api/admin/catalogs/order', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ order })
+            });
+            if (!res.ok) throw new Error();
+            msg.className = 'text-xs mt-2 text-green-500';
+            msg.textContent = 'Katalog sırası kaydedildi.';
+        } catch (err) {
+            msg.className = 'text-xs mt-2 text-red-500';
+            msg.textContent = 'Sıra kaydedilemedi.';
         }
     }
 

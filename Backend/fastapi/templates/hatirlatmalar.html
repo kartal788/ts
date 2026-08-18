@@ -164,11 +164,12 @@
       </div>
 
       <!-- Kullanıcı adı — tıklanabilir -->
-      <button onclick="openProfileModal()"
-              class="flex items-center gap-1 text-xs ts cursor-pointer hover:opacity-80 transition bg-transparent border-0 p-0">
+      <a href="/uye/bilgiler"
+         class="flex items-center gap-1 text-xs ts cursor-pointer hover:opacity-80 transition bg-transparent border-0 p-0"
+         style="text-decoration:none">
         <i class="fas fa-user-circle" style="font-size:1rem;color:var(--c-prim)"></i>
         <span class="max-w-[80px] truncate" style="color:var(--c-text)">{{ member_name }}</span>
-      </button>
+      </a>
 
       <!-- Dil seçici — PC (bayrak yok) -->
       <select onchange="changeLang(this.value)"

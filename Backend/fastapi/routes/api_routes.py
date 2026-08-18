@@ -296,7 +296,7 @@ async def create_token_api(payload: dict):
         )
 
         # Telegram ID girilmişse kullanıcıya abonelik kaydı oluştur/güncelle.
-        # Bu sayede kullanıcı /abonelik komutunu çalıştırdığında aktif görünür.
+        # Bu sayede kullanıcı /uyelik komutunu çalıştırdığında aktif görünür.
         if telegram_user_id:
             try:
                 tg_id = int(telegram_user_id)

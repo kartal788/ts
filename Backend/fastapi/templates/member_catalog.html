@@ -234,12 +234,12 @@
       </a>
 
       <!-- Kullanici ikonu + isim — her ekranda gorunur -->
-      <button onclick="openProfileModal()"
-              class="flex items-center gap-1 hover:opacity-80 transition cursor-pointer text-xs ts"
-              style="background:none;border:none;padding:0">
+      <a href="/uye/bilgiler"
+         class="flex items-center gap-1 hover:opacity-80 transition cursor-pointer text-xs ts"
+         style="background:none;border:none;padding:0;text-decoration:none">
         <i class="fas fa-user-circle" style="font-size:1rem;color:var(--c-prim)"></i>
         <span class="max-w-[60px] truncate" style="color:var(--c-text)">{{ member_name }}</span>
-      </button>
+      </a>
 
       <!-- Baglanti konumu bayragi — sadece md+ -->
       {% if country_flag %}
