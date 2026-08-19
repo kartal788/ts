@@ -1,7 +1,8 @@
 import asyncio
 import logging
 import json
-from fastapi import Request, Query, HTTPException
+import pathlib
+from fastapi import Request, Query, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse, JSONResponse
 from Backend import db, StartTime, __version__
 from Backend.helper.pyro import get_readable_time
@@ -1287,6 +1288,119 @@ async def invalidate_admin_sessions_api():
     except Exception as e:
         _logger.error("invalidate_admin_sessions_api hatası", exc_info=True)
         raise HTTPException(status_code=500, detail="Oturumlar sonlandırılamadı")
+
+
+# --- API Routes: Ayarlar (Settings) — Dosya Ekle (rclone.conf / gdrive_token.pickle) ---
+# NOT: /ayarlar Telegram komutundaki dosya yükleme mantığıyla aynı dosya yollarını
+# ve MongoDB kalıcılık şemasını (bot_files koleksiyonu) kullanır; bkz.
+# Backend/pyrofork/plugins/ayarlar.py ve Backend/__main__.py:_restore_persistent_files
+
+_PROJECT_ROOT       = pathlib.Path(__file__).resolve().parent.parent.parent.parent
+_GDRIVE_TOKEN_PATH  = _PROJECT_ROOT / "gdrive_token.pickle"
+_RCLONE_CONF_PATH   = _PROJECT_ROOT / "rclone.conf"
+
+_SETTINGS_FILE_TYPES = {
+    "gdrive_pickle": {"path": _GDRIVE_TOKEN_PATH, "label": "gdrive_token.pickle", "mongo_id": "gdrive_pickle"},
+    "rclone_conf":   {"path": _RCLONE_CONF_PATH,  "label": "rclone.conf",         "mongo_id": "rclone_conf"},
+}
+
+
+def _rclone_remotes_list() -> list:
+    if not _RCLONE_CONF_PATH.exists():
+        return []
+    try:
+        import configparser
+        rcp = configparser.ConfigParser()
+        rcp.read(str(_RCLONE_CONF_PATH))
+        return rcp.sections()
+    except Exception:
+        return []
+
+
+async def get_settings_files_api():
+    """Panelde 'Dosya Ekle' bölümü için mevcut dosya durumlarını döner."""
+    return {
+        "success": True,
+        "files": {
+            "gdrive_pickle": {
+                "exists": _GDRIVE_TOKEN_PATH.exists(),
+                "file_name": "gdrive_token.pickle",
+            },
+            "rclone_conf": {
+                "exists": _RCLONE_CONF_PATH.exists(),
+                "file_name": "rclone.conf",
+                "remotes": _rclone_remotes_list(),
+            },
+        },
+    }
+
+
+async def upload_settings_file_api(file_type: str, file: UploadFile):
+    """token.pickle / rclone.conf dosyasını panelden yükler; diske ve
+    MongoDB'ye (bot_files) kaydeder — Telegram komutundaki davranışın aynısı."""
+    info = _SETTINGS_FILE_TYPES.get(file_type)
+    if not info:
+        raise HTTPException(status_code=400, detail="Geçersiz dosya türü")
+
+    fname = (file.filename or "").lower()
+
+    if file_type == "gdrive_pickle":
+        if ".pickle" not in fname:
+            raise HTTPException(status_code=400, detail=f"Yalnızca .pickle uzantılı dosya kabul edilir. Gelen dosya adı: {file.filename}")
+    elif file_type == "rclone_conf":
+        if not (fname == "rclone.conf" or fname.endswith(".conf") or "rclone" in fname):
+            raise HTTPException(status_code=400, detail=f"Yalnızca rclone.conf dosyası kabul edilir. Gelen dosya adı: {file.filename}")
+
+    try:
+        data = await file.read()
+    except Exception as e:
+        _logger.error("upload_settings_file_api okuma hatası", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Dosya okunamadı: {e}")
+
+    if not data:
+        raise HTTPException(status_code=400, detail="Dosya boş.")
+
+    try:
+        info["path"].write_bytes(data)
+    except Exception as e:
+        _logger.error("upload_settings_file_api yazma hatası", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Dosya kaydedilemedi: {e}")
+
+    try:
+        await db.dbs["tracking"]["bot_files"].update_one(
+            {"_id": info["mongo_id"]},
+            {"$set": {"data": data, "file_name": info["label"]}},
+            upsert=True,
+        )
+    except Exception as _e:
+        _logger.warning(f"[settings] {info['label']} MongoDB kaydı başarısız: {_e}")
+
+    return {
+        "success": True,
+        "message": f"{info['label']} kaydedildi.",
+        "remotes": _rclone_remotes_list() if file_type == "rclone_conf" else None,
+    }
+
+
+async def delete_settings_file_api(file_type: str):
+    """token.pickle / rclone.conf dosyasını panelden diskten ve MongoDB'den siler."""
+    info = _SETTINGS_FILE_TYPES.get(file_type)
+    if not info:
+        raise HTTPException(status_code=400, detail="Geçersiz dosya türü")
+
+    try:
+        if info["path"].exists():
+            info["path"].unlink()
+    except Exception as e:
+        _logger.error("delete_settings_file_api silme hatası", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Dosya silinemedi: {e}")
+
+    try:
+        await db.dbs["tracking"]["bot_files"].delete_one({"_id": info["mongo_id"]})
+    except Exception as _e:
+        _logger.warning(f"[settings] {info['label']} MongoDB kaydı silinemedi: {_e}")
+
+    return {"success": True, "message": f"{info['label']} silindi."}
 
 
 # ----- ── Sistem & Bakım (Ayarlar sayfası: Veritabanı & Sistem İstatistikleri + Loglar) ──

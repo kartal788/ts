@@ -294,6 +294,24 @@ async def _send_with_flood_retry(chat, thread_id, posters, caption, markup, disp
             await asyncio.sleep(wait_seconds)
 
 
+#----- Duyuru mesajındaki "Stremio'da Aç" / "Nuvio'da Aç" butonlarını oluşturur.
+#----- Buradaki alan adı, projenin gerçek BASE_URL'inden BAĞIMSIZ olarak
+#----- ayarlar sayfasındaki "Yönlendirme Alan Adı" (redirect_base_url) alanından
+#----- okunur (ör. bir Cloudflare Workers alt alan adı: https://a.arsiv.workers.dev).
+#----- Böylece duyuru butonlarında projenin gerçek sunucu adresi ifşa olmaz.
+#----- imdb_id yoksa veya alan adı ayarlanmamışsa buton eklenmez.
+def _build_open_buttons(info: dict, settings) -> list:
+    redirect_base = str(getattr(settings, "redirect_base_url", "") or "").strip().rstrip("/")
+    imdb_id = str(info.get("imdb_id") or "").strip()
+    if not redirect_base or not imdb_id:
+        return []
+    stremio_type = "series" if info.get("media_type") == "tv" else "movie"
+    return [
+        InlineKeyboardButton("▶️ Stremio'da Aç", url=f"{redirect_base}/open/stremio/{stremio_type}/{imdb_id}"),
+        InlineKeyboardButton("📱 Nuvio'da Aç", url=f"{redirect_base}/open/nuvio/{stremio_type}/{imdb_id}"),
+    ]
+
+
 async def _announce(info: dict) -> None:
     settings = SettingsManager.current()
     if not settings.announce_new_content:
@@ -337,12 +355,19 @@ async def _announce(info: dict) -> None:
     display_title = info.get("title_tr") or info.get("title")
 
     markup = None
+    rows = []
+
+    open_buttons = _build_open_buttons(info, settings)
+    if open_buttons:
+        rows.append(open_buttons)
+
     bot_username = getattr(StreamBot, "username", None)
     if bot_username:
         app_name = (getattr(settings, "isim", "") or "").strip() or "Bot"
-        markup = InlineKeyboardMarkup([[
-            InlineKeyboardButton(f"▶️ {app_name} ile izle", url=f"https://t.me/{bot_username}")
-        ]])
+        rows.append([InlineKeyboardButton(f"🤖 {app_name}'e üye ol", url=f"https://t.me/{bot_username}")])
+
+    if rows:
+        markup = InlineKeyboardMarkup(rows)
 
     try:
         await _send_with_flood_retry(chat, thread_id, posters, caption, markup, display_title)

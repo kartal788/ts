@@ -1446,6 +1446,8 @@ async def media_streamer(
         parallelism=parallelism,
         request=request,
         rate_limit_mbps=per_stream_rate,
+        chat_id=chat_id,
+        message_id=msg_id,
     )
 
     # Yeni stream ACTIVE_STREAMS'e eklendi; mevcut diğer kullanıcı stream'lerini dengele.

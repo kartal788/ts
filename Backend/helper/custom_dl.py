@@ -6,7 +6,7 @@ from typing import Dict, List, Union, Optional, Tuple
 import traceback
 from fastapi import Request
 from pyrogram import Client, raw, utils
-from pyrogram.errors import AuthBytesInvalid, FloodWait
+from pyrogram.errors import AuthBytesInvalid, FileReferenceExpired, FloodWait
 from pyrogram.file_id import FileId, FileType, ThumbnailSource
 from pyrogram.session import Session, Auth
 from Backend.logger import LOGGER
@@ -104,7 +104,9 @@ class ByteStreamer:
                 LOGGER.debug(f"Pre-warmed media session for DC {dc}")
                 
             except Exception as e:
-                LOGGER.debug(f"Could not pre-warm DC {dc}: {e}")
+                #----- DC için ısıtma oturumu tamamen kurulamadı — kalıcı bir
+                #----- TG bağlantı sorununa işaret edebilir, bu yüzden görünür.
+                LOGGER.warning(f"[tg bağlantı sorunu] DC {dc} için oturum ısıtılamadı: {e}")
                 continue
 
     async def _refresh_sessions_periodically(self):
@@ -164,6 +166,8 @@ class ByteStreamer:
         parallelism: int = 2,
         request: Optional[Request] = None,
         rate_limit_mbps: float = 0.0,   # Mbit/s, 0 = sınırsız
+        chat_id: Optional[int] = None,
+        message_id: Optional[int] = None,
     ):
         if not stream_id:
             stream_id = secrets.token_hex(8)
@@ -200,6 +204,44 @@ class ByteStreamer:
 
         media_session = await self._get_media_session(file_id)
         location = await self._get_location(file_id)
+
+        #----- Telegram'ın file_reference'ı bir süre sonra (genelde ~1 saat)
+        #----- geçersiz olur ve GetFile isteği FileReferenceExpired ile döner.
+        #----- Bu durumda client/session değiştirmenin hiçbir faydası yoktur —
+        #----- location'ın kendisi (file_reference) bayattır. chat_id/message_id
+        #----- biliniyorsa mesaj yeniden çekilip TAZE bir file_reference alınır
+        #----- ve bu, aynı stream'deki TÜM chunk istekleri için paylaşılan
+        #----- location_state içine yazılır. location_lock, aynı anda birden
+        #----- fazla chunk'ın gereksiz yere paralel yenileme yapmasını önler.
+        location_lock = asyncio.Lock()
+        location_state = {"location": location, "refreshed_at": 0.0}
+
+        async def _refresh_file_reference(reason: str) -> bool:
+            if chat_id is None or message_id is None:
+                return False
+            async with location_lock:
+                # Çok kısa aralıkta (aynı anda gelen başka chunk'lar için)
+                # tekrar tekrar yenilemeyi önle.
+                if time.time() - location_state["refreshed_at"] < 5:
+                    return True
+                try:
+                    fresh_file_id = await get_file_ids(self.client, int(chat_id), int(message_id))
+                    if not fresh_file_id:
+                        return False
+                    self._file_id_cache[message_id] = fresh_file_id
+                    location_state["location"] = await self._get_location(fresh_file_id)
+                    location_state["refreshed_at"] = time.time()
+                    LOGGER.warning(
+                        "[tg bağlantı sorunu] file_reference yenilendi (%s) — msg_id=%s",
+                        reason, message_id,
+                    )
+                    return True
+                except Exception as refresh_err:
+                    LOGGER.warning(
+                        "[tg bağlantı sorunu] file_reference yenilenemedi (%s) — msg_id=%s hata=%s",
+                        reason, message_id, refresh_err,
+                    )
+                    return False
 
         async def fetch_chunk_with_retries(seq_idx: int, off: int) -> Tuple[int, Optional[bytes]]:
             """Fetch one chunk with timeout, exponential back-off, and bot fallback.
@@ -249,7 +291,7 @@ class ByteStreamer:
                     r = await asyncio.wait_for(
                         use_session.send(
                             raw.functions.upload.GetFile(
-                                location=location, offset=off, limit=chunk_size
+                                location=location_state["location"], offset=off, limit=chunk_size
                             )
                         ),
                         timeout=30.0,
@@ -264,7 +306,7 @@ class ByteStreamer:
                     tries += 1
                     client_failures[use_client_idx] = client_failures.get(use_client_idx, 0) + 1
                     LOGGER.warning(
-                        "Chunk timeout seq=%s off=%s try=%s client=%s",
+                        "[bağlantı hatası] chunk zaman aşımı (timeout) seq=%s off=%s try=%s client=%s",
                         seq_idx, off, tries, use_client_idx,
                     )
                     # Timeout → session ölü olabilir, cache'den temizle ki
@@ -285,11 +327,26 @@ class ByteStreamer:
                     tries += 1
                     wait_s = min(getattr(e, "value", 5) or 5, 120)
                     LOGGER.warning(
-                        "FloodWait: chunk seq=%s off=%s try=%s client=%s — %s sn bekleniyor",
+                        "[floodwait] chunk seq=%s off=%s try=%s client=%s — %s sn bekleniyor",
                         seq_idx, off, tries, use_client_idx, wait_s,
                     )
                     await asyncio.sleep(wait_s)
                     continue
+                except FileReferenceExpired:
+                    #----- Bayat file_reference — client değiştirmenin faydası
+                    #----- yok, mesajı yeniden çekip TAZE bir referans almalıyız.
+                    tries += 1
+                    LOGGER.warning(
+                        "[chunk hatası] file_reference süresi doldu (FileReferenceExpired) "
+                        "seq=%s off=%s try=%s client=%s — yenileniyor",
+                        seq_idx, off, tries, use_client_idx,
+                    )
+                    refreshed = await _refresh_file_reference("chunk fetch")
+                    if refreshed:
+                        # Yeni referansla hemen tekrar dene, geri sayım bekleme.
+                        continue
+                    # chat_id/message_id bilinmiyor ya da yenileme başarısız oldu
+                    # → normal exponential back-off'a düş.
                 except Exception as e:
                     tries += 1
                     err_str = str(e).lower()
@@ -305,21 +362,27 @@ class ByteStreamer:
                             fb_s = ByteStreamer._instances.get(use_client_idx)
                             if fb_s:
                                 fb_s.client.media_sessions.pop(file_id.dc_id, None)
-                        LOGGER.debug(
-                            "Connection error on chunk seq=%s try=%s client=%s, session invalidated: %s",
-                            seq_idx, tries, use_client_idx, e,
+                        #----- Bağlantı kopması / TG oturum sorunu — log.txt'de görünür
+                        #----- olması için WARNING (önceden DEBUG'da gizliydi).
+                        LOGGER.warning(
+                            "[bağlantı hatası] chunk seq=%s off=%s try=%s client=%s — oturum "
+                            "geçersiz kılındı: %s: %s",
+                            seq_idx, off, tries, use_client_idx, type(e).__name__, e,
                         )
                     else:
-                        LOGGER.debug(
-                            "Fetch chunk error seq=%s off=%s try=%s client=%s err=%s",
-                            seq_idx, off, tries, use_client_idx, getattr(e, "args", e),
+                        #----- Diğer chunk hataları (parse, TG API hatası vb.) — aynı
+                        #----- şekilde WARNING'e çekildi.
+                        LOGGER.warning(
+                            "[chunk hatası] seq=%s off=%s try=%s client=%s hata=%s: %s",
+                            seq_idx, off, tries, use_client_idx, type(e).__name__,
+                            getattr(e, "args", e),
                         )
 
                 # Exponential back-off: 0.5 s, 1 s, 2 s, 4 s, 8 s, 10 s (cap)
                 await asyncio.sleep(min(0.5 * (2 ** (tries - 1)), 10.0))
 
             LOGGER.error(
-                "Failed to fetch chunk seq=%s off=%s after 10 retries, client=%s",
+                "[chunk hatası] seq=%s off=%s 10 denemeden sonra alınamadı, client=%s",
                 seq_idx, off, client_index,
             )
             return seq_idx, None

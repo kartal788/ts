@@ -197,6 +197,21 @@
                 <input type="text" id="s-announcement_channel" class="s-input"
                     value="{{ settings.announcement_channel }}"
                     placeholder="-100xxxxxxxxxx, @kanal veya https://t.me/c/xxxxxxxxxx/2">
+
+                <hr class="sm-divider">
+                <label class="s-label">Yönlendirme Alan Adı (Stremio / Nuvio butonları)</label>
+                <p class="text-xs text-text opacity-60 mb-2">
+                    <i class="fa-solid fa-circle-info"></i>
+                    Duyuru mesajlarındaki "Stremio'da Aç" ve "Nuvio'da Aç" butonları bu adrese
+                    gider. Yukarıdaki "Site URL (BASE_URL)" alanından <strong>bağımsızdır</strong> —
+                    projenin gerçek adresini burada kullanmak zorunda değilsiniz; ayrı barındırılan
+                    bir yönlendirme sayfasının (ör. bir Cloudflare Workers alt alan adı,
+                    <code>https://a.arsiv.workers.dev</code> gibi) adresini girebilirsiniz.
+                    Boş bırakılırsa bu butonlar duyuruya eklenmez.
+                </p>
+                <input type="text" id="s-redirect_base_url" class="s-input"
+                    value="{{ settings.redirect_base_url }}"
+                    placeholder="https://a.arsiv.workers.dev">
             </div>
         </div>
 
@@ -402,6 +417,25 @@
             </button>
         </div>
 
+        <!-- Dosya Ekle (rclone.conf / gdrive_token.pickle) -->
+        <div class="theme-card rounded-2xl p-5">
+            <h3 class="text-xs font-extrabold uppercase tracking-wider text-primary mb-4 flex items-center gap-2">
+                <i class="fa-solid fa-folder-plus"></i> Dosya Ekle
+            </h3>
+            <p class="text-xs text-text opacity-60 mb-4">
+                Google Drive ve Rclone bağlantıları için gereken dosyaları buradan yükleyip silebilirsiniz.
+                Bu bölüm, Telegram'daki <code>/ayarlar</code> komutunun "📁 Dosya Ekle" sayfasıyla aynı
+                dosyaları yönetir.
+            </p>
+
+            <div id="settings-files-list" class="flex flex-col gap-3">
+                <div class="sm-hint"><i class="fa-solid fa-spinner fa-spin"></i> Yükleniyor…</div>
+            </div>
+
+            <input type="file" id="file-input-gdrive_pickle" accept=".pickle" style="display:none" onchange="uploadSettingsFile('gdrive_pickle', this)">
+            <input type="file" id="file-input-rclone_conf" accept=".conf,.txt" style="display:none" onchange="uploadSettingsFile('rclone_conf', this)">
+        </div>
+
         <!-- Yedekleme & Geri Yükleme -->
         <div class="theme-card rounded-2xl p-5">
             <h3 class="text-xs font-extrabold uppercase tracking-wider text-primary mb-4 flex items-center gap-2">
@@ -509,6 +543,35 @@ textarea.s-input { font-family: inherit; resize: vertical; line-height: 1.5; }
 .bk-warn { color: var(--text-sec); font-size: 0.76rem; margin-top: 0.85rem; }
 .bk-warn i { color: #f59e0b; }
 
+.sf-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 0.9rem; flex-wrap: wrap;
+    padding: 0.85rem 1rem; border-radius: 0.9rem;
+    border: 1px solid var(--hairline); background: color-mix(in srgb, var(--card) 92%, var(--bg));
+}
+.sf-info { display: flex; align-items: center; gap: 0.8rem; min-width: 0; }
+.sf-ic {
+    width: 2.5rem; height: 2.5rem; border-radius: 0.7rem; display: flex; align-items: center; justify-content: center;
+    font-size: 1.05rem; flex-shrink: 0;
+    background: color-mix(in srgb, var(--primary) 18%, transparent); color: var(--primary);
+}
+.sf-txt { display: flex; flex-direction: column; line-height: 1.3; min-width: 0; }
+.sf-txt b { font-size: 0.88rem; color: var(--text); }
+.sf-txt small { font-size: 0.72rem; color: var(--text-sec); }
+.sf-txt .sf-remotes { font-size: 0.7rem; color: var(--text-sec); margin-top: 0.15rem; }
+.sf-status { font-size: 0.66rem; font-weight: 800; text-transform: uppercase; padding: 0.15rem 0.5rem; border-radius: 999px; white-space: nowrap; }
+.sf-status.ok { background: #22c55e22; color: #22c55e; }
+.sf-status.missing { background: #ef444422; color: #ef4444; }
+.sf-actions { display: flex; align-items: center; gap: 0.5rem; flex-shrink: 0; }
+.sf-btn {
+    display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.5rem 0.85rem; border-radius: 0.7rem;
+    font-size: 0.76rem; font-weight: 700; border: 1px solid var(--hairline); cursor: pointer; transition: all .15s;
+    background: transparent; color: var(--text);
+}
+.sf-btn:hover { transform: translateY(-1px); border-color: var(--primary); }
+.sf-btn.sf-del { color: #ef4444; border-color: rgba(239,68,68,0.3); }
+.sf-btn.sf-del:hover { background: #ef444414; border-color: #ef4444; }
+.sf-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
 .sm-divider { border: none; border-top: 1px solid var(--hairline); margin: 1.25rem 0; }
 .sm-stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px,1fr)); gap: 0.75rem; }
 .sm-stat-box {
@@ -593,6 +656,106 @@ function renderDbList(dbList) {
     `).join('');
 }
 
+/* ── Dosya Ekle: rclone.conf / gdrive_token.pickle ───────────────────────── */
+const SETTINGS_FILE_META = {
+    gdrive_pickle: { icon: 'fa-solid fa-key', title: 'Google Drive Token', desc: 'gdrive_token.pickle' },
+    rclone_conf:   { icon: 'fa-solid fa-cloud', title: 'Rclone Yapılandırması', desc: 'rclone.conf' },
+};
+
+function sfRowHTML(fileType, info) {
+    const meta = SETTINGS_FILE_META[fileType];
+    const exists = !!(info && info.exists);
+    let remotesHtml = '';
+    if (fileType === 'rclone_conf' && exists && info.remotes && info.remotes.length) {
+        remotesHtml = `<div class="sf-remotes">Sürücüler: ${info.remotes.map(r => `<code>${escapeHtml(r)}</code>`).join(', ')}</div>`;
+    }
+    return `
+        <div class="sf-row" data-file-type="${fileType}">
+            <div class="sf-info">
+                <span class="sf-ic"><i class="${meta.icon}"></i></span>
+                <span class="sf-txt">
+                    <b>${meta.title}</b>
+                    <small>${meta.desc}</small>
+                    ${remotesHtml}
+                </span>
+            </div>
+            <div class="sf-actions">
+                <span class="sf-status ${exists ? 'ok' : 'missing'}">${exists ? '✔ Yüklü' : '✕ Yok'}</span>
+                <button type="button" class="sf-btn" onclick="document.getElementById('file-input-${fileType}').click()">
+                    <i class="fa-solid fa-upload"></i> Yükle
+                </button>
+                <button type="button" class="sf-btn sf-del" ${exists ? '' : 'disabled'} onclick="deleteSettingsFile('${fileType}')">
+                    <i class="fa-solid fa-trash"></i> Sil
+                </button>
+            </div>
+        </div>`;
+}
+
+function renderSettingsFiles(files) {
+    const box = document.getElementById('settings-files-list');
+    if (!box || !files) return;
+    box.innerHTML = ['gdrive_pickle', 'rclone_conf'].map(t => sfRowHTML(t, files[t])).join('');
+}
+
+async function loadSettingsFiles() {
+    const box = document.getElementById('settings-files-list');
+    try {
+        const res = await fetch('/api/admin/settings/files');
+        const data = await res.json();
+        if (!data.success) throw new Error(data.detail || 'failed');
+        renderSettingsFiles(data.files);
+    } catch (e) {
+        if (box) box.innerHTML = `<p class="text-xs text-text opacity-50">Dosya durumu yüklenemedi.</p>`;
+    }
+}
+
+async function uploadSettingsFile(fileType, input) {
+    const file = input.files[0];
+    if (!file) return;
+    const row = document.querySelector(`.sf-row[data-file-type="${fileType}"]`);
+    const btns = row ? row.querySelectorAll('.sf-btn') : [];
+    btns.forEach(b => b.disabled = true);
+    try {
+        const formData = new FormData();
+        formData.append('file', file);
+        const res = await fetch(`/api/admin/settings/files/${fileType}`, { method: 'POST', body: formData });
+        const data = await res.json();
+        if (res.ok && data.success) {
+            showStatus('✅ ' + data.message, true);
+            await loadSettingsFiles();
+        } else {
+            showStatus('❌ ' + (data.detail || 'Dosya yüklenemedi.'), false);
+        }
+    } catch (err) {
+        showStatus('❌ Hata: ' + err.message, false);
+    } finally {
+        input.value = '';
+        btns.forEach(b => b.disabled = false);
+    }
+}
+
+async function deleteSettingsFile(fileType) {
+    const meta = SETTINGS_FILE_META[fileType];
+    if (!confirm(`${meta.desc} silinsin mi? Bu işlem geri alınamaz.`)) return;
+    const row = document.querySelector(`.sf-row[data-file-type="${fileType}"]`);
+    const btns = row ? row.querySelectorAll('.sf-btn') : [];
+    btns.forEach(b => b.disabled = true);
+    try {
+        const res = await fetch(`/api/admin/settings/files/${fileType}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (res.ok && data.success) {
+            showStatus('✅ ' + data.message, true);
+            await loadSettingsFiles();
+        } else {
+            showStatus('❌ ' + (data.detail || 'Dosya silinemedi.'), false);
+            btns.forEach(b => b.disabled = false);
+        }
+    } catch (err) {
+        showStatus('❌ Hata: ' + err.message, false);
+        btns.forEach(b => b.disabled = false);
+    }
+}
+
 function renderEnvTokens(envTokens) {
     const box = document.getElementById('env-multi-tokens');
     if (!box) return;
@@ -623,6 +786,7 @@ function renderSettings(s) {
 
     document.getElementById('s-announce_new_content').checked = !!s.announce_new_content;
     document.getElementById('s-announcement_channel').value = s.announcement_channel || '';
+    document.getElementById('s-redirect_base_url').value = s.redirect_base_url || '';
     toggleAnnouncementFields();
 
     document.getElementById('s-subscription').checked = !!s.subscription;
@@ -689,6 +853,7 @@ function buildPayload() {
 
         announce_new_content: document.getElementById('s-announce_new_content').checked,
         announcement_channel: document.getElementById('s-announcement_channel').value.trim(),
+        redirect_base_url: document.getElementById('s-redirect_base_url').value.trim(),
 
         subscription: document.getElementById('s-subscription').checked,
         subscription_group_id: toInt('s-subscription_group_id', 0),
@@ -891,5 +1056,6 @@ function toggleLiveLogs() {
 document.addEventListener('DOMContentLoaded', () => renderSettings(currentSettings));
 document.addEventListener('DOMContentLoaded', () => loadDbStats());
 document.addEventListener('DOMContentLoaded', () => loadLogs());
+document.addEventListener('DOMContentLoaded', () => loadSettingsFiles());
 </script>
 {% endblock %}

@@ -1674,17 +1674,37 @@ class Database:
         else:
             parts.append(str(cast))
 
-        tg = doc.get("telegram")
-        if isinstance(tg, dict) and tg.get("name"):
-            parts.append(str(tg["name"]))
+        parts.extend(self._telegram_names(doc.get("telegram")))
+
         for season in (doc.get("seasons") or []):
+            if not isinstance(season, dict):
+                continue
             for ep in (season.get("episodes") or []):
-                ep_tg = (ep or {}).get("telegram") or {}
-                if ep_tg.get("name"):
-                    parts.append(str(ep_tg["name"]))
+                if not isinstance(ep, dict):
+                    continue
+                parts.extend(self._telegram_names(ep.get("telegram")))
 
         haystack = " ".join(parts).lower()
         return all(w in haystack for w in words)
+
+    @staticmethod
+    def _telegram_names(telegram) -> List[str]:
+        """
+        `telegram` alanı hem film hem bölüm belgelerinde bir kalite listesi
+        (`[{"name": ..., "quality": ..., ...}, ...]`) olarak saklanır — tek
+        bir dict değil. Eski arama kodu bunu yanlışlıkla dict sanıyordu ve
+        bölüm belgelerinde 'list' object has no attribute 'get' hatasına
+        yol açıyordu. Burada hem liste (doğru/güncel şema) hem de olası
+        eski/tekil dict biçimi güvenle işlenir.
+        """
+        if not telegram:
+            return []
+        entries = telegram if isinstance(telegram, list) else [telegram]
+        names = []
+        for entry in entries:
+            if isinstance(entry, dict) and entry.get("name"):
+                names.append(str(entry["name"]))
+        return names
 
     async def search_documents(
             self,
@@ -1722,9 +1742,16 @@ class Database:
             if not text_search:
                 return {"total_count": 0, "results": []}
 
+            # NOT: {"$sort": {"score": {"$meta": "textScore"}}} bazı MongoDB
+            # sürümlerinde "FieldPath field names may not start with '$',
+            # given '$computed0'" hatasına yol açıyor (sort optimizer'ın
+            # meta alanını materialize etmeden sıralamaya çalışmasından
+            # kaynaklanıyor). Skoru önce gerçek bir alan olarak $addFields
+            # ile üretip öyle sıralamak bu hatayı ortadan kaldırıyor.
             base_stage = [
                 {"$match": {"$text": {"$search": text_search}}},
-                {"$sort": {"score": {"$meta": "textScore"}}},
+                {"$addFields": {"score": {"$meta": "textScore"}}},
+                {"$sort": {"score": -1}},
             ]
 
             tv_pipeline = base_stage + [

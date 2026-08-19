@@ -55,15 +55,17 @@ async def get_file_ids(client: Client, chat_id: int, message_id: int) -> Optiona
             )
 
             if is_retryable and attempt < max_retries:
-                LOGGER.debug(
-                    f"Error getting file IDs: {e} "
-                    f"(attempt {attempt}/{max_retries}, {delay:.1f}s sonra yeniden deneniyor)"
+                #----- TG bağlantı sorunu / FloodWait vb. — log.txt'de görünür olması
+                #----- için WARNING (önceden DEBUG'da gizliydi).
+                LOGGER.warning(
+                    f"[tg bağlantı sorunu] get_file_ids: {type(e).__name__}: {e} "
+                    f"(deneme {attempt}/{max_retries}, {delay:.1f}sn sonra yeniden deneniyor)"
                 )
                 await _asyncio.sleep(delay)
                 delay *= 2
                 continue
 
-            LOGGER.error(f"Error getting file IDs: {e}")
+            LOGGER.error(f"[tg bağlantı sorunu] get_file_ids kalıcı olarak başarısız: {type(e).__name__}: {e}")
             raise
         
 
@@ -182,7 +184,7 @@ async def restart_notification():
 
 # Bot commands
 commands = [
-    BotCommand("start", "▶️ Eklenti linkini al."),
+    BotCommand("start", "▶️ Eklenti linki."),
     BotCommand("uyelik", "📊 Üyelik durumu."),
     BotCommand("istek", "🎬 Dizi / Film iste."),
     BotCommand("gecmis", "🕒 İzleme geçmişim."),

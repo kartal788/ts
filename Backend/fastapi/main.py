@@ -86,6 +86,7 @@ from Backend.fastapi.routes.api_routes import (
     get_settings_api, update_settings_api,
     export_settings_backup_api, import_settings_backup_api,
     invalidate_admin_sessions_api,
+    get_settings_files_api, upload_settings_file_api, delete_settings_file_api,
     get_db_stats_api, get_logs_api, download_logs_api,
     restart_bot_api,
 )
@@ -1001,6 +1002,22 @@ async def import_settings_backup(payload: dict, _: bool = Depends(require_auth))
 @app.post("/api/admin/settings/invalidate-sessions")
 async def invalidate_admin_sessions(_: bool = Depends(require_auth)):
     return await invalidate_admin_sessions_api()
+
+@app.get("/api/admin/settings/files")
+async def admin_settings_files(_: bool = Depends(require_auth)):
+    return await get_settings_files_api()
+
+@app.post("/api/admin/settings/files/{file_type}")
+async def admin_settings_files_upload(
+    file_type: str,
+    file: UploadFile = File(...),
+    _: bool = Depends(require_auth),
+):
+    return await upload_settings_file_api(file_type, file)
+
+@app.delete("/api/admin/settings/files/{file_type}")
+async def admin_settings_files_delete(file_type: str, _: bool = Depends(require_auth)):
+    return await delete_settings_file_api(file_type)
 
 @app.get("/api/admin/stats")
 async def admin_db_stats(_: bool = Depends(require_auth)):

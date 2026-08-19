@@ -32,6 +32,11 @@ _DEFAULTS: Dict[str, Any] = {
     "auth_channels": [],
     "tmdb_api": "",
     "base_url": "",
+    #----- Duyurulardaki Stremio/Nuvio "aç" butonlarında kullanılan alan adı.
+    #----- Kasıtlı olarak base_url'den AYRI tutulur: bu genellikle gerçek
+    #----- sunucu adresini gizlemek için ayrı barındırılan (ör. bir Cloudflare
+    #----- Workers alt alan adı) bir yönlendirme sayfasının adresidir.
+    "redirect_base_url": "",
     "upstream_repo": "",
     "upstream_branch": "",
     "isim": "KARTAL",

@@ -89,8 +89,8 @@ async def virtual_stream_generator(
             meta=meta,
             parallelism=parallelism,
             request=request,
-            # NOT: prefetch_stream chat_id/message_id kabul etmiyor;
-            # file_id zaten tüm gerekli bilgiyi içeriyor.
+            chat_id=part["chat_id"],
+            message_id=part["msg_id"],
         )
 
         try:

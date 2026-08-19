@@ -888,8 +888,13 @@ async def metadata(filename: str, channel: int, msg_id, override_id: str = None)
     # "Orijinal Başlık - Türkçe Çeviri" formatındaki başlıklarda
     # yalnızca tire öncesini TMDB araması için kullan.
     # Örnek: "Dune Part Two - Dune Çöl Gezegeni Bölüm İki" → "Dune Part Two"
+    # Bazı dosya adlarında bu sıralama tersine döner (ör. "Ölümcül Kaçamak -
+    # Fatal Seduction"), bu yüzden tire sonrası ikinci aday olarak saklanır;
+    # birincil başlıkla arama başarısız olursa bu alternatif denenir.
+    alt_title = None
     if title and " - " in title:
-        title = title.split(" - ")[0].strip()
+        parts = [p.strip() for p in title.split(" - ", 1)]
+        title, alt_title = parts[0], (parts[1] if len(parts) > 1 and parts[1] else None)
     season = parsed.get("season")
     episode = parsed.get("episode")
     year = parsed.get("year")
@@ -975,10 +980,10 @@ async def metadata(filename: str, channel: int, msg_id, override_id: str = None)
                 LOGGER.warning(f"URL says TV but no season/episode parsed for {filename} ({parsed})")
                 return None
             LOGGER.info(f"Fetching TV metadata: {title} S{season}E{episode}")
-            result = await fetch_tv_metadata(title, season, episode, encoded_string, year, quality, default_id)
+            result = await fetch_tv_metadata(title, season, episode, encoded_string, year, quality, default_id, alt_title)
         else:
             LOGGER.info(f"Fetching Movie metadata: {title} ({year})")
-            result = await fetch_movie_metadata(title, encoded_string, year, quality, default_id)
+            result = await fetch_movie_metadata(title, encoded_string, year, quality, default_id, alt_title)
 
         if result is not None:
             result["group_key"] = group_key
@@ -989,7 +994,7 @@ async def metadata(filename: str, channel: int, msg_id, override_id: str = None)
         return None
 
 # ----------------- TV Metadata -----------------
-async def fetch_tv_metadata(title, season, episode, encoded_string, year=None, quality=None, default_id=None) -> dict | None:
+async def fetch_tv_metadata(title, season, episode, encoded_string, year=None, quality=None, default_id=None, alt_title=None) -> dict | None:
     """
     Deduplication wrapper: aynı S/E için paralel çağrıları tek API isteğine indirger.
     """
@@ -1008,7 +1013,7 @@ async def fetch_tv_metadata(title, season, episode, encoded_string, year=None, q
         fut: asyncio.Future = loop.create_future()
         _METADATA_IN_FLIGHT[dedup_key] = fut
         try:
-            result = await _fetch_tv_metadata_impl(title, season, episode, encoded_string, year, quality, default_id)
+            result = await _fetch_tv_metadata_impl(title, season, episode, encoded_string, year, quality, default_id, alt_title)
             fut.set_result(result)
             return result
         except Exception as exc:
@@ -1018,10 +1023,10 @@ async def fetch_tv_metadata(title, season, episode, encoded_string, year=None, q
         finally:
             _METADATA_IN_FLIGHT.pop(dedup_key, None)
 
-    return await _fetch_tv_metadata_impl(title, season, episode, encoded_string, year, quality, default_id)
+    return await _fetch_tv_metadata_impl(title, season, episode, encoded_string, year, quality, default_id, alt_title)
 
 
-async def _fetch_tv_metadata_impl(title, season, episode, encoded_string, year=None, quality=None, default_id=None) -> dict | None:
+async def _fetch_tv_metadata_impl(title, season, episode, encoded_string, year=None, quality=None, default_id=None, alt_title=None) -> dict | None:
     imdb_id = None
     tmdb_id = None
     imdb_tv = None
@@ -1099,6 +1104,14 @@ async def _fetch_tv_metadata_impl(title, season, episode, encoded_string, year=N
         # Search TMDb by title
         if not tmdb_id:
             tmdb_search = await safe_tmdb_search(title, "tv", year)
+            if not tmdb_search and alt_title:
+                # Bazı dosya adlarında Türkçe/İngilizce sıralaması ters
+                # olabildiğinden ("Ölümcül Kaçamak - Fatal Seduction" gibi),
+                # birincil başlık bulunamazsa alternatif başlıkla tekrar denenir.
+                LOGGER.info(f"No TMDb TV result for '{title}' — trying alt title '{alt_title}'")
+                tmdb_search = await safe_tmdb_search(alt_title, "tv", year)
+                if tmdb_search:
+                    title = alt_title
             if not tmdb_search:
                 LOGGER.warning(f"No TMDb TV result for '{title}'")
                 return None
@@ -1291,7 +1304,7 @@ async def _fetch_tv_metadata_impl(title, season, episode, encoded_string, year=N
 
 
 # ----------------- Movie Metadata -----------------
-async def fetch_movie_metadata(title, encoded_string, year=None, quality=None, default_id=None) -> dict | None:
+async def fetch_movie_metadata(title, encoded_string, year=None, quality=None, default_id=None, alt_title=None) -> dict | None:
     """
     Deduplication wrapper: aynı anda aynı film için birden fazla çağrı gelirse
     yalnızca ilki API'ye gider, diğerleri sonucu bekler ve encoded_string'ini
@@ -1313,7 +1326,7 @@ async def fetch_movie_metadata(title, encoded_string, year=None, quality=None, d
         fut: asyncio.Future = loop.create_future()
         _METADATA_IN_FLIGHT[dedup_key] = fut
         try:
-            result = await _fetch_movie_metadata_impl(title, encoded_string, year, quality, default_id)
+            result = await _fetch_movie_metadata_impl(title, encoded_string, year, quality, default_id, alt_title)
             fut.set_result(result)
             return result
         except Exception as exc:
@@ -1323,10 +1336,10 @@ async def fetch_movie_metadata(title, encoded_string, year=None, quality=None, d
         finally:
             _METADATA_IN_FLIGHT.pop(dedup_key, None)
 
-    return await _fetch_movie_metadata_impl(title, encoded_string, year, quality, default_id)
+    return await _fetch_movie_metadata_impl(title, encoded_string, year, quality, default_id, alt_title)
 
 
-async def _fetch_movie_metadata_impl(title, encoded_string, year=None, quality=None, default_id=None) -> dict | None:
+async def _fetch_movie_metadata_impl(title, encoded_string, year=None, quality=None, default_id=None, alt_title=None) -> dict | None:
     imdb_id = None
     tmdb_id = None
     imdb_details = None
@@ -1400,6 +1413,13 @@ async def _fetch_movie_metadata_impl(title, encoded_string, year=None, quality=N
         # TMDb search if id unknown
         if not tmdb_id:
             tmdb_result = await safe_tmdb_search(title, "movie", year)
+            if not tmdb_result and alt_title:
+                # Bkz. fetch_tv_metadata — bazı dosya adlarında başlık sırası
+                # ters olabiliyor, alternatif başlıkla tekrar denenir.
+                LOGGER.info(f"No TMDb movie result for '{title}' — trying alt title '{alt_title}'")
+                tmdb_result = await safe_tmdb_search(alt_title, "movie", year)
+                if tmdb_result:
+                    title = alt_title
             if not tmdb_result:
                 LOGGER.warning(f"No TMDb movie found for '{title}'")
                 return None
