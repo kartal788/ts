@@ -96,6 +96,7 @@ from Backend.fastapi.routes.uyeler_routes import (
     admin_uyeler_list_api,
     admin_uye_stream_history_api,
     admin_uye_reminders_api,
+    admin_usage_discrepancies_api,
     admin_uye_subscription_history_api,
     admin_uye_ban_api,
     admin_uye_clear_devices_api,
@@ -1303,6 +1304,10 @@ async def admin_uyeler_api(_: bool = Depends(require_auth)):
 @app.get("/api/admin/uyeler/{member_id}/streams")
 async def admin_uye_streams_api(member_id: str, _: bool = Depends(require_auth)):
     return await admin_uye_stream_history_api(member_id)
+
+@app.get("/api/admin/uyarilar")
+async def admin_uyarilar_api(_: bool = Depends(require_auth)):
+    return await admin_usage_discrepancies_api()
 
 @app.get("/api/admin/uyeler/{member_id}/reminders")
 async def admin_uye_reminders(member_id: str, _: bool = Depends(require_auth)):

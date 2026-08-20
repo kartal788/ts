@@ -16,7 +16,7 @@ from Backend import db
 from Backend.pyrofork.bot import work_loads, multi_clients, client_dc_map, client_failures, client_avg_mbps
 
 ACTIVE_STREAMS: Dict[str, Dict] = {}
-RECENT_STREAMS = deque(maxlen=3)
+RECENT_STREAMS = deque(maxlen=200)
 
 
 def get_adaptive_chunk_size(client_index: int) -> int:

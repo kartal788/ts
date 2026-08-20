@@ -3710,6 +3710,103 @@ class Database:
             LOGGER.error(f"get_stream_analytics error: {e}")
             return {"summary": {}, "per_client": [], "recent": []}
 
+    async def get_daily_usage_discrepancies(self, threshold_gb: float = 0.05) -> list:
+        """
+        Her token için "Bugün" sayacı (usage.daily.bytes) ile izleme geçmişindeki
+        (stream_analytics) bugüne ait toplam veriyi karşılaştırır ve aralarında
+        anlamlı fark (threshold_gb üzeri) olan üyeleri döner.
+
+        "Bugün", admin panelindeki günlük limit sıfırlama saatiyle aynı "sanal gün"
+        mantığı (_daily_key) kullanılarak Europe/Istanbul saat dilimine göre hesaplanır;
+        böylece iki taraf da aynı gün tanımını kullanır.
+        """
+        try:
+            from Backend.config import Telegram as _Cfg
+
+            # ── "Bugün" pencerisinin (Europe/Istanbul) UTC başlangıç/bitiş sınırlarını hesapla ──
+            _raw = (_Cfg.LIMIT_SIFIRLAMA or "").strip()
+            try:
+                _rh, _rm = (int(x) for x in _raw.split(":"))
+            except Exception:
+                _rh, _rm = 0, 0
+
+            now_ist = datetime.now(_TZ_IST)
+            today_key = _daily_key()
+            threshold_today = now_ist.replace(hour=_rh, minute=_rm, second=0, microsecond=0)
+            if now_ist >= threshold_today:
+                window_start_ist = threshold_today
+            else:
+                window_start_ist = threshold_today - _td(days=1)
+            window_end_ist = window_start_ist + _td(days=1)
+
+            window_start_utc = window_start_ist.astimezone(timezone.utc).replace(tzinfo=None)
+            window_end_utc   = window_end_ist.astimezone(timezone.utc).replace(tzinfo=None)
+
+            # ── İzleme geçmişinden bugüne ait token bazlı toplamlar ──
+            col = self.dbs["tracking"]["stream_analytics"]
+            pipe = [
+                {"$match": {
+                    "logged_at":  {"$gte": window_start_utc, "$lt": window_end_utc},
+                    "user_token": {"$ne": None},
+                }},
+                {"$group": {"_id": "$user_token", "bytes": {"$sum": "$total_bytes"}}},
+            ]
+            history_rows = await col.aggregate(pipe).to_list(None)
+            history_by_token = {r["_id"]: r["bytes"] for r in history_rows if r["_id"]}
+
+            # ── Token tablosundan "Bugün" sayaçlarını al ──
+            tokens = await self.dbs["tracking"]["api_tokens"].find(
+                {}, {"_id": 0, "token": 1, "name": 1, "user_id": 1, "usage": 1}
+            ).to_list(None)
+
+            discrepancies = []
+            seen_tokens = set()
+            for t in tokens:
+                token_str = t.get("token")
+                if not token_str:
+                    continue
+                seen_tokens.add(token_str)
+                usage = t.get("usage", {}) or {}
+                daily = usage.get("daily", {}) or {}
+                # "Bugün" sayacı sadece tarihi bugünün anahtarıyla eşleşiyorsa geçerlidir;
+                # eşleşmiyorsa henüz sıfırlanmamış eski bir güne ait değer demektir → 0 kabul edilir.
+                daily_bytes = daily.get("bytes", 0) if daily.get("date") == today_key else 0
+                history_bytes = history_by_token.get(token_str, 0)
+
+                diff_bytes = abs(history_bytes - daily_bytes)
+                if diff_bytes / (1024 ** 3) < threshold_gb:
+                    continue
+
+                discrepancies.append({
+                    "user_id":       t.get("user_id"),
+                    "name":          t.get("name") or (f"Kullanıcı {t.get('user_id')}" if t.get("user_id") else f"Token …{token_str[-6:]}"),
+                    "token":         token_str,
+                    "history_bytes": history_bytes,
+                    "daily_bytes":   daily_bytes,
+                    "diff_bytes":    history_bytes - daily_bytes,
+                })
+
+            # Token'ı olmayan ama stream_analytics'te bugüne ait kaydı olan (yetim) tokenlar
+            for tok_str, hbytes in history_by_token.items():
+                if tok_str in seen_tokens:
+                    continue
+                if hbytes / (1024 ** 3) < threshold_gb:
+                    continue
+                discrepancies.append({
+                    "user_id":       None,
+                    "name":          f"Token …{tok_str[-6:]}" if tok_str else "Bilinmeyen",
+                    "token":         tok_str,
+                    "history_bytes": hbytes,
+                    "daily_bytes":   0,
+                    "diff_bytes":    hbytes,
+                })
+
+            discrepancies.sort(key=lambda x: abs(x["diff_bytes"]), reverse=True)
+            return discrepancies
+        except Exception as e:
+            LOGGER.error(f"get_daily_usage_discrepancies error: {e}")
+            return []
+
     async def get_bandwidth_stats(self) -> dict:
         """Kapsamlı bant genişliği istatistiklerini döndürür."""
         try:

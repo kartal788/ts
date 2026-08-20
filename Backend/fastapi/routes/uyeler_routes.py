@@ -22,6 +22,10 @@ Eklenmesi gereken route'lar (main.py'ye ekleyin):
   async def admin_uye_streams(member_id: str, _: bool = Depends(require_auth)):
       return await admin_uye_stream_history_api(member_id)
 
+  @app.get("/api/admin/uyarilar")
+  async def admin_uyarilar(_: bool = Depends(require_auth)):
+      return await admin_usage_discrepancies_api()
+
   @app.get("/api/admin/uyeler/{member_id}/subscription-history")
   async def admin_uye_subscription_history(member_id: str, _: bool = Depends(require_auth)):
       return await admin_uye_subscription_history_api(member_id)
@@ -243,6 +247,30 @@ async def admin_uyeler_list_api() -> dict:
     except Exception as e:
         _logger.error("Internal error", exc_info=True)
 
+        raise HTTPException(status_code=500, detail="Sunucu hatası")
+
+
+# ─── API: /api/admin/uyarilar (Bugün / İzleme geçmişi GB tutarsızlığı) ──────
+
+async def admin_usage_discrepancies_api() -> dict:
+    """
+    "Bugün" sayacı (usage.daily.bytes) ile izleme geçmişindeki (stream_analytics)
+    bugüne ait toplam veri arasında fark olan üyeleri döner. Dashboard'daki
+    "Uyarılar" kartı bu veriyi kullanır.
+    """
+    try:
+        rows = await db.get_daily_usage_discrepancies()
+        alerts = [{
+            "user_id":       r.get("user_id"),
+            "name":          r.get("name"),
+            "token":         (r.get("token") or "")[:8] + "..." if r.get("token") else None,
+            "history_gb":    _bytes_to_gb(r.get("history_bytes", 0)),
+            "daily_gb":      _bytes_to_gb(r.get("daily_bytes", 0)),
+            "diff_gb":       _bytes_to_gb(r.get("diff_bytes", 0)),
+        } for r in rows]
+        return {"status": "success", "alerts": alerts, "total": len(alerts)}
+    except Exception as e:
+        _logger.error("Internal error", exc_info=True)
         raise HTTPException(status_code=500, detail="Sunucu hatası")
 
 
