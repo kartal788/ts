@@ -311,7 +311,7 @@
                         … kontrol ediliyor
                     </span>
                 </div>
-                <p class="text-sm text-text-secondary">"Bugün" sayacı ile izleme geçmişi arasında GB farkı olan üyeler</p>
+                <p class="text-sm text-text-secondary">Limit, istek, abonelik talebi vb. uyarılar</p>
             </div>
 
             <div id="alerts-container" class="p-6 space-y-3">
@@ -922,9 +922,16 @@
         return n.toFixed(2) + ' GB';
     }
 
+    function formatDateLocal(iso) {
+        if (!iso) return '';
+        try {
+            return new Date(iso).toLocaleString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+        } catch (e) { return ''; }
+    }
+
     function renderAlertRow(alert) {
-        const name    = escapeHtmlLocal(alert.name || 'Bilinmeyen üye');
-        const token   = escapeHtmlLocal(alert.token || '');
+        const name  = escapeHtmlLocal(alert.name || 'Bilinmeyen üye');
+        const token = escapeHtmlLocal(alert.token || '');
         const history = alert.history_gb || 0;
         const daily   = alert.daily_gb || 0;
         const diff    = alert.diff_gb || 0;
@@ -939,6 +946,7 @@
             <div class="glass-panel rounded-2xl p-4 border border-yellow-500/10">
                 <div class="flex items-start justify-between gap-3 flex-wrap">
                     <div class="min-w-0">
+                        <span class="text-[9px] font-bold uppercase tracking-widest text-yellow-300/80">GB Tutarsızlığı</span>
                         <h5 class="font-bold text-sm text-text truncate">${name}</h5>
                         ${token ? `<p class="text-[10px] text-text-secondary font-mono mt-0.5">${token}</p>` : ''}
                     </div>
@@ -957,6 +965,117 @@
                     </div>
                 </div>
                 <p class="text-xs ${diffClass} mt-3">${diffLabel}</p>
+            </div>`;
+    }
+
+    function renderDailyLimitAlertRow(alert) {
+        const name  = escapeHtmlLocal(alert.name || 'Bilinmeyen üye');
+        const token = escapeHtmlLocal(alert.token || '');
+        const used  = alert.daily_used_gb || 0;
+        const limit = alert.daily_limit_gb || 0;
+
+        return `
+            <div class="glass-panel rounded-2xl p-4 border border-red-500/10">
+                <div class="flex items-start justify-between gap-3 flex-wrap">
+                    <div class="min-w-0">
+                        <span class="text-[9px] font-bold uppercase tracking-widest text-red-300/80">Günlük Limit Doldu</span>
+                        <h5 class="font-bold text-sm text-text truncate">${name}</h5>
+                        ${token ? `<p class="text-[10px] text-text-secondary font-mono mt-0.5">${token}</p>` : ''}
+                    </div>
+                    <span class="text-[10px] font-bold px-2 py-1 rounded-lg uppercase whitespace-nowrap text-red-400 bg-red-500/10">
+                        <i class="fa-solid fa-battery-empty mr-1"></i>Doldu
+                    </span>
+                </div>
+                <p class="text-xs text-text-secondary mt-3">
+                    Günlük kullanım: <span class="font-bold text-text">${formatGbLocal(used)}</span>
+                    ${limit ? ` / ${formatGbLocal(limit)} limit` : ''}
+                </p>
+            </div>`;
+    }
+
+    function renderPendingRequestAlertRow(alert) {
+        const name  = escapeHtmlLocal(alert.name || 'Bilinmeyen üye');
+        const title = escapeHtmlLocal(alert.last_title || 'Bilinmeyen içerik');
+        const count = alert.pending_count || 0;
+        const lastAt = formatDateLocal(alert.last_requested_at);
+
+        return `
+            <div class="glass-panel rounded-2xl p-4 border border-blue-500/10">
+                <div class="flex items-start justify-between gap-3 flex-wrap">
+                    <div class="min-w-0">
+                        <span class="text-[9px] font-bold uppercase tracking-widest text-blue-300/80">Onay Bekleyen İstek</span>
+                        <h5 class="font-bold text-sm text-text truncate">${name}</h5>
+                        <p class="text-[10px] text-text-secondary mt-0.5 truncate">Son istek: ${title}</p>
+                    </div>
+                    <span class="text-[10px] font-bold px-2 py-1 rounded-lg uppercase whitespace-nowrap text-blue-300 bg-blue-500/10">
+                        ${count} istek
+                    </span>
+                </div>
+                ${lastAt ? `<p class="text-xs text-text-secondary mt-3">Son talep: ${lastAt}</p>` : ''}
+            </div>`;
+    }
+
+    function renderPendingSubscriptionAlertRow(alert) {
+        const name = escapeHtmlLocal(alert.name || 'Bilinmeyen üye');
+        const plan = escapeHtmlLocal(alert.plan_label || (alert.duration_days ? `${alert.duration_days} gün` : 'Plan'));
+        const price = alert.price ? `${alert.price} ${escapeHtmlLocal(alert.currency || '')}` : '';
+        const requestedAt = formatDateLocal(alert.requested_at);
+
+        return `
+            <div class="glass-panel rounded-2xl p-4 border border-purple-500/10">
+                <div class="flex items-start justify-between gap-3 flex-wrap">
+                    <div class="min-w-0">
+                        <span class="text-[9px] font-bold uppercase tracking-widest text-purple-300/80">Onay Bekleyen Abonelik</span>
+                        <h5 class="font-bold text-sm text-text truncate">${name}</h5>
+                        <p class="text-[10px] text-text-secondary mt-0.5 truncate">${plan}${price ? ' · ' + price : ''}</p>
+                    </div>
+                    <span class="text-[10px] font-bold px-2 py-1 rounded-lg uppercase whitespace-nowrap text-purple-300 bg-purple-500/10">
+                        <i class="fa-solid fa-hourglass-half mr-1"></i>Bekliyor
+                    </span>
+                </div>
+                ${requestedAt ? `<p class="text-xs text-text-secondary mt-3">Talep tarihi: ${requestedAt}</p>` : ''}
+            </div>`;
+    }
+
+    function renderExpiringSoonAlertRow(alert) {
+        const name = escapeHtmlLocal(alert.name || 'Bilinmeyen üye');
+        const expiresAt = formatDateLocal(alert.expires_at);
+        const hours = (alert.hours_remaining === null || alert.hours_remaining === undefined)
+            ? null : alert.hours_remaining;
+
+        return `
+            <div class="glass-panel rounded-2xl p-4 border border-orange-500/10">
+                <div class="flex items-start justify-between gap-3 flex-wrap">
+                    <div class="min-w-0">
+                        <span class="text-[9px] font-bold uppercase tracking-widest text-orange-300/80">Yakında Sona Erecek</span>
+                        <h5 class="font-bold text-sm text-text truncate">${name}</h5>
+                        ${expiresAt ? `<p class="text-[10px] text-text-secondary mt-0.5">Bitiş: ${expiresAt}</p>` : ''}
+                    </div>
+                    <span class="text-[10px] font-bold px-2 py-1 rounded-lg uppercase whitespace-nowrap text-orange-300 bg-orange-500/10">
+                        <i class="fa-solid fa-clock mr-1"></i>${hours !== null ? hours + ' sa kaldı' : 'Yakında'}
+                    </span>
+                </div>
+            </div>`;
+    }
+
+    function renderExpiredButActiveAlertRow(alert) {
+        const name = escapeHtmlLocal(alert.name || 'Bilinmeyen üye');
+        const expiredAt = formatDateLocal(alert.expired_at);
+        const overdue = (alert.overdue_hours === null || alert.overdue_hours === undefined)
+            ? null : alert.overdue_hours;
+
+        return `
+            <div class="glass-panel rounded-2xl p-4 border border-rose-500/10">
+                <div class="flex items-start justify-between gap-3 flex-wrap">
+                    <div class="min-w-0">
+                        <span class="text-[9px] font-bold uppercase tracking-widest text-rose-300/80">Süresi Doldu (Hâlâ Aktif)</span>
+                        <h5 class="font-bold text-sm text-text truncate">${name}</h5>
+                        ${expiredAt ? `<p class="text-[10px] text-text-secondary mt-0.5">Bitiş: ${expiredAt}</p>` : ''}
+                    </div>
+                    <span class="text-[10px] font-bold px-2 py-1 rounded-lg uppercase whitespace-nowrap text-rose-400 bg-rose-500/10">
+                        <i class="fa-solid fa-triangle-exclamation mr-1"></i>${overdue !== null ? overdue + ' sa gecikti' : 'Tutarsız'}
+                    </span>
+                </div>
             </div>`;
     }
 
@@ -986,22 +1105,40 @@
             const response = await fetch('/api/admin/uyarilar');
             if (!response.ok) throw new Error('HTTP ' + response.status);
             const data = await response.json();
-            const alerts = data.alerts || [];
+
+            const usageAlerts        = data.alerts || [];
+            const dailyLimitAlerts   = data.daily_limit_alerts || [];
+            const pendingRequests    = data.pending_request_alerts || [];
+            const pendingSubs        = data.pending_subscription_alerts || [];
+            const expiringSoon       = data.expiring_soon_alerts || [];
+            const expiredButActive   = data.expired_but_active_alerts || [];
+
+            const totalCount = data.total ?? (
+                usageAlerts.length + dailyLimitAlerts.length + pendingRequests.length + pendingSubs.length
+                + expiringSoon.length + expiredButActive.length
+            );
 
             if (badge) {
-                if (alerts.length === 0) {
+                if (totalCount === 0) {
                     badge.textContent = 'Sorun yok';
                     badge.className = 'text-[10px] font-bold uppercase tracking-[0.2em] text-green-300 bg-green-500/10 px-3 py-1 rounded-full';
                 } else {
-                    badge.textContent = alerts.length + ' üye';
+                    badge.textContent = totalCount + ' uyarı';
                     badge.className = 'text-[10px] font-bold uppercase tracking-[0.2em] text-yellow-300 bg-yellow-500/10 px-3 py-1 rounded-full';
                 }
             }
 
             if (container) {
-                container.innerHTML = alerts.length
-                    ? alerts.map(renderAlertRow).join('')
-                    : renderAlertsEmptyState();
+                const html = [
+                    expiredButActive.map(renderExpiredButActiveAlertRow).join(''),
+                    dailyLimitAlerts.map(renderDailyLimitAlertRow).join(''),
+                    expiringSoon.map(renderExpiringSoonAlertRow).join(''),
+                    pendingRequests.map(renderPendingRequestAlertRow).join(''),
+                    pendingSubs.map(renderPendingSubscriptionAlertRow).join(''),
+                    usageAlerts.map(renderAlertRow).join(''),
+                ].join('');
+
+                container.innerHTML = totalCount ? html : renderAlertsEmptyState();
             }
         } catch (error) {
             console.error("Failed to load usage alerts:", error);

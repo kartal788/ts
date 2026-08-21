@@ -240,7 +240,42 @@ def _rebalance_user_streams(token: str, total_rate_mbps: float) -> None:
     )
 
 
-async def track_usage_from_stats(stream_id: str, token: str, token_data: dict):
+def _split_stream_snapshot(stream_id: str, part_count: int):
+    """Parçalı (split/virtual) akışlarda her fiziksel parça, ByteStreamer
+    tarafından ACTIVE_STREAMS içinde `{stream_id}-p{index}` anahtarıyla ayrı
+    bir kayıt olarak izlenir (bkz. virtual_dl.virtual_stream_generator).
+    Bu yüzden ana `stream_id` ACTIVE_STREAMS'te hiç oluşmaz ve doğrudan
+    ACTIVE_STREAMS.get(stream_id) her zaman None döner.
+
+    Bu fonksiyon, tüm parçaların (aktif veya RECENT_STREAMS'e taşınmış)
+    toplam byte sayısını toplayarak sanal akışın gerçek toplam kullanımını
+    hesaplar. Ayrıca son parçanın tamamlanıp tamamlanmadığını da döndürür.
+    """
+    total = 0
+    last_part_active = False
+    last_part_found = False
+    for i in range(part_count):
+        sub_id = f"{stream_id}-p{i}"
+        entry = ACTIVE_STREAMS.get(sub_id)
+        if entry is not None:
+            total += entry.get("total_bytes", 0)
+            if i == part_count - 1:
+                last_part_active = True
+                last_part_found = True
+            continue
+        for rec in RECENT_STREAMS:
+            if rec.get("stream_id") == sub_id:
+                total += rec.get("total_bytes", 0)
+                if i == part_count - 1:
+                    last_part_found = True
+                break
+    # Akış bittiğinde son parça artık aktif değildir ama (RECENT_STREAMS'te
+    # bulunmuş ya da hiç başlamamış olsa da) tamamlanmış sayılır.
+    finished = (not last_part_active)
+    return total, finished, last_part_found
+
+
+async def track_usage_from_stats(stream_id: str, token: str, token_data: dict, part_count: int = None):
     await asyncio.sleep(2)
     
     limits = token_data.get("limits", {}) if token_data else {}
@@ -258,6 +293,90 @@ async def track_usage_from_stats(stream_id: str, token: str, token_data: dict):
     try:
         while True:
             await asyncio.sleep(update_interval)
+
+            if part_count:
+                # ── Parçalı (split) dosya akışı ─────────────────────────
+                current_bytes, finished, _ = _split_stream_snapshot(stream_id, part_count)
+                delta = current_bytes - last_tracked_bytes
+                if delta > 0:
+                    try:
+                        await db.update_token_usage(token, delta)
+                        last_tracked_bytes = current_bytes
+                        LOGGER.debug(f"Updated usage (split) for {stream_id}: +{delta} bytes (total: {current_bytes})")
+                    except Exception as e:
+                        LOGGER.error(f"Periodic usage update (split) failed: {e}")
+
+                if finished:
+                    # Son parça artık aktif değil → akış tamamen bitti.
+                    if daily_limit_gb and daily_limit_gb > 0:
+                        final_daily_gb = (initial_daily_bytes + current_bytes) / (1024 ** 3)
+                        used_pct = round((final_daily_gb / daily_limit_gb) * 100, 1)
+                        tg_user_id = token_data.get("user_id") if token_data else None
+                        from pyrogram import enums as _pyrogram_enums
+                        if final_daily_gb >= daily_limit_gb:
+                            _force_stop_token_streams(token)
+                            if token not in _daily_finished_sent:
+                                try:
+                                    already_finished = await db.get_token_daily_limit_finished(token)
+                                    if not already_finished:
+                                        _daily_finished_sent.add(token)
+                                        if tg_user_id:
+                                            try:
+                                                await StreamBot.send_message(
+                                                    chat_id=int(tg_user_id),
+                                                    text=(
+                                                        f"🔴 Günlük Limitiniz Doldu!\n"
+                                                        f"📊 Kullanım : {round(final_daily_gb, 2)} GB / {daily_limit_gb} GB (%{used_pct})\n"
+                                                        f"⚠️ Bugünkü günlük limitiniz aşıldı."
+                                                    ),
+                                                    parse_mode=_pyrogram_enums.ParseMode.HTML,
+                                                )
+                                                LOGGER.info(f"Daily limit 100% finished sent (on close) to user {tg_user_id} for token {token[:8]}")
+                                            except Exception as warn_err:
+                                                LOGGER.warning(f"Daily limit finished notification failed (on close) for {token[:8]}: {warn_err}")
+                                        await db.mark_token_daily_limit_finished(token)
+                                except Exception as e:
+                                    LOGGER.warning(f"Daily limit finished check (on close) failed for {token[:8]}: {e}")
+                    return
+
+                # Aylık limit kontrolü (parçalı akış hâlâ devam ediyor)
+                if monthly_limit_gb and monthly_limit_gb > 0:
+                    current_monthly_gb = (initial_monthly_bytes + current_bytes) / (1024 ** 3)
+                    if current_monthly_gb >= monthly_limit_gb:
+                        LOGGER.debug(f"Monthly limit reached for token, stream {stream_id} may be blocked by verify_token")
+
+                # Günlük limit kontrolü (parçalı akış hâlâ devam ediyor)
+                if daily_limit_gb and daily_limit_gb > 0:
+                    current_daily_gb = (initial_daily_bytes + current_bytes) / (1024 ** 3)
+                    used_pct = round((current_daily_gb / daily_limit_gb) * 100, 1)
+                    tg_user_id = token_data.get("user_id") if token_data else None
+                    if current_daily_gb >= daily_limit_gb:
+                        _force_stop_token_streams(token)
+                        if token not in _daily_finished_sent:
+                            try:
+                                already_finished = await db.get_token_daily_limit_finished(token)
+                                if not already_finished:
+                                    _daily_finished_sent.add(token)
+                                    if tg_user_id:
+                                        from pyrogram import enums as _pyrogram_enums
+                                        try:
+                                            await StreamBot.send_message(
+                                                chat_id=int(tg_user_id),
+                                                text=(
+                                                    f"🔴 Günlük Limitiniz Doldu!\n"
+                                                    f"📊 Kullanım : {round(current_daily_gb, 2)} GB / {daily_limit_gb} GB (%{used_pct})\n"
+                                                    f"⚠️ Bugünkü günlük limitiniz aşıldı."
+                                                ),
+                                                parse_mode=_pyrogram_enums.ParseMode.HTML,
+                                            )
+                                            LOGGER.info(f"Daily limit 100% finished sent to user {tg_user_id} for token {token[:8]}")
+                                        except Exception as warn_err:
+                                            LOGGER.warning(f"Daily limit finished notification failed for {token[:8]}: {warn_err}")
+                                    await db.mark_token_daily_limit_finished(token)
+                            except Exception as warn_err:
+                                LOGGER.warning(f"Daily limit finished check failed for {token[:8]}: {warn_err}")
+                continue
+
             stream_info = ACTIVE_STREAMS.get(stream_id)
             if not stream_info:
                 for rec in RECENT_STREAMS:
@@ -354,16 +473,26 @@ async def track_usage_from_stats(stream_id: str, token: str, token_data: dict):
                     LOGGER.debug(f"Monthly limit reached for token, stream {stream_id} may be blocked by verify_token")
                     
     except asyncio.CancelledError:
-        stream_info = ACTIVE_STREAMS.get(stream_id)
-        if stream_info:
-            current_bytes = stream_info.get("total_bytes", 0)
+        if part_count:
+            current_bytes, _, _ = _split_stream_snapshot(stream_id, part_count)
             delta = current_bytes - last_tracked_bytes
             if delta > 0:
                 try:
                     await db.update_token_usage(token, delta)
-                    LOGGER.info(f"Cancelled - final update for {stream_id}: {delta} bytes")
+                    LOGGER.info(f"Cancelled - final update (split) for {stream_id}: {delta} bytes")
                 except Exception as e:
-                    LOGGER.error(f"Cancelled usage update failed: {e}")
+                    LOGGER.error(f"Cancelled usage update (split) failed: {e}")
+        else:
+            stream_info = ACTIVE_STREAMS.get(stream_id)
+            if stream_info:
+                current_bytes = stream_info.get("total_bytes", 0)
+                delta = current_bytes - last_tracked_bytes
+                if delta > 0:
+                    try:
+                        await db.update_token_usage(token, delta)
+                        LOGGER.info(f"Cancelled - final update for {stream_id}: {delta} bytes")
+                    except Exception as e:
+                        LOGGER.error(f"Cancelled usage update failed: {e}")
 
 
 @router.get("/dl/{token}/{id}/{gecicitoken}/{name}")
@@ -559,7 +688,7 @@ async def virtual_media_streamer(
     parallelism = Telegram.PRE_FETCH
 
     if token and token_data:
-        asyncio.create_task(track_usage_from_stats(stream_id, token, token_data))
+        asyncio.create_task(track_usage_from_stats(stream_id, token, token_data, part_count=len(parts)))
 
     if token:
         await db.add_device_session(token, stream_id)

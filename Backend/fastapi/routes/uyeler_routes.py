@@ -254,21 +254,94 @@ async def admin_uyeler_list_api() -> dict:
 
 async def admin_usage_discrepancies_api() -> dict:
     """
-    "Bugün" sayacı (usage.daily.bytes) ile izleme geçmişindeki (stream_analytics)
-    bugüne ait toplam veri arasında fark olan üyeleri döner. Dashboard'daki
-    "Uyarılar" kartı bu veriyi kullanır.
+    Dashboard'daki "Uyarılar" kartı için tüm uyarı türlerini toplayıp döner:
+      - usage_discrepancy:     "Bugün" sayacı ile izleme geçmişi arasında GB farkı olanlar
+      - daily_limit:           Günlük veri limiti dolan üyeler
+      - pending_request:       İçerik talebi yapıp onaylanmayan üyeler
+      - pending_subscription:  Abonelik planı seçip aboneliği/ödemesi onaylanmayan üyeler
+      - expiring_soon:         Aboneliği 24 saat içinde sona erecek üyeler
+      - expired_but_active:    Aboneliği sona ermiş ama hâlâ "active" işaretli üyeler
     """
     try:
-        rows = await db.get_daily_usage_discrepancies()
+        discrepancy_rows = await db.get_daily_usage_discrepancies()
         alerts = [{
+            "type":          "usage_discrepancy",
             "user_id":       r.get("user_id"),
             "name":          r.get("name"),
             "token":         (r.get("token") or "")[:8] + "..." if r.get("token") else None,
             "history_gb":    _bytes_to_gb(r.get("history_bytes", 0)),
             "daily_gb":      _bytes_to_gb(r.get("daily_bytes", 0)),
             "diff_gb":       _bytes_to_gb(r.get("diff_bytes", 0)),
-        } for r in rows]
-        return {"status": "success", "alerts": alerts, "total": len(alerts)}
+        } for r in discrepancy_rows]
+
+        daily_limit_rows = await db.get_daily_limit_reached_tokens()
+        daily_limit_alerts = [{
+            "type":             "daily_limit",
+            "user_id":          r.get("user_id"),
+            "name":             r.get("name"),
+            "token":            (r.get("token") or "")[:8] + "..." if r.get("token") else None,
+            "daily_used_gb":    _bytes_to_gb(r.get("daily_used_bytes", 0)),
+            "daily_limit_gb":   r.get("daily_limit_gb", 0),
+        } for r in daily_limit_rows]
+
+        pending_request_rows = await db.get_pending_content_request_members()
+        pending_request_alerts = [{
+            "type":               "pending_request",
+            "user_id":            r.get("user_id"),
+            "name":               r.get("name"),
+            "pending_count":      r.get("pending_count", 0),
+            "last_title":         r.get("last_title"),
+            "last_media_type":    r.get("last_media_type"),
+            "first_requested_at": r.get("first_requested_at"),
+            "last_requested_at":  r.get("last_requested_at"),
+        } for r in pending_request_rows]
+
+        pending_subscription_rows = await db.get_pending_subscription_payments()
+        pending_subscription_alerts = [{
+            "type":          "pending_subscription",
+            "user_id":       r.get("user_id"),
+            "name":          r.get("name"),
+            "plan_label":    r.get("plan_label"),
+            "duration_days": r.get("duration_days", 0),
+            "price":         r.get("price", 0),
+            "currency":      r.get("currency", "TRY"),
+            "requested_at":  r.get("requested_at"),
+        } for r in pending_subscription_rows]
+
+        expiring_soon_rows = await db.get_expiring_soon_alerts(hours=24)
+        expiring_soon_alerts = [{
+            "type":            "expiring_soon",
+            "user_id":         r.get("user_id"),
+            "name":            r.get("name"),
+            "expires_at":      r.get("expires_at"),
+            "hours_remaining": r.get("hours_remaining"),
+        } for r in expiring_soon_rows]
+
+        expired_but_active_rows = await db.get_expired_but_active_alerts()
+        expired_but_active_alerts = [{
+            "type":          "expired_but_active",
+            "user_id":       r.get("user_id"),
+            "name":          r.get("name"),
+            "expired_at":    r.get("expired_at"),
+            "overdue_hours": r.get("overdue_hours"),
+        } for r in expired_but_active_rows]
+
+        total = (
+            len(alerts) + len(daily_limit_alerts)
+            + len(pending_request_alerts) + len(pending_subscription_alerts)
+            + len(expiring_soon_alerts) + len(expired_but_active_alerts)
+        )
+
+        return {
+            "status": "success",
+            "alerts": alerts,
+            "daily_limit_alerts": daily_limit_alerts,
+            "pending_request_alerts": pending_request_alerts,
+            "pending_subscription_alerts": pending_subscription_alerts,
+            "expiring_soon_alerts": expiring_soon_alerts,
+            "expired_but_active_alerts": expired_but_active_alerts,
+            "total": total,
+        }
     except Exception as e:
         _logger.error("Internal error", exc_info=True)
         raise HTTPException(status_code=500, detail="Sunucu hatası")

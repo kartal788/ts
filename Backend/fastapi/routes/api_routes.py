@@ -945,6 +945,13 @@ async def revoke_token_api(token: str, delete_subscription: bool = False, user_i
         success = await db.revoke_api_token(token)
         if not success:
             raise HTTPException(status_code=404, detail="Token not found.")
+        # Token silindikten sonra stream_analytics'te kalan "yetim" kayıtları da temizle;
+        # aksi halde dashboard'daki Uyarılar kartında artık var olmayan bu üye için
+        # sahte bir "GB Tutarsızlığı" uyarısı görünmeye devam eder.
+        try:
+            await db.purge_stream_analytics_for_token(token)
+        except Exception as purge_err:
+            _logger.warning(f"revoke_token_api: stream_analytics purge failed: {purge_err}")
         if delete_subscription and user_id:
             await db.manage_subscriber(user_id, "delete")
             await db.delete_user_reminders(user_id)

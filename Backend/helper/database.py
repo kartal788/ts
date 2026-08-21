@@ -2881,6 +2881,24 @@ class Database:
         result = await self.dbs["tracking"]["api_tokens"].delete_one({"token": token})
         return result.deleted_count > 0
 
+    async def purge_stream_analytics_for_token(self, token: str) -> int:
+        """
+        Bir token silindiğinde (abonelik iptali vb.) o token'a ait
+        stream_analytics kayıtlarını da temizler. Aksi halde token
+        api_tokens tablosundan silinmiş olsa bile stream_analytics'te
+        "bugüne" ait kayıtlar kalmaya devam eder ve dashboard'daki
+        "Uyarılar" kartında artık var olmayan üye için sahte bir
+        "GB Tutarsızlığı" (yetim token) uyarısı olarak görünür.
+        """
+        if not token:
+            return 0
+        try:
+            result = await self.dbs["tracking"]["stream_analytics"].delete_many({"user_token": token})
+            return result.deleted_count
+        except Exception as e:
+            LOGGER.warning(f"purge_stream_analytics_for_token error: {e}")
+            return 0
+
     async def link_token_user(self, token: str, user_id: int) -> bool:
         """Link an existing token to a Telegram user_id."""
         result = await self.dbs["tracking"]["api_tokens"].update_one(
@@ -3805,6 +3823,194 @@ class Database:
             return discrepancies
         except Exception as e:
             LOGGER.error(f"get_daily_usage_discrepancies error: {e}")
+            return []
+
+    async def get_daily_limit_reached_tokens(self) -> list:
+        """
+        Günlük veri limitine ulaşmış (daily_limit_finished == True) tokenları döner.
+        Dashboard'daki "Uyarılar" kartında kullanılır.
+        """
+        try:
+            tokens = await self.dbs["tracking"]["api_tokens"].find(
+                {"daily_limit_finished": True},
+                {"token": 1, "name": 1, "user_id": 1, "usage": 1, "limits": 1},
+            ).to_list(None)
+
+            result = []
+            for t in tokens:
+                usage = t.get("usage", {}) or {}
+                limits = t.get("limits", {}) or {}
+                daily_bytes = usage.get("daily", {}).get("bytes", 0)
+                result.append({
+                    "user_id":        t.get("user_id"),
+                    "name":           t.get("name") or (f"Kullanıcı {t.get('user_id')}" if t.get("user_id") else None),
+                    "token":          t.get("token"),
+                    "daily_used_bytes":  daily_bytes,
+                    "daily_limit_gb":    limits.get("daily_limit_gb", 0),
+                })
+            return result
+        except Exception as e:
+            LOGGER.error(f"get_daily_limit_reached_tokens error: {e}")
+            return []
+
+    async def get_expiring_soon_alerts(self, hours: int = 24) -> list:
+        """
+        Aboneliği önümüzdeki `hours` saat içinde sona erecek, hâlâ "active"
+        durumdaki üyeleri döner. Dashboard'daki "Uyarılar" kartında kullanılır.
+        (Telegram hatırlatma bildirimi ayrıca subscription_checker.py üzerinden
+        gönderilir; bu fonksiyon yalnızca admin panelinde görünürlük sağlar.)
+        """
+        try:
+            from datetime import timedelta
+            now = datetime.utcnow()
+            target_time = now + timedelta(hours=hours)
+            cursor = self.dbs["tracking"]["users"].find(
+                {
+                    "subscription_expiry": {"$gt": now, "$lte": target_time},
+                    "subscription_status": "active",
+                },
+                {"_id": 1, "first_name": 1, "username": 1, "subscription_expiry": 1},
+            ).sort("subscription_expiry", ASCENDING)
+
+            result = []
+            async for u in cursor:
+                uid = u.get("_id")
+                name = u.get("first_name") or u.get("username") or (f"Kullanıcı {uid}" if uid else "Bilinmeyen üye")
+                expiry = u.get("subscription_expiry")
+                remaining = None
+                if isinstance(expiry, datetime):
+                    remaining = max(0, int((expiry - now).total_seconds() // 3600))
+                result.append({
+                    "user_id":         uid,
+                    "name":            name,
+                    "expires_at":      expiry.isoformat() if isinstance(expiry, datetime) else expiry,
+                    "hours_remaining": remaining,
+                })
+            return result
+        except Exception as e:
+            LOGGER.error(f"get_expiring_soon_alerts error: {e}")
+            return []
+
+    async def get_expired_but_active_alerts(self) -> list:
+        """
+        Aboneliği zaten sona ermiş (subscription_expiry geçmiş) ama durumu hâlâ
+        "active" olarak işaretli üyeleri döner — normalde günlük sıfırlama/expiry
+        job'ı bunları "expired"e çevirir; burada görünmesi senkronizasyon veya
+        gecikme kaynaklı bir tutarsızlığa işaret eder. Dashboard'daki "Uyarılar"
+        kartında kullanılır.
+        """
+        try:
+            now = datetime.utcnow()
+            cursor = self.dbs["tracking"]["users"].find(
+                {
+                    "subscription_expiry": {"$lt": now},
+                    "subscription_status": "active",
+                },
+                {"_id": 1, "first_name": 1, "username": 1, "subscription_expiry": 1},
+            ).sort("subscription_expiry", ASCENDING)
+
+            result = []
+            async for u in cursor:
+                uid = u.get("_id")
+                name = u.get("first_name") or u.get("username") or (f"Kullanıcı {uid}" if uid else "Bilinmeyen üye")
+                expiry = u.get("subscription_expiry")
+                overdue_hours = None
+                if isinstance(expiry, datetime):
+                    overdue_hours = max(0, int((now - expiry).total_seconds() // 3600))
+                result.append({
+                    "user_id":       uid,
+                    "name":          name,
+                    "expired_at":    expiry.isoformat() if isinstance(expiry, datetime) else expiry,
+                    "overdue_hours": overdue_hours,
+                })
+            return result
+        except Exception as e:
+            LOGGER.error(f"get_expired_but_active_alerts error: {e}")
+            return []
+
+    async def get_pending_content_request_members(self) -> list:
+        """
+        En az bir "pending" (onay bekleyen) içerik talebi olan üyeleri,
+        talep sayısı ve en güncel talep bilgisiyle birlikte döner.
+        Dashboard'daki "Uyarılar" kartında kullanılır.
+        """
+        try:
+            col = self.dbs["tracking"]["content_requests"]
+            pipe = [
+                {"$match": {"status": "pending"}},
+                {"$sort": {"created_at": -1}},
+                {"$group": {
+                    "_id":            "$user_id",
+                    "count":          {"$sum": 1},
+                    "last_title":     {"$first": "$title"},
+                    "last_link":      {"$first": "$link"},
+                    "last_media_type": {"$first": "$media_type"},
+                    "first_requested_at": {"$min": "$created_at"},
+                    "last_requested_at":  {"$max": "$created_at"},
+                }},
+                {"$sort": {"last_requested_at": -1}},
+            ]
+            rows = await col.aggregate(pipe).to_list(None)
+
+            user_ids = [r["_id"] for r in rows if r.get("_id")]
+            users_map: dict = {}
+            if user_ids:
+                ucursor = self.dbs["tracking"]["users"].find(
+                    {"_id": {"$in": user_ids}}, {"_id": 1, "first_name": 1, "username": 1}
+                )
+                async for u in ucursor:
+                    users_map[u["_id"]] = u
+
+            result = []
+            for r in rows:
+                uid = r.get("_id")
+                u = users_map.get(uid, {})
+                name = u.get("first_name") or u.get("username") or (f"Kullanıcı {uid}" if uid else "Bilinmeyen üye")
+                result.append({
+                    "user_id":            uid,
+                    "name":               name,
+                    "pending_count":      r.get("count", 0),
+                    "last_title":         r.get("last_title") or r.get("last_link") or "",
+                    "last_media_type":    r.get("last_media_type"),
+                    "first_requested_at": r.get("first_requested_at").isoformat() if r.get("first_requested_at") else None,
+                    "last_requested_at":  r.get("last_requested_at").isoformat() if r.get("last_requested_at") else None,
+                })
+            return result
+        except Exception as e:
+            LOGGER.error(f"get_pending_content_request_members error: {e}")
+            return []
+
+    async def get_pending_subscription_payments(self) -> list:
+        """
+        Bir abonelik planı seçip ödeme/aboneliği henüz onaylanmamış (pending_payment
+        alanı dolu olan) üyeleri döner. Dashboard'daki "Uyarılar" kartında kullanılır.
+        """
+        try:
+            cursor = self.dbs["tracking"]["users"].find(
+                {"pending_payment": {"$exists": True, "$ne": None}},
+                {"_id": 1, "first_name": 1, "username": 1, "pending_payment": 1},
+            ).sort("pending_payment.date", DESCENDING)
+            users = await cursor.to_list(None)
+
+            result = []
+            for u in users:
+                pp = u.get("pending_payment") or {}
+                if not pp:
+                    continue
+                name = u.get("first_name") or u.get("username") or f"Kullanıcı {u.get('_id')}"
+                requested_at = pp.get("date")
+                result.append({
+                    "user_id":      u.get("_id"),
+                    "name":         name,
+                    "plan_label":   pp.get("label") or "",
+                    "duration_days": pp.get("duration", 0),
+                    "price":        pp.get("price", 0),
+                    "currency":     pp.get("currency", "TRY"),
+                    "requested_at": requested_at.isoformat() if isinstance(requested_at, datetime) else requested_at,
+                })
+            return result
+        except Exception as e:
+            LOGGER.error(f"get_pending_subscription_payments error: {e}")
             return []
 
     async def get_bandwidth_stats(self) -> dict:
