@@ -82,14 +82,11 @@ class Segment:
 class BroadcastSession:
     """Tek bir yayına ait canlı durum."""
 
-    def __init__(self, broadcast_id: str, stream_url: str, buffer_seconds: int = 30, name: str = "",
-                 stream_format: str = "auto"):
+    def __init__(self, broadcast_id: str, stream_url: str, buffer_seconds: int = 30, name: str = ""):
         self.broadcast_id   = broadcast_id
         self.stream_url     = stream_url
         self.buffer_seconds = buffer_seconds
         self.name            = name or "Canlı Yayın"
-        # "auto" (otomatik tespit) | "hls" (M3U8/HLS zorla) | "ts" (Doğrudan MPEG-TS zorla)
-        self.stream_format   = (stream_format or "auto").lower()
 
         # Önbelleğe alınan segmentler: deque of Segment
         self.segments: deque      = deque()
@@ -439,18 +436,6 @@ async def _hls_fetcher(session: BroadcastSession):
     ) as client:
 
         # ── Adım 1: Stream tipini tespit et ──────────────────────────────────
-        # Kullanıcı yayın eklerken formatı elle seçtiyse (hls/ts), otomatik
-        # tespiti tamamen atla — bazı sunucular (özellikle Xtream/IPTV .ts
-        # akışları) content-type veya ilk byte'lara göre yanlış sınıflanabiliyor.
-        if session.stream_format in ("hls", "ts"):
-            stream_mode = session.stream_format
-            active_url  = session.stream_url
-            base        = _base_url(session.stream_url)
-            logger.info(
-                f"[Yayın {session.broadcast_id}] Format elle seçildi: "
-                f"{stream_mode} → {active_url}"
-            )
-
         while session.active and stream_mode is None:
             try:
                 probe_url = active_url
@@ -625,9 +610,8 @@ async def _hls_fetcher(session: BroadcastSession):
                             logger.warning(f"[Yayın {session.broadcast_id}] Segment indirme hatası: {e}")
 
                     # Eski segmentleri temizle
-                    # Kural: en az MIN_SEGS segment tut; üst limit buffer_seconds+10 sn.
-                    # NOT: "15'in katına yuvarlama" adımı kaldırıldı — bkz. TS modundaki
-                    # aynı düzeltmenin açıklaması (gereksiz tampon sığlaşması → donma).
+                    # Kural: en az 15 segment tut; üst limit buffer_seconds+10 sn
+                    # ama segment sayısı 15'in katına (15, 30, 45…) yuvarlanır
                     async with session.segment_lock:
                         segs_list = list(session.segments)
                         total_dur = sum(s.duration for s in segs_list)
@@ -635,6 +619,10 @@ async def _hls_fetcher(session: BroadcastSession):
                         while len(segs_list) > MIN_SEGS and total_dur > session.buffer_seconds + 10:
                             removed = segs_list.pop(0)
                             total_dur -= removed.duration
+                        # Segment sayısını 15'in katına yuvarla (aşağı)
+                        target = max(MIN_SEGS, (len(segs_list) // MIN_SEGS) * MIN_SEGS)
+                        while len(segs_list) > target:
+                            segs_list.pop(0)
                         session.segments = deque(segs_list)
                         session.buffered_segments = len(session.segments)
 
@@ -672,22 +660,10 @@ async def _hls_fetcher(session: BroadcastSession):
         # ── Adım 2b: MPEG-TS akış modu ───────────────────────────────────────
         elif stream_mode == "ts":
             logger.info(f"[Yayın {session.broadcast_id}] MPEG-TS akış modu başladı ({TS_CHUNK_SECONDS}s chunk)")
-            reconnect_delay = 2.0   # her başarısız denemede artar, max 15 sn
+            reconnect_delay = 1.0   # her başarısız denemede artar, max 10 sn
             total_received  = 0     # bu oturumda toplam alınan byte
 
-            # ── Bilinen IPTV/Xtream davranışı: bağlantı KOPMUYOR ama ~60 sn sonra
-            # hız neredeyse sıfıra düşürülüyor (bağlantı başına süre/hız sınırlaması —
-            # paylaşımlı panellerde yaygın bir "anti-leech" önlemi). Soket teknik
-            # olarak açık kaldığından httpx'in read-timeout'u da tetiklenmiyor ve
-            # eski kod sonsuza kadar veri bekleyip donuyordu. Çözüm: sınıra çarpmayı
-            # BEKLEMEK yerine, süre dolmadan PROAKTİF olarak bağlantıyı kendimiz
-            # tazeliyoruz + hiç veri gelmeyen (gerçekten durmuş) bağlantılar için de
-            # ayrı, kısa bir "stall" (durgunluk) zaman aşımı uyguluyoruz.
-            _TS_MAX_CONN_SECONDS = 45000.0   # bu süreden önce proaktif olarak yeniden bağlan
-            _TS_STALL_TIMEOUT    = 100.0   # bu süre boyunca HİÇ byte gelmezse durmuş say
-
             while session.active:
-                proactive_cycle = False
                 try:
                     chunk_bytes = int(ts_bitrate_bps * TS_CHUNK_SECONDS / 8)
                     chunk_bytes = max(chunk_bytes, 188 * 200)        # en az 200 TS paketi
@@ -698,116 +674,70 @@ async def _hls_fetcher(session: BroadcastSession):
                     connect_time = asyncio.get_event_loop().time()
                     bytes_this_conn = 0
 
-                    # ── Her denemede TAMAMEN YENİ bir bağlantı/istemci kullan ──
-                    # Kritik: paylaşılan `client` (keep-alive havuzlu) kullanılırsa,
-                    # bağlantı bittiğinde soket hemen kapanmaz, havuzda "idle" beklemeye
-                    # devam eder. Çoğu IPTV/Xtream kaynağı hesap başına TEK eşzamanlı
-                    # bağlantıya izin verir; soket sunucu tarafında kendi idle-timeout'u
-                    # dolana kadar "meşgul" sayılmaya devam eder ve yeniden bağlanma
-                    # denemesi reddedilir/askıda kalır. Bunu önlemek için:
-                    #   - Connection: close   → sunucuya bağlantıyı kalıcı yapmamasını söyler
-                    #   - Ayrı, kısa ömürlü AsyncClient → bağlantı bitince soket GERÇEKTEN
-                    #     kapanır, paylaşılan connection pool'da askıda kalmaz.
-                    async with httpx.AsyncClient(
-                        timeout=httpx.Timeout(connect=15, read=20, write=10, pool=10),
-                        follow_redirects=True,
-                        headers={
-                            "User-Agent": "Mozilla/5.0 (compatible; HLSProxy/1.0)",
-                            "Connection": "close",
-                        },
-                    ) as ts_client:
-                        async with ts_client.stream("GET", active_url) as resp:
-                            resp.raise_for_status()
-                            byte_iter = resp.aiter_bytes(chunk_size=65536)
+                    # Tek bağlantıda akışı sonuna kadar oku — döngü başına dönme
+                    async with client.stream(
+                        "GET", active_url,
+                        timeout=httpx.Timeout(connect=15, read=30, write=10, pool=10),
+                        headers={"User-Agent": "Mozilla/5.0 (compatible; HLSProxy/1.0)",
+                                 "Connection": "keep-alive"},
+                    ) as resp:
+                        resp.raise_for_status()
+                        async for raw in resp.aiter_bytes(chunk_size=65536):
+                            if not session.active:
+                                break
+                            buf.extend(raw)
+                            bytes_this_conn += len(raw)
+                            total_received  += len(raw)
 
-                            while True:
-                                if not session.active:
-                                    break
+                            while len(buf) >= chunk_bytes:
+                                data  = bytes(buf[:chunk_bytes])
+                                buf   = buf[chunk_bytes:]
 
-                                # Proaktif çevrim: kaynağın kendi limitine çarpmadan
-                                # önce bağlantıyı temiz bir şekilde biz kapatıp yeniden
-                                # açıyoruz. Buffer'da halihazırda ~90 sn'lik segment
-                                # olduğundan bu geçiş izleyici tarafında fark edilmez.
-                                if asyncio.get_event_loop().time() - connect_time > _TS_MAX_CONN_SECONDS:
-                                    proactive_cycle = True
-                                    break
+                                elapsed = asyncio.get_event_loop().time() - chunk_start
+                                chunk_start = asyncio.get_event_loop().time()
 
-                                try:
-                                    raw = await asyncio.wait_for(
-                                        byte_iter.__anext__(), timeout=_TS_STALL_TIMEOUT
+                                async with session.segment_lock:
+                                    seq = session._next_seq
+                                    session._next_seq += 1
+                                    seg = Segment(
+                                        seq=seq,
+                                        uri=f"ts_chunk_{seq}",
+                                        data=data,
+                                        duration=float(TS_CHUNK_SECONDS),
                                     )
-                                except StopAsyncIteration:
-                                    break
-                                except asyncio.TimeoutError:
-                                    logger.warning(
-                                        f"[Yayın {session.broadcast_id}] TS veri akışı {_TS_STALL_TIMEOUT:.0f}sn "
-                                        f"durdu (throttle/stall şüphesi) — bağlantı yenileniyor"
-                                    )
-                                    raise
+                                    session.segments.append(seg)
+                                    session.segment_size_kb   = len(data) // 1024
+                                    session.buffered_segments = len(session.segments)
 
-                                buf.extend(raw)
-                                bytes_this_conn += len(raw)
-                                total_received  += len(raw)
+                                # Gerçek bit hızını güncelle
+                                ts_bitrate_bps = max(500_000, int(len(data) * 8 / TS_CHUNK_SECONDS))
 
-                                while len(buf) >= chunk_bytes:
-                                    data  = bytes(buf[:chunk_bytes])
-                                    buf   = buf[chunk_bytes:]
+                                # Eski segmentleri temizle
+                                # Kural: en az 15 segment tut; üst limit buffer_seconds+10 sn
+                                # ama segment sayısı 15'in katına (15, 30, 45…) yuvarlanır
+                                async with session.segment_lock:
+                                    segs_list = list(session.segments)
+                                    total_dur = sum(s.duration for s in segs_list)
+                                    MIN_SEGS  = 15
+                                    while len(segs_list) > MIN_SEGS and total_dur > session.buffer_seconds + 10:
+                                        segs_list.pop(0)
+                                        total_dur -= TS_CHUNK_SECONDS
+                                    # Segment sayısını 15'in katına yuvarla (aşağı)
+                                    target = max(MIN_SEGS, (len(segs_list) // MIN_SEGS) * MIN_SEGS)
+                                    while len(segs_list) > target:
+                                        segs_list.pop(0)
+                                    session.segments = deque(segs_list)
+                                    session.buffered_segments = len(session.segments)
 
-                                    elapsed = asyncio.get_event_loop().time() - chunk_start
-                                    chunk_start = asyncio.get_event_loop().time()
-
-                                    async with session.segment_lock:
-                                        seq = session._next_seq
-                                        session._next_seq += 1
-                                        seg = Segment(
-                                            seq=seq,
-                                            uri=f"ts_chunk_{seq}",
-                                            data=data,
-                                            duration=float(TS_CHUNK_SECONDS),
-                                        )
-                                        session.segments.append(seg)
-                                        session.segment_size_kb   = len(data) // 1024
-                                        session.buffered_segments = len(session.segments)
-
-                                    # Gerçek bit hızını güncelle
-                                    ts_bitrate_bps = max(500_000, int(len(data) * 8 / TS_CHUNK_SECONDS))
-
-                                    # Eski segmentleri temizle
-                                    # Kural: en az MIN_SEGS segment tut; üst limit buffer_seconds+10 sn.
-                                    # NOT: Eskiden burada segment sayısını 15'in katına aşağı
-                                    # yuvarlayan ek bir adım vardı (örn. 29 segment → 15'e budanıyordu).
-                                    # Bu, süre limiti (buffer_seconds+10) hâlâ izin veriyor olsa
-                                    # bile tamponu gereksiz yere sığlaştırıp segmentlerin
-                                    # oynatıcı henüz istemeden önbellekten düşmesine, dolayısıyla
-                                    # 404 döngüsüne ve donmaya yol açıyordu. Kaldırıldı.
-                                    async with session.segment_lock:
-                                        segs_list = list(session.segments)
-                                        total_dur = sum(s.duration for s in segs_list)
-                                        MIN_SEGS  = 15
-                                        while len(segs_list) > MIN_SEGS and total_dur > session.buffer_seconds + 10:
-                                            segs_list.pop(0)
-                                            total_dur -= TS_CHUNK_SECONDS
-                                        session.segments = deque(segs_list)
-                                        session.buffered_segments = len(session.segments)
-
-                                    logger.debug(
-                                        f"[Yayın {session.broadcast_id}] TS chunk#{seq} "
-                                        f"({len(data)//1024} KB)"
-                                    )
+                                logger.debug(
+                                    f"[Yayın {session.broadcast_id}] TS chunk#{seq} "
+                                    f"({len(data)//1024} KB)"
+                                )
 
                     # Akış kapandı — ne kadar veri geldi?
                     conn_duration = asyncio.get_event_loop().time() - connect_time
                     if session.active:
-                        if proactive_cycle:
-                            # Kaynak limitine çarpmadan önce biz kapattık — hata değil,
-                            # normal döngü. Beklemeden hemen yeni bağlantı aç.
-                            logger.info(
-                                f"[Yayın {session.broadcast_id}] TS bağlantısı proaktif olarak "
-                                f"yenileniyor ({bytes_this_conn // 1024} KB, {conn_duration:.1f}s)"
-                            )
-                            reconnect_delay = 2.0
-                            await asyncio.sleep(0.2)
-                        elif bytes_this_conn == 0:
+                        if bytes_this_conn == 0:
                             # Hiç veri gelmedi → sunucu bu URL'yi kabul etmiyor
                             logger.warning(
                                 f"[Yayın {session.broadcast_id}] TS bağlantısı veri vermeden kapandı "
@@ -815,13 +745,13 @@ async def _hls_fetcher(session: BroadcastSession):
                                 f"{reconnect_delay:.0f}s beklenip yeniden denenecek"
                             )
                             await asyncio.sleep(reconnect_delay)
-                            reconnect_delay = min(reconnect_delay * 2, 15.0)
+                            reconnect_delay = min(reconnect_delay * 2, 10.0)
                         else:
                             logger.warning(
                                 f"[Yayın {session.broadcast_id}] TS akışı kapandı "
                                 f"({bytes_this_conn // 1024} KB, {conn_duration:.1f}s) — yeniden bağlanıyor"
                             )
-                            reconnect_delay = 2.0  # başarılı bağlantı sonrası sıfırla
+                            reconnect_delay = 1.0  # başarılı bağlantı sonrası sıfırla
                             await asyncio.sleep(1)
 
                 except asyncio.CancelledError:
@@ -835,7 +765,7 @@ async def _hls_fetcher(session: BroadcastSession):
                             f"[Yayın {session.broadcast_id}] .ts URL 404 → uzantısız URL'ye geçiliyor: {fallback_url}"
                         )
                         active_url      = fallback_url
-                        reconnect_delay = 2.0
+                        reconnect_delay = 1.0
                         await asyncio.sleep(1)
                     else:
                         logger.error(
@@ -843,11 +773,11 @@ async def _hls_fetcher(session: BroadcastSession):
                             f"({active_url}) — {reconnect_delay:.0f}s sonra yeniden bağlanıyor"
                         )
                         await asyncio.sleep(reconnect_delay)
-                        reconnect_delay = min(reconnect_delay * 2, 15.0)
+                        reconnect_delay = min(reconnect_delay * 2, 10.0)
                 except Exception as e:
-                    logger.error(f"[Yayın {session.broadcast_id}] TS akış hatası: {type(e).__name__}: {e} — {reconnect_delay:.0f}s sonra yeniden bağlanıyor")
+                    logger.error(f"[Yayın {session.broadcast_id}] TS akış hatası: {e} — {reconnect_delay:.0f}s sonra yeniden bağlanıyor")
                     await asyncio.sleep(reconnect_delay)
-                    reconnect_delay = min(reconnect_delay * 2, 15.0)
+                    reconnect_delay = min(reconnect_delay * 2, 10.0)
 
     logger.info(f"[Yayın {session.broadcast_id}] Fetcher durdu.")
 
@@ -900,16 +830,14 @@ async def yayin_delete(broadcast_id: str, _: bool = Depends(require_auth)):
 # ─── Admin: Start / Stop ──────────────────────────────────────────────────────
 
 async def _start_session(broadcast_id: str, bc: dict):
-    # buffer_seconds çok küçükse oynatıcı segmentlere yetişemez → minimum zorla.
-    # 60s: 45s'lik proaktif TS yeniden bağlanma döngüsünü ve oynatıcı tarafındaki
-    # segment retry/backoff süresini rahatça absorbe edebilecek bir pay bırakır.
-    buffer_secs = max(60, int(bc.get("buffer_seconds", 60)))
+    # buffer_seconds çok küçükse (< 10) oynatıcı segmentlere yetişemez → minimum 10 zorla
+    # Ek: 15 segment * TS_CHUNK_SECONDS (2-6s) = en az 30s buffer gerekebilir → minimum 30 zorla
+    buffer_secs = max(30, int(bc.get("buffer_seconds", 30)))
     session = BroadcastSession(
         broadcast_id   = broadcast_id,
         stream_url     = bc["stream_url"],
         buffer_seconds = buffer_secs,
         name           = bc.get("name", "Canlı Yayın"),
-        stream_format  = bc.get("stream_format", "auto"),
     )
     session.active = True
     task = asyncio.create_task(_hls_fetcher(session))
