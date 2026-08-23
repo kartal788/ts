@@ -165,6 +165,16 @@
                         <i class="fa-solid fa-bolt text-primary"></i> Hızlı Erişim
                     </h3>
                     <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                        <a href="/admin/dashboard" class="glass-panel p-5 rounded-[2rem] hover:bg-primary/5 transition-all group border border-hairline flex flex-col items-center text-center gap-3">
+                            <div class="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary group-hover:scale-110 transition-transform">
+                                <i class="fa-solid fa-user-shield"></i>
+                            </div>
+                            <div>
+                                <h4 class="font-bold text-sm text-text">Yönetici</h4>
+                                <p class="text-[11px] text-text-secondary mt-0.5">Yönetici sayfasına gidin</p>
+                            </div>
+                        </a>
+
                         <a href="/link-ekle" class="glass-panel p-5 rounded-[2rem] hover:bg-primary/5 transition-all group border border-hairline flex flex-col items-center text-center gap-3">
                             <div class="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary group-hover:scale-110 transition-transform">
                                 <i class="fa-solid fa-link"></i>
@@ -175,16 +185,6 @@
                             </div>
                         </a>
 
-                        <a href="/admin/uyeler" class="glass-panel p-5 rounded-[2rem] hover:bg-accent/5 transition-all group border border-hairline flex flex-col items-center text-center gap-3">
-                            <div class="w-12 h-12 rounded-2xl bg-accent/10 flex items-center justify-center text-accent group-hover:scale-110 transition-transform">
-                                <i class="fa-solid fa-users"></i>
-                            </div>
-                            <div>
-                                <h4 class="font-bold text-sm text-text">Üyeler</h4>
-                                <p class="text-[11px] text-text-secondary mt-0.5">Kayıtlı üyeleri yönetin</p>
-                            </div>
-                        </a>
-
                         <a href="/admin/sunucu" class="glass-panel p-5 rounded-[2rem] hover:bg-primary/5 transition-all group border border-hairline flex flex-col items-center text-center gap-3">
                             <div class="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary group-hover:scale-110 transition-transform">
                                 <i class="fa-solid fa-server"></i>
@@ -192,6 +192,26 @@
                             <div>
                                 <h4 class="font-bold text-sm text-text">Sunucu</h4>
                                 <p class="text-[11px] text-text-secondary mt-0.5">Sunucu ayarlarını yönetin</p>
+                            </div>
+                        </a>
+
+                        <a href="/admin/araclar" class="glass-panel p-5 rounded-[2rem] hover:bg-accent/5 transition-all group border border-hairline flex flex-col items-center text-center gap-3">
+                            <div class="w-12 h-12 rounded-2xl bg-accent/10 flex items-center justify-center text-accent group-hover:scale-110 transition-transform">
+                                <i class="fa-solid fa-toolbox"></i>
+                            </div>
+                            <div>
+                                <h4 class="font-bold text-sm text-text">Araçlar</h4>
+                                <p class="text-[11px] text-text-secondary mt-0.5">Sistem araçlarına erişin</p>
+                            </div>
+                        </a>
+
+                        <a href="/admin/access" class="glass-panel p-5 rounded-[2rem] hover:bg-primary/5 transition-all group border border-hairline flex flex-col items-center text-center gap-3">
+                            <div class="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary group-hover:scale-110 transition-transform">
+                                <i class="fa-solid fa-key"></i>
+                            </div>
+                            <div>
+                                <h4 class="font-bold text-sm text-text">Erişim</h4>
+                                <p class="text-[11px] text-text-secondary mt-0.5">Erişim ve token yönetimi</p>
                             </div>
                         </a>
 
@@ -311,7 +331,7 @@
                         … kontrol ediliyor
                     </span>
                 </div>
-                <p class="text-sm text-text-secondary">Limit, istek, abonelik talebi vb. uyarılar</p>
+                <p class="text-sm text-text-secondary">Limit, abonelik talebi vb. uyarılar</p>
             </div>
 
             <div id="alerts-container" class="p-6 space-y-3">
@@ -323,7 +343,7 @@
         </div>
 
         <!-- Access Management Section -->
-        <div class="theme-card rounded-xl p-8 shadow-xl mb-8">
+        <div class="glass-panel rounded-[2.5rem] p-8 mb-8">
             <div class="text-center mb-8">
                 <div
                     class="w-16 h-16 theme-primary rounded-full flex items-center justify-center mx-auto mb-4 bg-opacity-20 text-primary">
@@ -353,7 +373,7 @@
                 </div>
 
                 <div id="create-form-container"
-                    class="hidden mt-4 bg-gray-50 p-6 rounded-xl border border-gray-200 transition-all duration-300">
+                    class="hidden mt-4 bg-gray-50 p-6 rounded-[2rem] border border-gray-200 transition-all duration-300">
                     <form onsubmit="createToken(event)" class="flex flex-col gap-4">
                         <!-- Satır 1: Ad + Limitler -->
                         <div class="flex flex-col md:flex-row gap-4 items-end">
@@ -780,6 +800,56 @@
             </div>`;
     }
 
+    function renderBroadcastCard(bc) {
+        const name = escapeHtmlLocal(bc.name || 'Canlı Yayın');
+        const viewers = Array.isArray(bc.viewers) ? bc.viewers : [];
+        const viewerCount = bc.viewer_count ?? viewers.length;
+        const totalMb = ((bc.total_bytes_served || 0) / 1024 / 1024).toFixed(1);
+        const bufferedSegments = bc.buffered_segments ?? 0;
+        const viewerNamesHtml = viewers.length
+            ? viewers.map(v => `<span class="text-[10px] font-semibold px-2 py-1 rounded-lg bg-primary/10 text-primary">${escapeHtmlLocal(v)}</span>`).join('')
+            : `<span class="text-[11px] text-text-secondary">İzleyici yok</span>`;
+
+        return `
+            <div class="stream-card rounded-[2rem] p-5">
+                <div class="flex justify-between items-start gap-3">
+                    <div class="min-w-0 pr-2">
+                        <h5 class="font-bold text-sm text-text truncate">${name}</h5>
+                        <div class="mt-1 flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-widest text-text-secondary">
+                            <span>Yayın</span>
+                        </div>
+                    </div>
+                    <span class="text-[10px] font-bold px-2 py-1 rounded-lg uppercase whitespace-nowrap stream-badge-live">
+                        canlı
+                    </span>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3 mt-4 pt-4 border-t border-hairline">
+                    <div class="text-center">
+                        <p class="text-[9px] text-text-secondary uppercase tracking-widest font-bold">İzleyici</p>
+                        <p class="text-xs font-bold text-text">${viewerCount}</p>
+                    </div>
+                    <div class="text-center">
+                        <p class="text-[9px] text-text-secondary uppercase tracking-widest font-bold">Toplam</p>
+                        <p class="text-xs font-bold text-text">${totalMb} MB</p>
+                    </div>
+                    <div class="text-center">
+                        <p class="text-[9px] text-text-secondary uppercase tracking-widest font-bold">Buffer</p>
+                        <p class="text-xs font-bold text-text">${bufferedSegments} segment</p>
+                    </div>
+                    <div class="text-center">
+                        <p class="text-[9px] text-text-secondary uppercase tracking-widest font-bold">Durum</p>
+                        <p class="text-xs font-bold text-text">active</p>
+                    </div>
+                </div>
+
+                <div class="mt-4 pt-4 border-t border-hairline">
+                    <p class="text-[9px] text-text-secondary uppercase tracking-widest font-bold mb-2">İzleyenler</p>
+                    <div class="flex flex-wrap gap-1.5">${viewerNamesHtml}</div>
+                </div>
+            </div>`;
+    }
+
     function renderStreamsEmptyState() {
         return `
             <div class="glass-panel p-8 rounded-[2rem] text-center border-dashed border-hairline">
@@ -797,23 +867,41 @@
         const sysLiveStreams = document.getElementById('sys-live-streams');
 
         try {
-            const response = await fetch('/stream/stats');
-            if (response.ok) {
-                const data = await response.json();
+            // Telegram tabanlı indirme/izleme oturumları ve yayin.html'den
+            // eklenip başlatılan HLS canlı yayınları ayrı sistemlerde tutuluyor;
+            // panelde ikisini birden göstermek için paralel çekiyoruz.
+            const [streamResponse, broadcastResponse] = await Promise.all([
+                fetch('/stream/stats'),
+                fetch('/api/yayin/active-status').catch(() => null),
+            ]);
+
+            let activeStreams = [];
+            let recentStreams = [];
+            if (streamResponse && streamResponse.ok) {
+                const data = await streamResponse.json();
                 // Backend zaten active + total_bytes > 0 filtresi uyguluyor
-                const activeStreams = data.active_streams || [];
-                const recentStreams = data.recent_streams || [];
+                activeStreams = data.active_streams || [];
+                recentStreams = data.recent_streams || [];
+            }
 
-                if (liveCount) liveCount.textContent = activeStreams.length + ' Aktif';
-                if (liveNowCount) liveNowCount.textContent = String(activeStreams.length);
-                if (recentCount) recentCount.textContent = String(recentStreams.length);
-                if (sysLiveStreams) sysLiveStreams.textContent = activeStreams.length + ' Aktif';
+            let activeBroadcasts = [];
+            if (broadcastResponse && broadcastResponse.ok) {
+                const bdata = await broadcastResponse.json();
+                // Sadece fetcher'ı gerçekten çalışan (session aktif) yayınları göster
+                activeBroadcasts = (bdata.broadcasts || []).filter(b => b.active);
+            }
 
-                if (container) {
-                    container.innerHTML = activeStreams.length
-                        ? activeStreams.map(renderStreamCard).join('')
-                        : renderStreamsEmptyState();
-                }
+            const totalActive = activeStreams.length + activeBroadcasts.length;
+
+            if (liveCount) liveCount.textContent = totalActive + ' Aktif';
+            if (liveNowCount) liveNowCount.textContent = String(totalActive);
+            if (recentCount) recentCount.textContent = String(recentStreams.length);
+            if (sysLiveStreams) sysLiveStreams.textContent = totalActive + ' Aktif';
+
+            if (container) {
+                const cardsHtml = activeBroadcasts.map(renderBroadcastCard).join('')
+                    + activeStreams.map(renderStreamCard).join('');
+                container.innerHTML = totalActive ? cardsHtml : renderStreamsEmptyState();
             }
         } catch (error) {
             console.error("Failed to update active streams:", error);
@@ -925,7 +1013,14 @@
     function formatDateLocal(iso) {
         if (!iso) return '';
         try {
-            return new Date(iso).toLocaleString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+            // Backend tarihleri UTC olarak üretiyor ama saat dilimi eki (Z/+00:00) içermiyor.
+            // Bu yüzden tarayıcının string'i kendi yerel saatiymiş gibi yorumlamasını
+            // engellemek için, eksikse sonuna 'Z' ekleyip UTC olduğunu açıkça belirtiyoruz.
+            let normalized = String(iso);
+            if (!/[zZ]|[+-]\d{2}:?\d{2}$/.test(normalized)) {
+                normalized += 'Z';
+            }
+            return new Date(normalized).toLocaleString('tr-TR', { timeZone: 'Europe/Istanbul', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
         } catch (e) { return ''; }
     }
 
@@ -990,28 +1085,6 @@
                     Günlük kullanım: <span class="font-bold text-text">${formatGbLocal(used)}</span>
                     ${limit ? ` / ${formatGbLocal(limit)} limit` : ''}
                 </p>
-            </div>`;
-    }
-
-    function renderPendingRequestAlertRow(alert) {
-        const name  = escapeHtmlLocal(alert.name || 'Bilinmeyen üye');
-        const title = escapeHtmlLocal(alert.last_title || 'Bilinmeyen içerik');
-        const count = alert.pending_count || 0;
-        const lastAt = formatDateLocal(alert.last_requested_at);
-
-        return `
-            <div class="glass-panel rounded-2xl p-4 border border-blue-500/10">
-                <div class="flex items-start justify-between gap-3 flex-wrap">
-                    <div class="min-w-0">
-                        <span class="text-[9px] font-bold uppercase tracking-widest text-blue-300/80">Onay Bekleyen İstek</span>
-                        <h5 class="font-bold text-sm text-text truncate">${name}</h5>
-                        <p class="text-[10px] text-text-secondary mt-0.5 truncate">Son istek: ${title}</p>
-                    </div>
-                    <span class="text-[10px] font-bold px-2 py-1 rounded-lg uppercase whitespace-nowrap text-blue-300 bg-blue-500/10">
-                        ${count} istek
-                    </span>
-                </div>
-                ${lastAt ? `<p class="text-xs text-text-secondary mt-3">Son talep: ${lastAt}</p>` : ''}
             </div>`;
     }
 
@@ -1108,15 +1181,16 @@
 
             const usageAlerts        = data.alerts || [];
             const dailyLimitAlerts   = data.daily_limit_alerts || [];
-            const pendingRequests    = data.pending_request_alerts || [];
             const pendingSubs        = data.pending_subscription_alerts || [];
             const expiringSoon       = data.expiring_soon_alerts || [];
             const expiredButActive   = data.expired_but_active_alerts || [];
 
-            const totalCount = data.total ?? (
-                usageAlerts.length + dailyLimitAlerts.length + pendingRequests.length + pendingSubs.length
-                + expiringSoon.length + expiredButActive.length
-            );
+            // Not: Dizi/film istekleri (pending_request_alerts) bilinçli olarak
+            // Uyarılar bölümünde gösterilmiyor. Bu yüzden toplam sayı, backend'in
+            // döndürdüğü 'total' yerine (o istek uyarılarını da içeriyor) burada
+            // gösterilen kategorilerden ayrıca hesaplanıyor.
+            const totalCount = usageAlerts.length + dailyLimitAlerts.length + pendingSubs.length
+                + expiringSoon.length + expiredButActive.length;
 
             if (badge) {
                 if (totalCount === 0) {
@@ -1133,7 +1207,6 @@
                     expiredButActive.map(renderExpiredButActiveAlertRow).join(''),
                     dailyLimitAlerts.map(renderDailyLimitAlertRow).join(''),
                     expiringSoon.map(renderExpiringSoonAlertRow).join(''),
-                    pendingRequests.map(renderPendingRequestAlertRow).join(''),
                     pendingSubs.map(renderPendingSubscriptionAlertRow).join(''),
                     usageAlerts.map(renderAlertRow).join(''),
                 ].join('');

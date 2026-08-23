@@ -86,6 +86,7 @@ class TVShowSchema(BaseModel):
     certification_us: Optional[str] = None  # ABD sertifikası
     updated_on: datetime = Field(default_factory=datetime.utcnow)
     seasons: List[Season] = Field(default_factory=list)
+    visibility: Optional[dict] = None  # {"mode": "subscribers"|"selected", "member_ids": [int]}
 
 
 # ---------------------------
@@ -125,3 +126,4 @@ class MovieSchema(BaseModel):
     certification_us: Optional[str] = None  # ABD sertifikası (MPAA)
     updated_on: datetime = Field(default_factory=datetime.utcnow)
     telegram: Optional[List[QualityDetail]]
+    visibility: Optional[dict] = None  # {"mode": "subscribers"|"selected", "member_ids": [int]}

@@ -153,7 +153,7 @@
         <div class="flex flex-col gap-2">
           <button onclick="toggleBan()" id="adm-ban-btn"
             class="px-4 py-2 bg-gray-500/10 hover:bg-gray-500/20 text-gray-300 rounded-xl text-sm font-medium transition-all text-left">
-            <i class="fas fa-ban mr-1.5"></i><span id="adm-ban-label">Üyeyi Banla</span>
+            <i class="fas fa-ban mr-1.5"></i><span id="adm-ban-label">Üyeyi Yasakla</span>
           </button>
           <button onclick="regenerateToken()" id="adm-regen-btn"
             class="px-4 py-2 bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 rounded-xl text-sm font-medium transition-all text-left">
@@ -162,6 +162,103 @@
         </div>
       </div>
     </div>
+  </div>
+
+  <!-- Erişim İzinleri (Sadece Seçili Videolar) -->
+  <div class="theme-card rounded-2xl border p-6 mb-6">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-lg font-bold flex items-center gap-2">
+        <i class="fas fa-user-shield text-primary"></i> Erişim İzinleri
+      </h2>
+      <span id="acc-msg" class="text-xs"></span>
+    </div>
+
+    <!-- Sadece Seçili Videolar -->
+    <div>
+      <div class="flex items-center justify-between mb-3">
+        <div>
+          <div class="text-sm font-semibold flex items-center gap-2">
+            <i class="fas fa-list-check text-primary"></i> Sadece Seçili Videoları Göster
+          </div>
+          <p class="text-xs theme-text-secondary mt-1 leading-relaxed max-w-2xl">
+            Bu ayar açıldığında üye,
+            <strong class="text-text">SADECE</strong> aşağıda seçtiğiniz film/dizileri görebilir.
+            IMDB, TMDB ID'si ile veya arama yaparak video ekleyin.
+          </p>
+        </div>
+        <label class="flex items-center gap-2 text-xs theme-text-secondary cursor-pointer flex-shrink-0">
+          <input type="checkbox" id="acc-selected-only-toggle" onchange="toggleSelectedOnlyMode()">
+          Aktif
+        </label>
+      </div>
+
+      <div id="acc-selected-only-body" class="hidden">
+        <label class="flex items-center gap-2 text-xs theme-text-secondary cursor-pointer mb-4 w-fit">
+          <input type="checkbox" id="acc-include-live-toggle">
+          <span class="flex items-center gap-1.5">
+            <i class="fas fa-satellite-dish text-primary"></i>
+            Canlı Yayın koleksiyonunu da ekle
+          </span>
+        </label>
+
+        <div class="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)] gap-4">
+          <div class="flex flex-col sm:flex-row gap-2">
+            <div class="relative flex-1">
+              <input id="acc-sel-video-search" type="text" placeholder="Film/dizi ara…"
+                class="w-full text-sm px-3 py-2 rounded-xl border focus:outline-none focus:border-primary"
+                oninput="searchAccessVideoSel(this.value)">
+            </div>
+            <div class="flex gap-1.5">
+              <input id="acc-sel-video-imdb-input" type="text" placeholder="IMDB ID (tt…)"
+                class="w-32 text-xs px-2.5 py-2 rounded-lg border focus:outline-none focus:border-primary">
+              <input id="acc-sel-video-tmdb-input" type="text" placeholder="TMDB ID"
+                class="w-24 text-xs px-2.5 py-2 rounded-lg border focus:outline-none focus:border-primary">
+              <select id="acc-sel-video-tmdb-type"
+                class="text-xs px-1 py-2 rounded-lg border focus:outline-none focus:border-primary">
+                <option value="movie">Film</option>
+                <option value="tv">Dizi</option>
+              </select>
+              <button type="button" onclick="addAccessVideoById()"
+                class="text-xs px-3 py-2 rounded-lg border hover:border-primary theme-text-secondary hover:text-primary transition whitespace-nowrap">
+                <i class="fas fa-plus mr-1"></i>ID ile Ekle
+              </button>
+            </div>
+          </div>
+
+          <!-- Arama sonuçları: 6x4 poster ızgarası + sayfalama -->
+          <div id="acc-sel-video-search-results" class="hidden">
+            <div id="acc-sel-video-search-grid"
+              class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-3"></div>
+            <div class="flex items-center justify-between mt-3">
+              <button type="button" id="acc-sel-search-prev" onclick="changeAccVideoSelPage(-1)"
+                class="text-xs px-3 py-1.5 rounded-lg border hover:border-primary theme-text-secondary hover:text-primary transition disabled:opacity-40 disabled:pointer-events-none">
+                <i class="fas fa-chevron-left mr-1"></i>Önceki
+              </button>
+              <span id="acc-sel-search-page-info" class="text-xs theme-text-secondary">Sayfa 1</span>
+              <button type="button" id="acc-sel-search-next" onclick="changeAccVideoSelPage(1)"
+                class="text-xs px-3 py-1.5 rounded-lg border hover:border-primary theme-text-secondary hover:text-primary transition disabled:opacity-40 disabled:pointer-events-none">
+                Sonraki<i class="fas fa-chevron-right ml-1"></i>
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <div class="text-xs font-semibold theme-text-secondary uppercase tracking-wide mb-2 mt-2">
+              Görebileceği Videolar
+            </div>
+            <div id="acc-selected-videos"
+              class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-3">
+              <div class="text-xs theme-text-secondary col-span-full">Henüz video eklenmedi</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <button onclick="saveAccessRestrictions()" id="acc-save-btn"
+      class="mt-5 w-full sm:w-auto px-5 py-2.5 bg-primary/10 hover:bg-primary/20 text-primary rounded-xl text-sm font-medium transition-all">
+      <i class="fas fa-floppy-disk mr-1.5"></i>Erişim İzinlerini Kaydet
+    </button>
   </div>
 
   <!-- Veri İstatistik Kartları -->
@@ -469,6 +566,26 @@
   let MEMBER_TOKEN   = null;   // API'den dönen gerçek token
   let MEMBER_USER_ID = null;   // API'den dönen gerçek Telegram user_id
   let MEMBER_BANNED  = false;
+
+  // ─── Erişim İzinleri (katalog / sertifika / video) ─────────────────────────
+  // Not: Katalog / sertifika-yaş-sınırı / sertifika-muafiyeti arayüzü bu sayfadan
+  // kaldırıldı, ancak kayıt API'si (save_member_access_restrictions) bu alanları
+  // her seferinde topluca üzerine yazdığı için, admin tarafından daha önce
+  // ayarlanmış değerleri kaybetmemek adına API'den geldiği haliyle (düzenlenmeden)
+  // saklayıp kaydederken aynen geri gönderiyoruz.
+  let ACC_ALLOWED_CATS   = null; // önceki katalog kısıtlaması — bu sayfadan düzenlenmiyor
+  let ACC_CERT_MAX_AGE   = null; // önceki azami yaş sınırı — bu sayfadan düzenlenmiyor
+  let ACC_WHITELIST      = [];   // önceki sertifika muafiyeti listesi — bu sayfadan düzenlenmiyor
+  let ACC_SELECTED_ONLY = false;// true ise üye SADECE ACC_SELECTED_VIDEOS'u görebilir
+  let ACC_SELECTED_VIDEOS = []; // [{imdb_id, title, media_type, poster, year, rating}] — sadece bunlar görünür
+  let accSelVideoSearchTimer = null;
+
+  // ─── "Sadece Seçili Videolar" arama ızgarası: 6 sütun x 4 satır, sayfalı ──
+  let ACC_SEL_SEARCH_QUERY      = "";
+  let ACC_SEL_SEARCH_PAGE       = 1;
+  let ACC_SEL_SEARCH_TOTAL_PAGES = 1;
+  const ACC_SEL_SEARCH_PAGE_SIZE = 24; // 6 x 4
+  let ACC_SEL_SEARCH_RESULTS = []; // o anki sayfanın sonuçları — tik işaretini yerelde güncellemek için
 
   let ALL_HISTORY  = [];
   let FILT_HISTORY = [];
@@ -1033,7 +1150,279 @@
   function updateBanButton() {
     const btn = document.getElementById("adm-ban-label");
     if (!btn) return;
-    btn.textContent = MEMBER_BANNED ? "Ban Kaldır" : "Üyeyi Banla";
+    btn.textContent = MEMBER_BANNED ? "Yasağı Kaldır" : "Üyeyi Yasakla";
+  }
+
+  // ─── Erişim İzinleri ────────────────────────────────────────────────────
+
+  function accMsg(text, ok) {
+    const el = document.getElementById("acc-msg");
+    el.textContent = text;
+    el.className = "text-xs " + (ok ? "text-green-400" : "text-red-400");
+    setTimeout(() => { el.textContent = ""; }, 4000);
+  }
+
+  async function loadAccessRestrictions() {
+    try {
+      const r = await fetch(`/api/admin/uyeler/${encodeURIComponent(MEMBER_ID)}/access`);
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      const data = await r.json();
+
+      const restr = data.restrictions || {};
+      // Bu üç alan artık bu sayfada düzenlenmiyor; sadece kaydederken aynen
+      // geri göndermek için olduğu gibi saklanıyor.
+      ACC_ALLOWED_CATS = restr.allowed_catalogs ?? null;
+      ACC_CERT_MAX_AGE = (restr.certification_max_age === undefined) ? null : restr.certification_max_age;
+      ACC_WHITELIST    = restr.allowed_videos || [];
+
+      ACC_SELECTED_ONLY = !!restr.only_selected_videos;
+      ACC_SELECTED_VIDEOS = restr.selected_videos || [];
+
+      document.getElementById("acc-selected-only-toggle").checked = ACC_SELECTED_ONLY;
+      document.getElementById("acc-selected-only-body").classList.toggle("hidden", !ACC_SELECTED_ONLY);
+      document.getElementById("acc-include-live-toggle").checked = !!restr.include_live_collection;
+      renderSelectedVideos();
+    } catch (e) {
+      accMsg("Erişim izinleri yüklenemedi", false);
+    }
+  }
+
+  function toggleSelectedOnlyMode() {
+    ACC_SELECTED_ONLY = document.getElementById("acc-selected-only-toggle").checked;
+    document.getElementById("acc-selected-only-body").classList.toggle("hidden", !ACC_SELECTED_ONLY);
+  }
+
+  function accPosterCardHtml(v, opts) {
+    // opts: { onclick, removable, idx, selected }
+    const poster = v.poster || 'https://via.placeholder.com/200x300/1a1a1a/666666?text=Poster+Yok';
+    const title  = escHtml(v.title || v.imdb_id || '');
+    const year   = v.year || '';
+    const rating = (v.rating !== undefined && v.rating !== null && v.rating !== '')
+      ? `⭐ ${parseFloat(v.rating).toFixed(1)}` : '';
+    const typeLabel = v.media_type === 'tv' ? 'Dizi' : 'Film';
+    const removeBtn = opts.removable
+      ? `<button type="button" onclick="event.stopPropagation(); removeAccessVideo(${opts.idx})"
+           class="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-black/70 text-red-400 hover:text-red-300 hover:bg-black/90 flex items-center justify-center transition-colors z-10">
+           <i class="fas fa-xmark text-xs"></i>
+         </button>`
+      : '';
+    // Zaten seçili olan içerikte poster üstünde tik rozeti + vurgulu kenarlık gösterilir
+    const selectedOverlay = opts.selected
+      ? `<div class="absolute inset-0 bg-primary/25 flex items-start justify-end p-1.5 pointer-events-none">
+           <span class="w-6 h-6 rounded-full bg-primary text-white flex items-center justify-center shadow">
+             <i class="fas fa-check text-xs"></i>
+           </span>
+         </div>`
+      : '';
+    return `
+      <div class="theme-card rounded-xl border overflow-hidden group relative ${opts.onclick ? 'cursor-pointer hover:border-primary transition-colors' : ''} ${opts.selected ? 'border-primary ring-1 ring-primary' : ''}"
+        ${opts.onclick ? `onclick='${opts.onclick}'` : ''}>
+        ${removeBtn}
+        <div class="relative">
+          <img src="${poster}" alt="${title}" loading="lazy"
+            class="w-full aspect-[2/3] object-cover"
+            onerror="this.src='https://via.placeholder.com/200x300/1a1a1a/666666?text=Poster+Yok'">
+          <span class="absolute bottom-1.5 left-1.5 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-black/70 text-white">${typeLabel}</span>
+          ${selectedOverlay}
+        </div>
+        <div class="p-2">
+          <h5 class="text-xs font-semibold leading-snug line-clamp-2 min-h-[2.2em]" title="${title}">${title}</h5>
+          <div class="flex items-center justify-between mt-1 text-[10px] theme-text-secondary">
+            <span>${escHtml(String(year))}</span>
+            ${rating ? `<span>${rating}</span>` : ''}
+          </div>
+        </div>
+      </div>`;
+  }
+
+  function renderSelectedVideos() {
+    const box = document.getElementById("acc-selected-videos");
+    if (!box) return;
+    if (!ACC_SELECTED_VIDEOS.length) {
+      box.innerHTML = `<div class="text-xs theme-text-secondary col-span-full">Henüz video eklenmedi</div>`;
+      return;
+    }
+    box.innerHTML = ACC_SELECTED_VIDEOS.map((v, idx) =>
+      accPosterCardHtml(v, { removable: true, idx, onclick: `removeAccessVideo(${idx})` })
+    ).join("");
+  }
+
+  function removeAccessVideo(idx) {
+    ACC_SELECTED_VIDEOS.splice(idx, 1);
+    renderSelectedVideos();
+    renderAccSelSearchGrid(); // arama ızgarasındaki tik işaretini de güncelle
+    setAccSaveState(false);
+  }
+
+  // ─── 'sel' (Sadece Seçili Videolar) araması: 6x4 poster ızgarası + sayfalama ──
+  function searchAccessVideoSel(q) {
+    clearTimeout(accSelVideoSearchTimer);
+    q = (q || "").trim();
+    ACC_SEL_SEARCH_QUERY = q;
+    ACC_SEL_SEARCH_PAGE = 1;
+
+    if (!q) {
+      document.getElementById("acc-sel-video-search-results").classList.add("hidden");
+      document.getElementById("acc-sel-video-search-grid").innerHTML = "";
+      return;
+    }
+
+    accSelVideoSearchTimer = setTimeout(() => fetchAccessVideoSelPage(), 300);
+  }
+
+  function changeAccVideoSelPage(delta) {
+    const next = ACC_SEL_SEARCH_PAGE + delta;
+    if (next < 1 || next > ACC_SEL_SEARCH_TOTAL_PAGES) return;
+    ACC_SEL_SEARCH_PAGE = next;
+    fetchAccessVideoSelPage();
+  }
+
+  async function fetchAccessVideoSelPage() {
+    const grid = document.getElementById("acc-sel-video-search-grid");
+    const resultsBox = document.getElementById("acc-sel-video-search-results");
+    const pageInfo = document.getElementById("acc-sel-search-page-info");
+    const prevBtn = document.getElementById("acc-sel-search-prev");
+    const nextBtn = document.getElementById("acc-sel-search-next");
+
+    resultsBox.classList.remove("hidden");
+    grid.innerHTML = `<div class="col-span-full text-xs theme-text-secondary p-3"><i class="fas fa-spinner fa-spin mr-1"></i>Aranıyor…</div>`;
+
+    try {
+      const params = new URLSearchParams({
+        q: ACC_SEL_SEARCH_QUERY,
+        page: String(ACC_SEL_SEARCH_PAGE),
+        page_size: String(ACC_SEL_SEARCH_PAGE_SIZE),
+      });
+      const r = await fetch(`/api/admin/uyeler/${encodeURIComponent(MEMBER_ID)}/access/search-media?${params.toString()}`);
+      if (!r.ok) throw new Error();
+      const data = await r.json();
+      ACC_SEL_SEARCH_RESULTS = data.results || [];
+      ACC_SEL_SEARCH_TOTAL_PAGES = data.total_pages || 1;
+
+      renderAccSelSearchGrid();
+
+      pageInfo.textContent = `Sayfa ${ACC_SEL_SEARCH_PAGE} / ${ACC_SEL_SEARCH_TOTAL_PAGES}`;
+      prevBtn.disabled = ACC_SEL_SEARCH_PAGE <= 1;
+      nextBtn.disabled = ACC_SEL_SEARCH_PAGE >= ACC_SEL_SEARCH_TOTAL_PAGES;
+    } catch {
+      grid.innerHTML = `<div class="col-span-full text-xs text-red-400 p-3">Arama başarısız oldu</div>`;
+    }
+  }
+
+  // Arama ızgarasını ACC_SEL_SEARCH_RESULTS önbelleğinden yeniden çizer;
+  // her karta, o içerik zaten seçiliyse tik rozeti ekler. Ağ isteği yapmaz.
+  function renderAccSelSearchGrid() {
+    const grid = document.getElementById("acc-sel-video-search-grid");
+    if (!grid) return;
+    if (!ACC_SEL_SEARCH_RESULTS.length) {
+      grid.innerHTML = `<div class="col-span-full text-xs theme-text-secondary p-3">Sonuç bulunamadı</div>`;
+      return;
+    }
+    grid.innerHTML = ACC_SEL_SEARCH_RESULTS.map(v => {
+      const selected = ACC_SELECTED_VIDEOS.some(x => x.imdb_id === v.imdb_id);
+      const onclick = `toggleAccessVideoSel(${JSON.stringify(v).replace(/'/g, "&#39;")})`;
+      return accPosterCardHtml(v, { onclick, removable: false, selected });
+    }).join("");
+  }
+
+  // Arama ızgarasındaki bir karta dokunma: seçili değilse ekler, seçiliyse geri alır (tik kalkar)
+  function toggleAccessVideoSel(v) {
+    if (!v || !v.imdb_id) return;
+    const idx = ACC_SELECTED_VIDEOS.findIndex(x => x.imdb_id === v.imdb_id);
+    if (idx >= 0) {
+      ACC_SELECTED_VIDEOS.splice(idx, 1);
+      accMsg(`"${v.title || v.imdb_id}" kaldırıldı`, true);
+    } else {
+      ACC_SELECTED_VIDEOS.push({
+        imdb_id: v.imdb_id, title: v.title, media_type: v.media_type,
+        poster: v.poster || '', year: v.year || null, rating: v.rating ?? null,
+      });
+      accMsg(`"${v.title || v.imdb_id}" eklendi`, true);
+    }
+    renderSelectedVideos();
+    renderAccSelSearchGrid();
+    setAccSaveState(false);
+  }
+
+  function addAccessVideo(v) {
+    if (!v || !v.imdb_id) return;
+    if (!ACC_SELECTED_VIDEOS.some(x => x.imdb_id === v.imdb_id)) {
+      ACC_SELECTED_VIDEOS.push({
+        imdb_id: v.imdb_id, title: v.title, media_type: v.media_type,
+        poster: v.poster || '', year: v.year || null, rating: v.rating ?? null,
+      });
+      renderSelectedVideos();
+      renderAccSelSearchGrid();
+      accMsg(`"${v.title || v.imdb_id}" eklendi`, true);
+      setAccSaveState(false);
+    } else {
+      accMsg(`"${v.title || v.imdb_id}" zaten ekli`, false);
+    }
+  }
+
+  // IMDB ID veya TMDB ID girerek doğrudan video ekleme ("Sadece Seçili Videolar")
+  async function addAccessVideoById() {
+    const imdbInput = document.getElementById("acc-sel-video-imdb-input");
+    const tmdbInput = document.getElementById("acc-sel-video-tmdb-input");
+    const tmdbType  = document.getElementById("acc-sel-video-tmdb-type");
+
+    const imdbVal = (imdbInput.value || "").trim();
+    const tmdbVal = (tmdbInput.value || "").trim();
+    if (!imdbVal && !tmdbVal) { accMsg("IMDB veya TMDB ID girin", false); return; }
+
+    const params = new URLSearchParams();
+    if (imdbVal) params.set("imdb_id", imdbVal);
+    else { params.set("tmdb_id", tmdbVal); params.set("media_type", tmdbType.value); }
+
+    try {
+      const r = await fetch(`/api/admin/uyeler/${encodeURIComponent(MEMBER_ID)}/access/lookup-media?${params.toString()}`);
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.detail || "Bulunamadı");
+      const v = data.result;
+      if (!v || !v.imdb_id) { accMsg("İçeriğin IMDB ID'si bulunamadı", false); return; }
+      addAccessVideo(v);
+      imdbInput.value = "";
+      tmdbInput.value = "";
+    } catch (e) {
+      accMsg(e.message || "Video eklenemedi", false);
+    }
+  }
+
+  function setAccSaveState(saved) {
+    const btn = document.getElementById("acc-save-btn");
+    if (!btn) return;
+    btn.innerHTML = saved
+      ? `<i class="fas fa-check mr-1.5"></i>Kaydedildi`
+      : `<i class="fas fa-floppy-disk mr-1.5"></i>Erişim İzinlerini Kaydet`;
+  }
+
+  async function saveAccessRestrictions() {
+    const body = {
+      // Bu üç alan artık bu sayfada düzenlenmiyor; admin tarafından önceden
+      // ayarlanmış değerler değiştirilmeden geri gönderiliyor.
+      allowed_catalogs: ACC_ALLOWED_CATS,
+      certification_max_age: ACC_CERT_MAX_AGE,
+      allowed_videos: ACC_WHITELIST,
+      only_selected_videos: document.getElementById("acc-selected-only-toggle").checked,
+      selected_videos: ACC_SELECTED_VIDEOS,
+      include_live_collection: document.getElementById("acc-include-live-toggle").checked,
+    };
+    const btn = document.getElementById("acc-save-btn");
+    btn.disabled = true;
+    try {
+      const r = await fetch(`/api/admin/uyeler/${encodeURIComponent(MEMBER_ID)}/access`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      if (!r.ok) throw new Error();
+      accMsg("Erişim izinleri kaydedildi", true);
+      setAccSaveState(true);
+    } catch {
+      accMsg("Kaydedilemedi", false);
+    } finally {
+      btn.disabled = false;
+    }
   }
 
   async function saveLimits() {
@@ -1080,7 +1469,7 @@
   async function toggleBan() {
     if (!MEMBER_USER_ID) { admMsg("Kullanıcı ID bulunamadı", false); return; }
     const nextBanned = !MEMBER_BANNED;
-    if (!confirm(nextBanned ? "Bu üyeyi banlamak istediğinize emin misiniz?" : "Bu üyenin banını kaldırmak istediğinize emin misiniz?")) return;
+    if (!confirm(nextBanned ? "Bu üyeyi yasaklamak istediğinize emin misiniz?" : "Bu üyenin yasağını kaldırmak istediğinize emin misiniz?")) return;
     try {
       const endpoint = nextBanned ? "ban" : "unban";
       const r = await fetch(`/api/admin/uyeler/${encodeURIComponent(MEMBER_ID)}/${endpoint}`, { method: "POST" });
@@ -1331,6 +1720,7 @@
 
   // ─── Başlat ──────────────────────────────────────────────────────────────
   loadMemberDetail();
+  loadAccessRestrictions();
 
   // ─── Hatırlatmalar ───────────────────────────────────────────────────────
   let _REM_DATA     = { tv: [], movie: [] };

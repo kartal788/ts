@@ -791,6 +791,50 @@ async def yayin_list(_: bool = Depends(require_auth)):
     return {"broadcasts": broadcasts}
 
 
+@router.get("/api/yayin/active-status")
+async def yayin_active_status(_: bool = Depends(require_auth)):
+    """
+    Aktif (başlatılmış) tüm yayınların anlık durumunu (izleyici sayısı,
+    izleyen üyelerin adları, arabellek, toplam servis edilen byte vb.) döndürür.
+    Kontrol Paneli'ndeki 'Canlı Yayın Durumu' kartı bu endpoint'i kullanır.
+    """
+    now_ts = time.time()
+    broadcasts = await db.get_active_broadcasts()
+    result = []
+    for bc in broadcasts:
+        bid = bc.get("_id")
+        session = _sessions.get(bid)
+        if session:
+            status = session.status_dict()
+        else:
+            # DB'de active=True ama bellekte session yok (örn. sunucu yeniden başladı)
+            status = {
+                "active":             False,
+                "buffer_seconds":     bc.get("buffer_seconds", 30),
+                "segment_size_kb":    0,
+                "buffered_segments":  0,
+                "viewer_count":       0,
+                "total_bytes_served": 0,
+            }
+
+        # O anda (idle-timeout içinde) segment isteği göndermiş, yani gerçekten
+        # izlemekte olan üyelerin adlarını topla.
+        viewer_names = sorted({
+            (v.get("user_name") or "Bilinmeyen Üye")
+            for v in _viewer_activity.values()
+            if v.get("broadcast_id") == bid and (now_ts - v.get("last_ts", 0)) <= _VIEWER_IDLE_TIMEOUT
+        })
+
+        result.append({
+            "id":   bid,
+            "name": bc.get("name") or "Canlı Yayın",
+            "stream_url": bc.get("stream_url"),
+            "viewers": viewer_names,
+            **status,
+        })
+    return {"broadcasts": result}
+
+
 @router.post("/api/yayin")
 async def yayin_add(payload: dict, _: bool = Depends(require_auth)):
     """Yeni yayın ekle."""
@@ -1070,10 +1114,6 @@ async def yayin_member_segment(broadcast_id: str, seg_seq: int, token: str = Non
     # Token kullanımını güncelle (arka planda, yanıtı geciktirmemek için)
     asyncio.create_task(db.update_token_usage(token, byte_count))
 
-    # İstatistik güncelle
-    session.total_bytes_served += byte_count
-    session.viewer_count = max(session.viewer_count, 1)
-
     # ── İzleme geçmişi: izleyici aktivitesini biriktir ──────────────────────
     # (Üye detay sayfasındaki "İzleme Geçmişi" tablosu stream_analytics'ten
     #  beslendiğinden, canlı yayın izlemelerinin de burada birikip periyodik
@@ -1086,14 +1126,24 @@ async def yayin_member_segment(broadcast_id: str, seg_seq: int, token: str = Non
             "broadcast_id": broadcast_id,
             "token":        token,
             "title":        session.name,
+            "user_name":    token_data.get("name") or "Bilinmeyen Üye",
             "start_ts":     now_ts,
             "last_ts":      now_ts,
             "total_bytes":  0,
         }
         _viewer_activity[viewer_key] = activity
     activity["title"]       = session.name  # yayın adı sonradan değişmiş olabilir
+    activity["user_name"]   = token_data.get("name") or activity.get("user_name") or "Bilinmeyen Üye"
     activity["last_ts"]     = now_ts
     activity["total_bytes"] += byte_count
+
+    # İstatistik güncelle: gerçek eşzamanlı izleyici sayısı — bu broadcast için
+    # az önce (idle timeout içinde) segment isteği göndermiş benzersiz token sayısı.
+    session.total_bytes_served += byte_count
+    session.viewer_count = sum(
+        1 for v in _viewer_activity.values()
+        if v.get("broadcast_id") == broadcast_id and (now_ts - v.get("last_ts", 0)) <= _VIEWER_IDLE_TIMEOUT
+    )
 
     # Segment formatını magic bytes'tan otomatik tespit et
     # fMP4 (fragmented MP4): 0x66747970 'ftyp' veya 0x6D6F6F66 'moof' başlangıcı

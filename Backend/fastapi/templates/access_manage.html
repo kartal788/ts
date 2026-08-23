@@ -9,10 +9,20 @@
             <h2 class="text-3xl font-bold text-primary">🔑 Erişim Yönetimi</h2>
             <p class="text-sm text-text opacity-60 mt-1">Stremio eklentisi erişimi için API tokenlarını yönetin</p>
         </div>
-        <button onclick="loadTokens()"
+        <button onclick="loadTokens(); loadPendingRequests();"
             class="bg-primary text-white px-4 py-2 rounded-lg hover:opacity-80 transition text-sm font-medium">
             🔄 Yenile
         </button>
+    </div>
+
+    <!-- Bekleyen Abonelik Talepleri -->
+    <div class="mb-6" id="pending-requests-section" style="display:none">
+        <div class="flex items-center gap-2 mb-3">
+            <h3 class="text-lg font-bold text-text">⏳ Bekleyen Abonelik Talepleri</h3>
+            <span id="pending-count-badge"
+                class="text-xs px-2 py-0.5 rounded-full bg-yellow-500/20 text-yellow-600 font-bold">0</span>
+        </div>
+        <div id="pending-requests-list" class="grid gap-3"></div>
     </div>
 
     <!-- Stats -->
@@ -409,8 +419,76 @@
         if (e.target === this) closeAssignModal();
     });
 
+    // ---- Bekleyen Abonelik Talepleri ----
+    async function loadPendingRequests() {
+        try {
+            const resp = await fetch('/api/admin/access/subscription-requests');
+            const data = await resp.json();
+            renderPendingRequests(data.requests || []);
+        } catch (err) {
+            console.warn('Bekleyen talepler yüklenemedi:', err);
+        }
+    }
+
+    function renderPendingRequests(list) {
+        const section = document.getElementById('pending-requests-section');
+        const container = document.getElementById('pending-requests-list');
+        document.getElementById('pending-count-badge').textContent = list.length;
+
+        if (!list.length) {
+            section.style.display = 'none';
+            container.innerHTML = '';
+            return;
+        }
+        section.style.display = 'block';
+
+        container.innerHTML = list.map(r => {
+            const safeName = escHtml(r.name || String(r.user_id));
+            const planText = r.plan_label ? r.plan_label : `${r.duration_days || 0} gün`;
+            return `<div class="theme-card rounded-xl border p-4 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div class="font-medium text-text">${safeName} <span class="text-xs text-text opacity-50">(ID: ${r.user_id})</span></div>
+                <div class="text-xs text-text opacity-70 mt-1">
+                  📦 ${escHtml(planText)} — ${r.price || 0} ${escHtml(r.currency || 'TRY')}
+                  &nbsp;•&nbsp; 🕒 ${fmtDate(r.requested_at)}
+                </div>
+              </div>
+              <div class="flex gap-2 flex-shrink-0">
+                <button onclick="reviewPending(${r.user_id}, '${safeName}', 'approve')"
+                  class="px-3 py-1.5 bg-green-500/15 hover:bg-green-500/25 text-green-600 rounded-lg text-xs font-semibold transition">✅ Onayla</button>
+                <button onclick="reviewPending(${r.user_id}, '${safeName}', 'reject')"
+                  class="px-3 py-1.5 bg-red-500/15 hover:bg-red-500/25 text-red-500 rounded-lg text-xs font-semibold transition">❌ Reddet</button>
+                <button onclick="reviewPending(${r.user_id}, '${safeName}', 'ban')"
+                  class="px-3 py-1.5 bg-gray-500/15 hover:bg-gray-500/25 text-gray-500 rounded-lg text-xs font-semibold transition">🚫 Banla</button>
+              </div>
+            </div>`;
+        }).join('');
+    }
+
+    async function reviewPending(userId, userName, action) {
+        const verbs = { approve: 'onaylamak', reject: 'reddetmek', ban: 'banlamak' };
+        if (!confirm(`${userName} (ID: ${userId}) kullanıcısının abonelik talebini ${verbs[action]} istediğinize emin misiniz?`)) return;
+
+        try {
+            const resp = await fetch(`/api/admin/access/subscription-requests/${userId}/review`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action })
+            });
+            const data = await resp.json();
+            if (resp.ok) {
+                showToast(data.message || 'İşlem tamamlandı.', action === 'approve' ? 'green' : 'red');
+                loadPendingRequests();
+                loadTokens();
+            } else {
+                showToast(data.detail || 'İşlem başarısız.', 'red');
+            }
+        } catch (err) { showToast('Error: ' + err.message, 'red'); }
+    }
+
     loadPlans();
     loadTokens();
+    loadPendingRequests();
 </script>
 
 <!-- Sub Action Modal (Extend / Reduce / Revoke) -->

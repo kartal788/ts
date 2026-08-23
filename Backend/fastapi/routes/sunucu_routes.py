@@ -113,8 +113,21 @@ def _is_safe_url(url: str) -> tuple[bool, str]:
 
 
 def _safe_path(relative: str) -> Path:
-    p = (SUNUCU_DIR / relative.lstrip("/\\")).resolve()
-    if not str(p).startswith(str(SUNUCU_DIR.resolve())):
+    """
+    NOT: Eski implementasyon str(p).startswith(str(SUNUCU_DIR)) kullanıyordu.
+    Bu, ayraç (separator) eklemeden yapılan bir prefix kontrolüydü ve
+    SUNUCU_DIR ile aynı önekli KARDEŞ dizinlere erişime izin veriyordu
+    (örn. SUNUCU_DIR="/data/sunucu" iken "../sunucu_GIZLI/x" payload'u
+    "/data/sunucu_GIZLI/x" yoluna izin veriyordu çünkü bu yol da
+    "/data/sunucu" ile başlıyor). PoC ile doğrulanmış path traversal
+    zafiyeti — relative_to() ile kesin (segment bazlı) sınır kontrolüne
+    geçildi.
+    """
+    base = SUNUCU_DIR.resolve()
+    p = (base / relative.lstrip("/\\")).resolve()
+    try:
+        p.relative_to(base)
+    except ValueError:
         raise ValueError("Güvenli alan dışı erişim")
     return p
 

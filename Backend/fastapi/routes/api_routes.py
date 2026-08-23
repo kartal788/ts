@@ -181,6 +181,93 @@ async def update_media_api(
 
         raise HTTPException(status_code=500, detail="Sunucu hatası")
 
+
+# ─── API: İçerik görünürlüğü (kimler görebilir/erişebilir) ──────────────────
+#
+#   GET /api/media/visibility   → mevcut ayarı + seçim için üye listesini döner
+#   PUT /api/media/visibility   → ayarı kaydeder
+#
+# main.py'ye eklenecek route'lar:
+#   @app.get("/api/media/visibility")
+#   async def get_media_visibility(tmdb_id: int, db_index: int, media_type: str = Query(regex="^(movie|tv)$"), _: bool = Depends(require_auth)):
+#       return await get_media_visibility_api(tmdb_id, db_index, media_type)
+#
+#   @app.put("/api/media/visibility")
+#   async def update_media_visibility(request: Request, tmdb_id: int, db_index: int, media_type: str = Query(regex="^(movie|tv)$"), _: bool = Depends(require_auth)):
+#       return await update_media_visibility_api(request, tmdb_id, db_index, media_type)
+
+async def get_media_visibility_api(
+    tmdb_id: int,
+    db_index: int,
+    media_type: str = Query(regex="^(movie|tv)$"),
+):
+    try:
+        media_doc = await db.get_document(media_type, tmdb_id, db_index)
+        if not media_doc:
+            raise HTTPException(status_code=404, detail="Media not found")
+
+        visibility = await db.get_media_visibility(media_type, tmdb_id, db_index)
+
+        # Seçim arayüzü için tüm üyeleri (token + subscriber birleşimi) döner.
+        from Backend.fastapi.routes.uyeler_routes import _build_members_list
+        members_raw = await _build_members_list()
+        members = [
+            {
+                "user_id":             m.get("user_id"),
+                "user_name":           m.get("user_name"),
+                "subscription_status": m.get("subscription_status"),
+            }
+            for m in members_raw
+            if m.get("user_id") is not None
+        ]
+
+        return {
+            "status":     "success",
+            "visibility": visibility,
+            "members":    members,
+        }
+    except HTTPException:
+        raise
+    except Exception:
+        _logger.error("get_media_visibility_api error", exc_info=True)
+        raise HTTPException(status_code=500, detail="Sunucu hatası")
+
+
+async def update_media_visibility_api(
+    request: Request,
+    tmdb_id: int,
+    db_index: int,
+    media_type: str = Query(regex="^(movie|tv)$"),
+):
+    try:
+        media_doc = await db.get_document(media_type, tmdb_id, db_index)
+        if not media_doc:
+            raise HTTPException(status_code=404, detail="Media not found")
+
+        payload = await request.json()
+        mode = payload.get("mode")
+        if mode not in ("subscribers", "selected"):
+            raise HTTPException(status_code=400, detail="mode 'subscribers' veya 'selected' olmalı")
+
+        member_ids = payload.get("member_ids") or []
+        if not isinstance(member_ids, list):
+            raise HTTPException(status_code=400, detail="member_ids bir liste olmalı")
+
+        if mode == "selected" and not member_ids:
+            raise HTTPException(
+                status_code=400,
+                detail="'Sadece seçtiğim üye(ler)' seçildiğinde en az bir üye seçilmelidir",
+            )
+
+        await db.save_media_visibility(media_type, tmdb_id, db_index, mode, member_ids)
+        return {"status": "success"}
+    except HTTPException:
+        raise
+    except Exception:
+        _logger.error("update_media_visibility_api error", exc_info=True)
+        raise HTTPException(status_code=500, detail="Sunucu hatası")
+
+
 async def get_media_details_api(
     tmdb_id: int,
     db_index: int,
@@ -820,6 +907,202 @@ async def manage_subscriber_api(user_id: int, payload: dict) -> dict:
         _logger.error("Internal error", exc_info=True)
 
         raise HTTPException(status_code=500, detail="Sunucu hatası")
+
+
+async def get_pending_subscription_requests_api() -> dict:
+    """Web panelinde 'Bekleyen Abonelik Talepleri' listesi için kullanılır."""
+    from Backend import db
+    try:
+        pending = await db.get_pending_subscription_payments()
+        return {"status": "success", "requests": pending}
+    except Exception as e:
+        _logger.error("Internal error", exc_info=True)
+        return {"status": "error", "message": "Sunucu hatası"}
+
+
+def _get_websitesi_enabled_api() -> bool:
+    """config.env'den WEBSITESI değerini runtime'da okur (bot restart gerekmez)."""
+    import re as _re
+    try:
+        text = pathlib.Path("config.env").read_text(encoding="utf-8").replace("\r\n", "\n").replace("\r", "\n")
+        m = _re.search(r'^WEBSITESI\s*=\s*["\']?(.*?)["\']?\s*(?:#.*)?$', text, _re.MULTILINE)
+        if m:
+            return m.group(1).strip().lower() == "true"
+    except Exception:
+        pass
+    return True  # Bulunamazsa varsayılan: açık
+
+
+async def admin_review_subscription_request_api(user_id: int, payload: dict) -> dict:
+    """
+    Web panelinden bekleyen abonelik talebini onayla / reddet / banla.
+
+    Botla tam senkron çalışır: Telegram bot'undaki (Backend/pyrofork/plugins/subscription.py
+    admin_review) ile AYNI DB fonksiyonlarını kullanır ve kullanıcıya sonucu Telegram üzerinden
+    bildirir. Ayrıca yöneticilere bot tarafından gönderilmiş olan bekleyen onay mesajını
+    (✅ Onayla / ❌ Reddet / 🚫 Banla butonlarıyla) günceller: butonları kaldırır ve talebin
+    web panelinden hangi kararla sonuçlandığını ekler — böylece aynı talep botta tekrar
+    işleme alınmaya çalışılamaz ve panel/bot arasında tutarsızlık oluşmaz.
+    """
+    from Backend import db
+    from Backend.config import Telegram
+    from pyrogram import enums as _enums
+
+    action = (payload or {}).get("action")
+    if action not in ("approve", "reject", "ban"):
+        raise HTTPException(status_code=400, detail="Geçersiz aksiyon")
+
+    user = await db.get_user(user_id)
+
+    # Ban işlemi için pending_payment zorunlu değil (bot tarafındaki davranışla aynı)
+    if action != "ban" and (not user or "pending_payment" not in user):
+        raise HTTPException(status_code=404, detail="Bu talep zaten işleme alınmış.")
+
+    admin_messages = ((user or {}).get("pending_payment") or {}).get("admin_messages") or []
+    user_name = (user or {}).get("first_name") or (user or {}).get("username") or str(user_id)
+
+    async def _update_admin_messages(label: str):
+        """
+        Botun yöneticilere gönderdiği bekleyen onay mesajını günceller: onayla/reddet/banla
+        butonlarını kaldırır ve talebin web panelinden hangi kararla sonuçlandığını ekler.
+        Bu sayede talep botta hâlâ 'beklemede' görünmeye devam etmez.
+        """
+        if not admin_messages:
+            return
+        status_section = (
+            f"\n\n{'─' * 30}\n"
+            f"<b>{label}</b> — 🌐 Web panelinden\n"
+            f"<b>👤 Kullanıcı:</b> {user_name} (ID: <code>{user_id}</code>)"
+        )
+        for am in admin_messages:
+            try:
+                existing_msg = await StreamBot.get_messages(am["chat_id"], am["message_id"])
+                original_text = existing_msg.text or existing_msg.caption or ""
+            except Exception:
+                original_text = ""
+            try:
+                await StreamBot.edit_message_text(
+                    chat_id=am["chat_id"],
+                    message_id=am["message_id"],
+                    text=f"{original_text}{status_section}" if original_text else status_section,
+                    parse_mode=_enums.ParseMode.HTML,
+                    disable_web_page_preview=True,
+                    reply_markup=None,
+                )
+            except Exception as e:
+                _logger.warning(
+                    "Panel işlemi sonrası admin mesajı güncellenemedi (%s/%s): %s",
+                    am.get("chat_id"), am.get("message_id"), e
+                )
+
+    if action == "approve":
+        user_data = await db.approve_payment(user_id)
+        if not user_data:
+            raise HTTPException(status_code=404, detail="Onaylanamadı — bekleyen talep bulunamadı.")
+
+        try:
+            await db.reset_reminder_sent(user_id)
+        except Exception:
+            pass
+
+        user_name = user_data.get("first_name") or user_data.get("username") or str(user_id)
+        try:
+            token_doc = await db.add_api_token(
+                name=user_name,
+                user_id=user_id,
+                daily_limit_gb=user_data.get("_plan_daily_gb") or None,
+                monthly_limit_gb=user_data.get("_plan_monthly_gb") or None,
+                speed_limit_mbps=user_data.get("_plan_speed_mbps") or None,
+            )
+            token_str = token_doc.get("token")
+        except Exception:
+            token_str = None
+
+        base_url = Telegram.BASE_URL
+        expiry = user_data.get("subscription_expiry")
+        expiry_str = expiry.strftime("%d.%m.%Y") if expiry else "—"
+
+        try:
+            if _get_websitesi_enabled_api():
+                otp = await db.create_member_otp(user_id, user_name)
+                portal_url = f"{base_url}/uye/giris"
+                otp_text = (
+                    f"\n\n🌐 <b>Dizi ve filmleri indirmek için:</b>\n"
+                    f"🔗 {portal_url}\n"
+                    f"👤 <b>Kullanıcı Adı:</b> <code>{otp['username']}</code>\n"
+                    f"🔑 <b>Şifre:</b> <code>{otp['password']}</code>\n"
+                    f"<i>⚠️ Bu bilgiler her /start'ta yenilenir.</i>"
+                )
+            else:
+                otp_text = (
+                    f"\n\n🔧 <b>{Telegram.ISIM} Websitesi</b> şu an bakım çalışmasındadır.\n"
+                    f"<i>Hizmet kısa süre içinde tekrar aktif olacaktır.</i>"
+                )
+        except Exception:
+            otp_text = ""
+
+        if token_str:
+            tr_url = f"{base_url}/stremio/{token_str}/tr/manifest.json"
+            de_url = f"{base_url}/stremio/{token_str}/de/manifest.json"
+            en_url = f"{base_url}/stremio/{token_str}/en/manifest.json"
+            success_text = (
+                f"✅ <b>Aboneliğiniz aktif durumdadır.</b>\n"
+                f"📅 <b>Son kullanma tarihi:</b> {expiry_str}\n\n"
+                f"🔗 <b>Eklenti linkiniz:</b>\n\n"
+                f"🇹🇷 <b>Türkçe:</b>\n<code>{tr_url}</code>\n\n"
+                f"🇩🇪 <b>Deutsch:</b>\n<code>{de_url}</code>\n\n"
+                f"🇬🇧 <b>English:</b>\n<code>{en_url}</code>\n\n"
+                f"Dizi ve filmleri izlemek için yukarıdaki linki kopyalayıp Nuvio eklentilerine yapıştırın."
+                f"{otp_text}"
+            )
+        else:
+            success_text = (
+                f"✅ <b>Aboneliğiniz aktif durumdadır.</b>\n"
+                f"📅 <b>Son kullanma tarihi:</b> {expiry_str}\n\n"
+                f"⚠️ Eklenti linkiniz oluşturulurken sorun oluştu. Lütfen yönetici ile iletişime geçin."
+                f"{otp_text}"
+            )
+
+        try:
+            await StreamBot.send_message(user_id, success_text, parse_mode=_enums.ParseMode.HTML)
+        except Exception as e:
+            _logger.warning("Kullanıcıya onay bildirimi gönderilemedi (%s): %s", user_id, e)
+
+        await _update_admin_messages("✅ Onaylandı")
+        return {"status": "success", "message": f"{user_name} için talep onaylandı ve kullanıcıya bildirildi."}
+
+    elif action == "reject":
+        success = await db.reject_payment(user_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="Reddedilemedi — bekleyen talep bulunamadı.")
+
+        try:
+            await StreamBot.send_message(
+                user_id,
+                "❌ <b>Talebiniz Reddedildi</b>\n\nAbonelik talebiniz yönetici tarafından reddedildi. "
+                "Daha fazla bilgi için yönetici ile iletişime geçin.",
+                parse_mode=_enums.ParseMode.HTML
+            )
+        except Exception as e:
+            _logger.warning("Kullanıcıya red bildirimi gönderilemedi (%s): %s", user_id, e)
+
+        await _update_admin_messages("❌ Reddedildi")
+        return {"status": "success", "message": "Talep reddedildi ve kullanıcıya bildirildi."}
+
+    else:  # ban
+        await db.ban_user(user_id)
+        try:
+            await StreamBot.send_message(
+                user_id,
+                "🚫 <b>Hesabınız Engellendi</b>\n\nHesabınız yönetici tarafından engellenmiştir. "
+                "Bu botu artık kullanamazsınız.",
+                parse_mode=_enums.ParseMode.HTML
+            )
+        except Exception:
+            pass
+
+        await _update_admin_messages("🚫 Banlandı")
+        return {"status": "success", "message": "Kullanıcı banlandı."}
 
 
 # --- Access Management API ---

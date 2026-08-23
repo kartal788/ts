@@ -63,6 +63,13 @@ class Telegram:
     PROXY_TYPE = getenv("ProxyType", "HTTPS")
     HTTP_PROXY_URL = getenv("HTTP_Proxy_URL", "")
     PROXY_MODE = int(getenv("PROXY_MODE", "1"))  # 1=normal, 2=proxy+normal, 3=sadece proxy
+    # Proxy hangi üyelere uygulanacak?
+    #   "subscribers" → aktif aboneliği olan tüm üyelere (varsayılan davranış)
+    #   "selected"    → yalnızca PROXY_SCOPE_MEMBER_IDS'teki üyelere
+    # Kapsam dışındaki üyeler PROXY_MODE ne olursa olsun her zaman doğrudan
+    # (proxy'siz) link alır. Yalnızca panelden (Ayarlar) yönetilir.
+    PROXY_SCOPE_MODE = "subscribers"
+    PROXY_SCOPE_MEMBER_IDS: list = []
 
     # ── Token başına Cihaz Limiti ───────────────────────────────────
     #                       0 veya boş → sınırsız.

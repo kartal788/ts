@@ -16,3 +16,4 @@ python-dateutil>=2.8.2
 google-auth
 google-auth-oauthlib
 google-api-python-client
+pywebpush

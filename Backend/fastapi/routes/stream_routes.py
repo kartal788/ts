@@ -249,30 +249,45 @@ def _split_stream_snapshot(stream_id: str, part_count: int):
 
     Bu fonksiyon, tüm parçaların (aktif veya RECENT_STREAMS'e taşınmış)
     toplam byte sayısını toplayarak sanal akışın gerçek toplam kullanımını
-    hesaplar. Ayrıca son parçanın tamamlanıp tamamlanmadığını da döndürür.
+    hesaplar. Ayrıca akışın tamamlanıp tamamlanmadığını da döndürür.
+
+    ÖNEMLİ: `part_count`, dosyanın TÜM fiziksel parça sayısıdır (ör. 3),
+    ama tek bir HTTP Range isteği genelde bu parçaların HEPSİNE değil,
+    sadece istenen byte aralığına denk gelen bir alt kümesine dokunur
+    (bkz. virtual_dl.virtual_stream_generator). Özellikle dosyanın SON
+    fiziksel parçasına hiç uğramayan bir istek (örn. ortadan başlayan bir
+    seek) için "son parça aktif mi?" sorusu asla True olmaz — bu yüzden
+    "bitti" durumu artık son parçanın (part_count-1) index'ine göre değil,
+    BU istek sırasında görülmüş (any_seen) alt-parçaların hepsinin artık
+    aktif olmamasına (any_active == False) göre belirlenir. Aksi halde
+    "Bugün" sayacı akış tamamlanmadan çok erken durdurulup gerçek
+    kullanımın çok altında kalıyor, "İzleme Geçmişi" ise (her parça kendi
+    finally bloğunda tam olarak loglandığından) doğru kalmaya devam
+    ediyor — dashboard'da sahte "GB Tutarsızlığı" uyarısına yol açıyordu.
     """
     total = 0
-    last_part_active = False
-    last_part_found = False
+    any_active = False
+    any_seen = False
     for i in range(part_count):
         sub_id = f"{stream_id}-p{i}"
         entry = ACTIVE_STREAMS.get(sub_id)
         if entry is not None:
+            any_seen = True
             total += entry.get("total_bytes", 0)
-            if i == part_count - 1:
-                last_part_active = True
-                last_part_found = True
+            if entry.get("status") == "active":
+                any_active = True
             continue
         for rec in RECENT_STREAMS:
             if rec.get("stream_id") == sub_id:
+                any_seen = True
                 total += rec.get("total_bytes", 0)
-                if i == part_count - 1:
-                    last_part_found = True
                 break
-    # Akış bittiğinde son parça artık aktif değildir ama (RECENT_STREAMS'te
-    # bulunmuş ya da hiç başlamamış olsa da) tamamlanmış sayılır.
-    finished = (not last_part_active)
-    return total, finished, last_part_found
+    # Bu istek sırasında en az bir alt-parça görülmüş VE hiçbiri artık
+    # aktif değilse akış (bu Range isteği için) tamamlanmış demektir.
+    # Henüz hiçbir alt-parça oluşmadıysa (ör. ilk 2sn içinde stream henüz
+    # başlamadıysa) erken "bitti" sayılmaması için finished=False kalır.
+    finished = any_seen and not any_active
+    return total, finished, any_seen
 
 
 async def track_usage_from_stats(stream_id: str, token: str, token_data: dict, part_count: int = None):
@@ -1372,7 +1387,14 @@ async def local_file_streamer(request: Request, local_path: str, token_data: dic
                     "parallelism":  1,
                     "chunk_size":   chunk,
                     "meta": {
-                        "title": clean_title,
+                        "title":      clean_title,
+                        # user_token eksikse bu kayıt "izleme geçmişi" (stream_analytics)
+                        # toplamına dahil edilmez (get_daily_usage_discrepancies user_token'a
+                        # göre gruplar), fakat "Bugün" sayacı (usage.daily.bytes) yine de
+                        # track_usage_from_stats üzerinden artar. Sonuç: yerel/parçalı
+                        # (split) dosyalar izlendiğinde dashboard'da sahte "GB Tutarsızlığı"
+                        # uyarısı görünür. user_token'ı burada da eklemek iki tarafı eşitler.
+                        "user_token": token or "",
                     },
                 }
                 asyncio.create_task(db.log_stream_stats(log_entry))

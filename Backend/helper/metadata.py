@@ -712,6 +712,8 @@ async def build_manual_metadata(
     imdb_id: str | None = None,
     rating: float | None = None,
     genres: list[str] | None = None,
+    visibility_mode: str | None = None,
+    visibility_member_ids: list | None = None,
 ) -> dict | None:
     """Manuel içerik ekleme modu için: TMDB/IMDb'de karşılığı olmayan (ders
     videosu, kişisel video vb.) dosyalar için TMDB/IMDb sorgusu yapmadan doğrudan
@@ -738,6 +740,12 @@ async def build_manual_metadata(
     year: opsiyonel çıkış yılı (panelde boş bırakılabilir, None gönderilirse
     kayıtta year=None olarak kalır).
 
+    visibility_mode / visibility_member_ids: panelde "İçerik Ekle" formundan
+    seçilen görünürlük ayarı. mode="selected" ise yalnızca member_ids'teki
+    üyeler bu içeriği görebilir/erişebilir; aksi halde (None veya
+    "subscribers") tüm aktif abonelere açıktır (bkz. media_edit.html'deki
+    aynı mekanizma — is_media_visible_to_member).
+
     tmdb_id/imdb_id: normalde başlıktan deterministik olarak türetilir (yeni
     "manuel" bir kayıt oluşturmak için). Ancak /media/edit sayfasındaki
     "İçerik Ekle" (var olan içeriğe ekleme) modu bu ikisini var olan kaydın
@@ -748,6 +756,20 @@ async def build_manual_metadata(
     if not title or not title.strip():
         LOGGER.warning("build_manual_metadata: boş başlıkla çağrıldı, atlanıyor.")
         return None
+
+    visibility = None
+    if visibility_mode == "selected":
+        clean_ids = []
+        for m in (visibility_member_ids or []):
+            try:
+                clean_ids.append(int(m))
+            except (TypeError, ValueError):
+                continue
+        visibility = {"mode": "selected", "member_ids": sorted(set(clean_ids))}
+    elif visibility_mode == "subscribers":
+        visibility = {"mode": "subscribers", "member_ids": []}
+    # visibility_mode None → visibility=None bırakılır; insert_media() bu
+    # durumda şemadaki varsayılana (herkese açık) düşer.
 
     base_quality = _parse_quality_from_filename(filename)
     file_label = re.sub(r"\.[A-Za-z0-9]{1,5}$", "", filename).strip()
@@ -791,6 +813,7 @@ async def build_manual_metadata(
             "encoded_string": encoded_string,
             "group_key": None,
             "part_number": None,
+            "visibility": visibility,
         }
 
     # ----- TV (dizi) modu: sezon/bölüm dosya adından tespit edilebiliyorsa
@@ -855,6 +878,7 @@ async def build_manual_metadata(
         "encoded_string": encoded_string,
         "group_key": None,
         "part_number": None,
+        "visibility": visibility,
     }
 
 

@@ -179,6 +179,33 @@ body::before {
 }
 .nav-link.pill-active { color: var(--bg) !important; }
 
+/* ── İstekler rozeti (bekleyen içerik + abonelik talebi sayısı) ──────────── */
+.istekler-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    background: #ef4444;
+    color: #fff;
+    font-size: 0.65rem;
+    font-weight: 800;
+    line-height: 1;
+    padding: 0.2rem 0.4rem;
+    border-radius: 9999px;
+    box-shadow: 0 0 0 2px var(--bg, transparent);
+    animation: istekler-badge-pop 0.35s ease;
+}
+.istekler-badge i { font-size: 0.62rem; }
+@keyframes istekler-badge-pop {
+    0%   { transform: scale(0.5); opacity: 0; }
+    60%  { transform: scale(1.15); opacity: 1; }
+    100% { transform: scale(1); }
+}
+@keyframes istekler-badge-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.55); }
+    50%      { box-shadow: 0 0 0 4px rgba(239,68,68,0); }
+}
+.istekler-badge.pulse { animation: istekler-badge-pulse 1.6s ease-in-out infinite; }
+
 #active-pill {
     position: absolute;
     inset: auto;
@@ -371,20 +398,24 @@ tailwind.config = {
         <div id="active-pill" class="pointer-events-none"></div>
         <a href="/" class="nav-link"><i class="fa-solid fa-gauge text-[11px]"></i> Kontrol Paneli</a>
         <a href="/media/manage" class="nav-link"><i class="fa-solid fa-film text-[11px]"></i> Medya</a>
-        <a href="/admin/dashboard" class="nav-link"><i class="fa-solid fa-user-shield text-[11px]"></i> Yönetici</a>
         <a href="/admin/kataloglar" class="nav-link"><i class="fa-solid fa-layer-group text-[11px]"></i> Kataloglar</a>
-        <a href="/admin/araclar" class="nav-link"><i class="fa-solid fa-toolbox text-[11px]"></i> Araçlar</a>
-        <a href="/admin/subscriptions" class="nav-link"><i class="fa-solid fa-credit-card text-[11px]"></i> Abonelikler</a>
-        <a href="/admin/access" class="nav-link"><i class="fa-solid fa-key text-[11px]"></i> Erişim</a>
-        <a href="/istekler" class="nav-link"><i class="fa-solid fa-inbox text-[11px]"></i> İstekler</a>
-        <a href="/canli" class="nav-link"><span class="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse inline-block"></span> Canlı</a>
-        <a href="/yayin" class="nav-link"><i class="fa-solid fa-satellite-dish text-[11px]"></i> Yayın</a>
+        <a href="/admin/subscriptions" class="nav-link"><i class="fa-solid fa-credit-card text-[11px]"></i> Planlar</a>
+        <a href="/admin/uyeler" class="nav-link"><i class="fa-solid fa-users text-[11px]"></i> Üyeler</a>
+        <a href="/istekler" class="nav-link" id="istekler-nav-link"><i class="fa-solid fa-inbox text-[11px]"></i> İstekler<span id="istekler-badge" class="istekler-badge" style="display:none"><i class="fa-solid fa-bell"></i><span id="istekler-badge-count">0</span></span></a>
+        <a href="/canli" class="nav-link"><span class="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse inline-block"></span> TV</a>
+        <a href="/yayin" class="nav-link"><i class="fa-solid fa-satellite-dish text-[11px]"></i> Maç Yayını</a>
         <a href="/admin/settings" class="nav-link"><i class="fa-solid fa-gear text-[11px]"></i> Ayarlar</a>
     </div>
     {% endif %}
 
     <div class="flex items-center gap-2.5 justify-self-end">
         {% if current_user %}
+            <button id="push-enable-btn" type="button" title="Bildirimleri Aç"
+                class="w-9 h-9 flex items-center justify-center text-sm hover:bg-surface-2 rounded-full transition text-primary"
+                style="display:none">
+                <i class="fa-solid fa-bell"></i>
+            </button>
+
             <button id="menu-btn" class="md:hidden w-9 h-9 flex items-center justify-center text-lg hover:bg-surface-2 rounded-full transition">
                 <i id="menu-icon" class="fa-solid fa-bars"></i>
             </button>
@@ -442,14 +473,12 @@ tailwind.config = {
         <div class="glass-panel mx-2 rounded-3xl p-4 flex flex-col gap-1 max-h-[70vh] overflow-y-auto">
             <a href="/" class="px-4 py-3 rounded-xl hover:bg-primary hover:text-background transition flex items-center gap-3 font-semibold text-sm"><i class="fa-solid fa-gauge w-4"></i> Kontrol Paneli</a>
             <a href="/media/manage" class="px-4 py-3 rounded-xl hover:bg-primary hover:text-background transition flex items-center gap-3 font-semibold text-sm"><i class="fa-solid fa-film w-4"></i> Medya</a>
-            <a href="/admin/dashboard" class="px-4 py-3 rounded-xl hover:bg-primary hover:text-background transition flex items-center gap-3 font-semibold text-sm"><i class="fa-solid fa-user-shield w-4"></i> Yönetici</a>
             <a href="/admin/kataloglar" class="px-4 py-3 rounded-xl hover:bg-primary hover:text-background transition flex items-center gap-3 font-semibold text-sm"><i class="fa-solid fa-layer-group w-4"></i> Kataloglar</a>
-            <a href="/admin/araclar" class="px-4 py-3 rounded-xl hover:bg-primary hover:text-background transition flex items-center gap-3 font-semibold text-sm"><i class="fa-solid fa-toolbox w-4"></i> Araçlar</a>
-            <a href="/admin/subscriptions" class="px-4 py-3 rounded-xl hover:bg-primary hover:text-background transition flex items-center gap-3 font-semibold text-sm"><i class="fa-solid fa-credit-card w-4"></i> Abonelikler</a>
-            <a href="/admin/access" class="px-4 py-3 rounded-xl hover:bg-primary hover:text-background transition flex items-center gap-3 font-semibold text-sm"><i class="fa-solid fa-key w-4"></i> Erişim</a>
-            <a href="/istekler" class="px-4 py-3 rounded-xl hover:bg-primary hover:text-background transition flex items-center gap-3 font-semibold text-sm"><i class="fa-solid fa-inbox w-4"></i> İstekler</a>
-            <a href="/canli" class="px-4 py-3 rounded-xl hover:bg-primary hover:text-background transition flex items-center gap-3 font-semibold text-sm"><span class="w-2 h-2 bg-red-500 rounded-full animate-pulse inline-block"></span> Canlı</a>
-            <a href="/yayin" class="px-4 py-3 rounded-xl hover:bg-primary hover:text-background transition flex items-center gap-3 font-semibold text-sm"><i class="fa-solid fa-satellite-dish w-4"></i> Yayın</a>
+            <a href="/admin/subscriptions" class="px-4 py-3 rounded-xl hover:bg-primary hover:text-background transition flex items-center gap-3 font-semibold text-sm"><i class="fa-solid fa-credit-card w-4"></i> Planlar</a>
+            <a href="/admin/uyeler" class="px-4 py-3 rounded-xl hover:bg-primary hover:text-background transition flex items-center gap-3 font-semibold text-sm"><i class="fa-solid fa-users w-4"></i> Üyeler</a>
+            <a href="/istekler" class="px-4 py-3 rounded-xl hover:bg-primary hover:text-background transition flex items-center gap-3 font-semibold text-sm" id="istekler-nav-link-mobile"><i class="fa-solid fa-inbox w-4"></i> İstekler<span id="istekler-badge-mobile" class="istekler-badge" style="display:none"><i class="fa-solid fa-bell"></i><span id="istekler-badge-count-mobile">0</span></span></a>
+            <a href="/canli" class="px-4 py-3 rounded-xl hover:bg-primary hover:text-background transition flex items-center gap-3 font-semibold text-sm"><span class="w-2 h-2 bg-red-500 rounded-full animate-pulse inline-block"></span> TV</a>
+            <a href="/yayin" class="px-4 py-3 rounded-xl hover:bg-primary hover:text-background transition flex items-center gap-3 font-semibold text-sm"><i class="fa-solid fa-satellite-dish w-4"></i> Maç Yayını</a>
             <a href="/admin/settings" class="px-4 py-3 rounded-xl hover:bg-primary hover:text-background transition flex items-center gap-3 font-semibold text-sm"><i class="fa-solid fa-gear w-4"></i> Ayarlar</a>
             <div class="border-t border-hairline pt-2 mt-1 flex items-center justify-between">
                 <span class="text-sm theme-text-secondary px-3 flex items-center gap-1.5">
@@ -468,7 +497,7 @@ tailwind.config = {
 </main>
 
 <footer class="mt-auto w-full max-w-5xl mx-auto px-6 py-8">
-    <div class="glass-panel rounded-3xl p-6 flex flex-col md:flex-row justify-between items-center gap-4">
+    <div class="glass-panel rounded-3xl p-6 flex flex-col md:flex-row justify-center items-center gap-4">
         <div class="flex items-center gap-2">
             <i class="fa-brands fa-telegram text-primary text-xl"></i>
             <p class="theme-text-secondary text-sm">© 2026 {{ app_name }}.</p>
@@ -721,5 +750,134 @@ function toggleMobileMenu() { toggleMenu(); }
     };
 })();
 </script>
+
+{% if current_user %}
+<!-- ── İstekler rozeti — bekleyen içerik + abonelik talebi sayısı ─────────
+     2 film isteği + 5 abonelik talebi varsa "İstekler" linkinin yanında
+     bildirim ikonlu "7" rozeti gösterilir. Periyodik olarak yenilenir. ─── -->
+<script>
+(function () {
+    const BADGE_POLL_MS = 20000;
+    const badgeEl        = document.getElementById('istekler-badge');
+    const badgeCount     = document.getElementById('istekler-badge-count');
+    const badgeElMobile  = document.getElementById('istekler-badge-mobile');
+    const badgeCountMob  = document.getElementById('istekler-badge-count-mobile');
+
+    let _lastTotal = null;
+
+    async function refreshIstekBadge() {
+        try {
+            const res = await fetch('/api/admin/istekler/sayac', { credentials: 'same-origin' });
+            if (!res.ok) return;
+            const data = await res.json();
+            const total = data.total || 0;
+
+            [[badgeEl, badgeCount], [badgeElMobile, badgeCountMob]].forEach(([wrap, countEl]) => {
+                if (!wrap || !countEl) return;
+                countEl.textContent = total > 99 ? '99+' : String(total);
+                if (total > 0) {
+                    wrap.style.display = 'inline-flex';
+                    wrap.classList.toggle('pulse', _lastTotal !== null && total > _lastTotal);
+                } else {
+                    wrap.style.display = 'none';
+                    wrap.classList.remove('pulse');
+                }
+            });
+
+            _lastTotal = total;
+        } catch (e) {
+            console.warn('[istekler] sayaç alınamadı:', e);
+        }
+    }
+
+    refreshIstekBadge();
+    setInterval(refreshIstekBadge, BADGE_POLL_MS);
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') refreshIstekBadge();
+    });
+
+    // istekler.html üzerinde onayla/reddet işleminden sonra rozeti anında
+    // güncellemek için global olarak erişilebilir yapılır.
+    window.refreshIstekBadge = refreshIstekBadge;
+})();
+</script>
+
+<!-- ── Web Push — yeni içerik/abonelik talebi geldiğinde yöneticinin
+     tarayıcısına sistem bildirimi gönderir (Telegram'dan bağımsız). ─────── -->
+<script>
+(function () {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
+        return;
+    }
+
+    function urlBase64ToUint8Array(base64String) {
+        const padding = '='.repeat((4 - base64String.length % 4) % 4);
+        const base64  = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+        const rawData = atob(base64);
+        const output  = new Uint8Array(rawData.length);
+        for (let i = 0; i < rawData.length; ++i) output[i] = rawData.charCodeAt(i);
+        return output;
+    }
+
+    async function subscribeForPush() {
+        try {
+            const reg = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+            const keyRes = await fetch('/api/admin/push/public-key', { credentials: 'same-origin' });
+            if (!keyRes.ok) return;
+            const { public_key } = await keyRes.json();
+            if (!public_key) return;
+
+            let sub = await reg.pushManager.getSubscription();
+            if (!sub) {
+                sub = await reg.pushManager.subscribe({
+                    userVisibleOnly: true,
+                    applicationServerKey: urlBase64ToUint8Array(public_key),
+                });
+            }
+            await fetch('/api/admin/push/abone-ol', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ subscription: sub.toJSON() }),
+                credentials: 'same-origin',
+            });
+        } catch (e) {
+            console.warn('[push] abonelik oluşturulamadı:', e);
+        }
+    }
+
+    const bellBtn = document.getElementById('push-enable-btn');
+
+    function updateBellVisibility() {
+        if (!bellBtn) return;
+        bellBtn.style.display = (Notification.permission === 'granted') ? 'none' : 'flex';
+    }
+
+    // İzin zaten verilmişse (önceki ziyaretten) sessizce yeniden abone ol —
+    // tarayıcı push endpoint'i değişmiş olabileceğinden bunu her sayfa
+    // yüklemesinde tazelemek gerekir.
+    if (Notification.permission === 'granted') {
+        subscribeForPush();
+    }
+    updateBellVisibility();
+
+    if (bellBtn) {
+        bellBtn.addEventListener('click', async () => {
+            try {
+                const perm = await Notification.requestPermission();
+                updateBellVisibility();
+                if (perm === 'granted') {
+                    await subscribeForPush();
+                    if (window.showToast) showToast('Bildirimler açıldı. Yeni istek geldiğinde haber vereceğiz.', 'success');
+                } else if (window.showToast) {
+                    showToast('Bildirim izni verilmedi.', 'error');
+                }
+            } catch (e) {
+                console.warn('[push] izin istenemedi:', e);
+            }
+        });
+    }
+})();
+</script>
+{% endif %}
 </body>
 </html>

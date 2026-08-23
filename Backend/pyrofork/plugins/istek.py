@@ -156,6 +156,22 @@ async def istek_command(client: Client, message: Message):
         tmdb_id=tmdb_id,
     )
 
+    # Yöneticinin tarayıcısına Web Push bildirimi gönder (Telegram'dan bağımsız)
+    try:
+        from Backend.helper.webpush import notify_admins as _notify_admins_push
+        _push_type_label = {"movie": "🎬 Film", "tv": "📺 Dizi", "unknown": "🎥 İçerik"}.get(
+            resolved_media_type, "🎥 İçerik"
+        )
+        import asyncio as _asyncio
+        _asyncio.create_task(_notify_admins_push(
+            title="Yeni İçerik Talebi",
+            body=f"{_push_type_label} talebi: {first_name or username or user_id}",
+            url="/istekler",
+            tag="istek-icerik",
+        ))
+    except Exception as _pe:
+        print(f"[istek] Web push bildirimi gönderilemedi: {_pe}")
+
     if resolved_media_type in ("tv", "movie") and tmdb_id:
         try:
             from Backend.fastapi.routes.notification_routes import (

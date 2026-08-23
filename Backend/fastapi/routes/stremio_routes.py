@@ -5,6 +5,7 @@ from typing import Optional
 from urllib.parse import unquote, unquote_plus
 from Backend.config import Telegram
 from Backend import db, __version__
+from Backend.helper.database import is_media_visible_to_member, is_proxy_scope_member
 from Backend.helper.platform_catalog import platform_catalog, PLATFORM_LABELS
 from Backend.helper.settings_manager import SettingsManager
 import PTN
@@ -90,6 +91,9 @@ LANG_LABELS = {
         "yerli_movies": "🇹🇷 Yerli Filmler",
         "yerli_series": "🇹🇷 Yerli Diziler",
         "similar": "🎯 Sana Özel",
+
+        "selected_movies": "🎬 Filmler",
+        "selected_series": "📺 Diziler",
     },
     "de": {
         "new": "Neu hinzugefügt", "popular": "Beliebt", "movies": "Filme",
@@ -99,6 +103,9 @@ LANG_LABELS = {
         "yerli_movies": "🇹🇷 Türkische Filme",
         "yerli_series": "🇹🇷 Türkische Serien",
         "similar": "🎯 Empfohlen für Sie",
+
+        "selected_movies": "🎬 Ausgewählte Filme",
+        "selected_series": "📺 Ausgewählte Serien",
     },
     "en": {
         "new": "Recently Added", "popular": "Popular", "movies": "Movies",
@@ -108,6 +115,9 @@ LANG_LABELS = {
         "yerli_movies": "🇹🇷 Turkish Movies",
         "yerli_series": "🇹🇷 Turkish Series",
         "similar": "🎯 Recommended For You",
+
+        "selected_movies": "🎬 Selected Movies",
+        "selected_series": "📺 Selected Series",
     },
 }
 
@@ -423,6 +433,118 @@ def _has_video_stream(item: dict) -> bool:
                 return True
 
     return False
+
+
+# ── Üye erişim kısıtlamaları (uye_detay.html admin panelinden yönetilir) ────
+# Bir üyeye (token bazında) admin tarafından: hangi katalogları görebileceği,
+# en fazla hangi yaş sınırına kadar içerik görebileceği ve hangi içeriklere
+# sertifika sınırından bağımsız her zaman erişebileceği (whitelist) atanabilir.
+
+_CERT_AGE_MAP: dict = {
+    # US (MPAA)
+    "G": 0, "TV-G": 0, "TV-Y": 0, "TV-Y7": 7,
+    "PG": 7, "TV-PG": 7,
+    "PG-13": 13, "TV-14": 14,
+    "R": 17, "NC-17": 18, "TV-MA": 17,
+    # DE (FSK)
+    "0": 0, "6": 6, "12": 12, "16": 16, "18": 18,
+    "FSK0": 0, "FSK6": 6, "FSK12": 12, "FSK16": 16, "FSK18": 18,
+    # TR (yaygın biçimler)
+    "GENEL İZLEYİCİ KİTLESİ": 0, "GENEL IZLEYICI KITLESI": 0,
+    "0+": 0, "6+": 6, "7+": 7, "10+": 10, "13+": 13, "15+": 15, "16+": 16, "18+": 18,
+}
+
+
+def _certification_age(item: dict) -> Optional[int]:
+    """Bir içeriğin (TR/DE/US sertifikalarından) tahmini en yüksek yaş sınırını
+    döner. Sertifika bilgisi hiç yoksa/anlaşılamıyorsa None döner — çağıran taraf
+    bu durumu ('Üye Sertifikası' yok) 'sınır yok' seçeneğinden ayırt edebilsin diye."""
+    ages = []
+    for field in ("certification_tr", "certification_de", "certification_us"):
+        raw = (item.get(field) or "").strip().upper()
+        if not raw:
+            continue
+        if raw in _CERT_AGE_MAP:
+            ages.append(_CERT_AGE_MAP[raw])
+            continue
+        m = _re.search(r"\d+", raw)
+        if m:
+            try:
+                ages.append(int(m.group()))
+            except ValueError:
+                pass
+    return max(ages) if ages else None
+
+
+async def _enrich_visibility(items: list) -> list:
+    """
+    'visibility' alanını taşımayan harici kaynaklı katalog öğelerini
+    (TMDB trend listesi, platform koleksiyon önbelleği vb.) gerçek DB
+    dokümanındaki görünürlük ayarıyla zenginleştirir; böylece bu öğeler
+    de _apply_member_restrictions(..., user_id=...) tarafından doğru
+    şekilde süzülebilir. Öğe zaten 'visibility' taşıyorsa dokunulmaz.
+    """
+    missing_ids = [
+        it.get("imdb_id") for it in items
+        if it.get("imdb_id") and "visibility" not in it
+    ]
+    if not missing_ids:
+        return items
+    vis_map = await db.get_visibility_map(missing_ids)
+    if not vis_map:
+        return items
+    for it in items:
+        imdb_id = it.get("imdb_id")
+        if imdb_id and "visibility" not in it and imdb_id in vis_map:
+            it["visibility"] = vis_map[imdb_id]
+    return items
+
+
+def _apply_member_restrictions(items: list, restrictions: Optional[dict], user_id=None) -> list:
+    """Katalog listesine üyeye özel erişim kısıtlamalarını uygular.
+
+    - only_selected_videos=True ise: her şeyin önüne geçer, üye SADECE
+      selected_videos listesindeki içerikleri görebilir (katalog/sertifika
+      kısıtlamaları bu modda değerlendirilmez).
+    - Aksi halde: 'certification_max_age' (azami yaş sınırı) uygulanır.
+      * None ise ("Sınır yok") tüm içerikler geçer (mevcut davranış).
+      * Bir değer ayarlıysa: Üye Sertifikası (TR/DE/US) OLMAYAN içerikler de
+        bu sınırla birlikte GİZLENİR — yalnızca 'allowed_videos' whitelist'inde
+        açıkça işaretlenmiş videolar bu sınırdan muaf tutulur.
+    - Son adım: içerik seviyesinde tanımlanmış görünürlük kısıtlaması
+      (media_edit.html → "Sadece seçtiğim üye(ler)") uygulanır. user_id
+      verilmemişse bu adım atlanır (geriye dönük uyumluluk).
+    """
+    if restrictions:
+        if restrictions.get("only_selected_videos"):
+            selected_ids = {
+                v.get("imdb_id") for v in (restrictions.get("selected_videos") or []) if v.get("imdb_id")
+            }
+            items = [] if not selected_ids else [it for it in items if it.get("imdb_id") in selected_ids]
+        else:
+            max_age = restrictions.get("certification_max_age")
+            if max_age is not None:
+                allowed_ids = {
+                    v.get("imdb_id") for v in (restrictions.get("allowed_videos") or []) if v.get("imdb_id")
+                }
+                out = []
+                for it in items:
+                    if it.get("imdb_id") in allowed_ids:
+                        out.append(it)
+                        continue
+                    cert_age = _certification_age(it)
+                    if cert_age is None:
+                        # Üye Sertifikası yok → yalnızca whitelist'e alınmadıkça gösterilmez.
+                        continue
+                    if cert_age <= max_age:
+                        out.append(it)
+                items = out
+
+    if user_id is not None:
+        items = [it for it in items if is_media_visible_to_member(it, user_id)]
+
+    return items
+
 
 def _extract_lang_flags(filename: str) -> str:
     """
@@ -975,69 +1097,154 @@ async def get_manifest(token: str, lang: str = "en", token_data: dict = Depends(
 
         from Backend import db as _db_cat
 
-        # --- Admin: globalde kapatılmış hazır katalogları çıkar ---
-        _global_settings = await _db_cat.get_catalog_global_settings()
-        _globally_disabled = set(_global_settings.get("disabled", []))
-        _global_order = _global_settings.get("order", [])
+        # --- Admin: Bu üyeye özel katalog erişim kısıtlaması (uye_detay.html) ---
+        _member_restrictions = await _db_cat.get_member_access_restrictions(token)
 
-        def _builtin_base_id(cat_id: str, cat_lang: str) -> str:
-            suffix = f"_{cat_lang}"
-            return cat_id[:-len(suffix)] if cat_id.endswith(suffix) else cat_id
+        if _member_restrictions.get("only_selected_videos"):
+            # "Sadece Seçili Videoları Göster" aktifken üye SADECE kendisi için
+            # seçilen içerikleri görür. Ana sayfada başka hiçbir katalog
+            # (hazır/özel/vb.) gösterilmez — yalnızca bu üyeye özel, film/dizi
+            # olarak ikiye ayrılmış iki katalog satırı üretilir.
+            _selected = _member_restrictions.get("selected_videos") or []
+            _has_movies = any((v.get("media_type") or "movie") != "tv" for v in _selected)
+            _has_series = any((v.get("media_type") or "movie") == "tv" for v in _selected)
 
-        all_catalogs = [
-            c for c in all_catalogs
-            if _builtin_base_id(c["id"], lang) not in _globally_disabled
-        ]
+            catalogs = []
+            if _has_movies or not _selected:
+                catalogs.append({
+                    "type": "movie",
+                    "id": f"selected_movies_{lang}",
+                    "name": lbl["selected_movies"],
+                    "extra": [{"name": "skip"}],
+                    "extraSupported": ["skip"],
+                })
+            if _has_series or not _selected:
+                catalogs.append({
+                    "type": "series",
+                    "id": f"selected_series_{lang}",
+                    "name": lbl["selected_series"],
+                    "extra": [{"name": "skip"}],
+                    "extraSupported": ["skip"],
+                })
+            # Admin, "Sadece Seçili Videoları Göster" aktifken bu üye için
+            # Canlı Yayın koleksiyonunun da (tüm kanallar) eklenmesini
+            # işaretlediyse, normal moddaki aynı "live_{lang}" katalog
+            # satırını üretiyoruz — kanal listeleme/meta/stream işleyicileri
+            # zaten id ön ekine göre çalıştığından ekstra bir filtreye
+            # gerek kalmıyor.
+            if _member_restrictions.get("include_live_collection"):
+                catalogs.append({
+                    "type": "channel",
+                    "id": f"live_{lang}",
+                    "name": lbl["live"],
+                    "extra": [
+                        {"name": "genre", "isRequired": False, "options": get_live_genres_for_lang(lang)},
+                        {"name": "skip"},
+                    ],
+                    "extraSupported": ["genre", "skip"],
+                })
+        elif _member_restrictions.get("certification_max_age") is not None:
+            # "Azami İçerik Yaş Sınırı" seçiliyken de aynı mantık: ana sayfada
+            # başka hiçbir katalog gösterilmez — üyeye özel, sadece o yaş
+            # sınırının altındaki (veya muafiyet listesindeki) içerikleri
+            # barındıran, film/dizi olarak ikiye ayrılmış iki katalog üretilir.
+            catalogs = [
+                {
+                    "type": "movie",
+                    "id": f"cert_movies_{lang}",
+                    "name": lbl["movies"],
+                    "extra": [
+                        {"name": "genre", "isRequired": False, "options": get_genres_for_lang(lang)},
+                        {"name": "skip"},
+                        {"name": "search", "isRequired": False},
+                    ],
+                    "extraSupported": ["genre", "skip", "search"],
+                },
+                {
+                    "type": "series",
+                    "id": f"cert_series_{lang}",
+                    "name": lbl["series"],
+                    "extra": [
+                        {"name": "genre", "isRequired": False, "options": get_genres_for_lang(lang)},
+                        {"name": "skip"},
+                        {"name": "search", "isRequired": False},
+                    ],
+                    "extraSupported": ["genre", "skip", "search"],
+                },
+            ]
+        else:
+            # --- Admin: globalde kapatılmış hazır katalogları çıkar ---
+            _global_settings = await _db_cat.get_catalog_global_settings()
+            _globally_disabled = set(_global_settings.get("disabled", []))
+            _global_order = _global_settings.get("order", [])
 
-        # --- Admin: aktif özel katalogları ekle ---
-        custom_catalogs = await _db_cat.get_custom_catalogs(active_only=True)
-        for cc in custom_catalogs:
-            cc_media_type = cc.get("media_type", "mixed")
-            catalog_type = "series" if cc_media_type == "series" else "movie"
-            cc_name = cc.get(f"name_{lang}") or cc.get("name", "Katalog")
-            all_catalogs.append({
-                "type": catalog_type,
-                "id": f"custom_{cc['_id']}_{lang}",
-                "name": cc_name,
-                "extra": [{"name": "skip"}],
-                "extraSupported": ["skip"],
-            })
+            def _builtin_base_id(cat_id: str, cat_lang: str) -> str:
+                suffix = f"_{cat_lang}"
+                return cat_id[:-len(suffix)] if cat_id.endswith(suffix) else cat_id
 
-        # --- Admin: TÜM üyeler için geçerli varsayılan katalog sırasını uygula ---
-        # (Bir üye kendi Stremio ayarlar sayfasından kişisel bir sıra belirlerse,
-        # aşağıdaki adımda bu varsayılanın üzerine yazılır.)
-        if _global_order:
-            _order_map = {bid: idx for idx, bid in enumerate(_global_order)}
-            _default_start = len(_global_order)
-            _original_positions = {id(c): i for i, c in enumerate(all_catalogs)}
-            all_catalogs.sort(
-                key=lambda c: _order_map.get(
-                    strip_catalog_lang_suffix(c["id"]),
-                    _default_start + _original_positions[id(c)],
+            all_catalogs = [
+                c for c in all_catalogs
+                if _builtin_base_id(c["id"], lang) not in _globally_disabled
+            ]
+
+            # --- Admin: aktif özel katalogları ekle ---
+            custom_catalogs = await _db_cat.get_custom_catalogs(active_only=True)
+            for cc in custom_catalogs:
+                cc_media_type = cc.get("media_type", "mixed")
+                catalog_type = "series" if cc_media_type == "series" else "movie"
+                cc_name = cc.get(f"name_{lang}") or cc.get("name", "Katalog")
+                all_catalogs.append({
+                    "type": catalog_type,
+                    "id": f"custom_{cc['_id']}_{lang}",
+                    "name": cc_name,
+                    "extra": [{"name": "skip"}],
+                    "extraSupported": ["skip"],
+                })
+
+            # --- Admin: Bu üyeye özel katalog erişim kısıtlaması (uye_detay.html) ---
+            _allowed_catalogs = _member_restrictions.get("allowed_catalogs")
+            if _allowed_catalogs is not None:
+                _allowed_cat_set = set(_allowed_catalogs)
+                all_catalogs = [
+                    c for c in all_catalogs
+                    if strip_catalog_lang_suffix(c["id"]) in _allowed_cat_set
+                ]
+
+            # --- Admin: TÜM üyeler için geçerli varsayılan katalog sırasını uygula ---
+            # (Bir üye kendi Stremio ayarlar sayfasından kişisel bir sıra belirlerse,
+            # aşağıdaki adımda bu varsayılanın üzerine yazılır.)
+            if _global_order:
+                _order_map = {bid: idx for idx, bid in enumerate(_global_order)}
+                _default_start = len(_global_order)
+                _original_positions = {id(c): i for i, c in enumerate(all_catalogs)}
+                all_catalogs.sort(
+                    key=lambda c: _order_map.get(
+                        strip_catalog_lang_suffix(c["id"]),
+                        _default_start + _original_positions[id(c)],
+                    )
                 )
-            )
 
-        # --- Kullanıcının gizlediği ve sıraladığı katalogları uygula ---
-        cat_doc = await _db_cat.get_catalog_prefs_full(token)
-        hidden = cat_doc.get("hidden_catalogs", []) if isinstance(cat_doc, dict) else (cat_doc or [])
-        catalog_order = cat_doc.get("catalog_order", []) if isinstance(cat_doc, dict) else []
+            # --- Kullanıcının gizlediği ve sıraladığı katalogları uygula ---
+            cat_doc = await _db_cat.get_catalog_prefs_full(token)
+            hidden = cat_doc.get("hidden_catalogs", []) if isinstance(cat_doc, dict) else (cat_doc or [])
+            catalog_order = cat_doc.get("catalog_order", []) if isinstance(cat_doc, dict) else []
 
-        # Gizli katalogları çıkar
-        filtered = [c for c in all_catalogs if strip_catalog_lang_suffix(c["id"]) not in hidden]
+            # Gizli katalogları çıkar
+            filtered = [c for c in all_catalogs if strip_catalog_lang_suffix(c["id"]) not in hidden]
 
-        # Kullanıcının özel sırasını uygula (varsa) — admin varsayılanının önüne geçer
-        if catalog_order:
-            order_map = {base_id: idx for idx, base_id in enumerate(catalog_order)}
-            default_start = len(catalog_order)
-            _original_positions = {id(c): i for i, c in enumerate(filtered)}
-            filtered.sort(
-                key=lambda c: order_map.get(
-                    strip_catalog_lang_suffix(c["id"]),
-                    default_start + _original_positions[id(c)],
+            # Kullanıcının özel sırasını uygula (varsa) — admin varsayılanının önüne geçer
+            if catalog_order:
+                order_map = {base_id: idx for idx, base_id in enumerate(catalog_order)}
+                default_start = len(catalog_order)
+                _original_positions = {id(c): i for i, c in enumerate(filtered)}
+                filtered.sort(
+                    key=lambda c: order_map.get(
+                        strip_catalog_lang_suffix(c["id"]),
+                        default_start + _original_positions[id(c)],
+                    )
                 )
-            )
 
-        catalogs = filtered
+            catalogs = filtered
 
     # Build dynamic name/description/version with subscription info
     addon_name = ADDON_NAME
@@ -1796,6 +2003,22 @@ async def get_catalog(token: str, media_type: str, id: str, extra: Optional[str]
     _global_settings = await _db_cat_pref.get_catalog_global_settings()
     globally_disabled = set(_global_settings.get("disabled", []))
 
+    # Admin: bu üyeye özel erişim kısıtlamaları (uye_detay.html)
+    member_restrictions = await _db_cat_pref.get_member_access_restrictions(token)
+    _allowed_cats = member_restrictions.get("allowed_catalogs")
+    # only_selected_videos VEYA certification_max_age aktifken üye zaten
+    # sadece kendisine özel (selected_/cert_ ile başlayan) kataloglara sahiptir;
+    # bu durumda "Görebileceği Kataloglar" kısıtlaması değerlendirilmez.
+    _override_mode = bool(member_restrictions.get("only_selected_videos")) or (
+        member_restrictions.get("certification_max_age") is not None
+    )
+    if (
+        _allowed_cats is not None
+        and not _override_mode
+        and strip_catalog_lang_suffix(id) not in set(_allowed_cats)
+    ):
+        return {"metas": []}
+
     if media_type not in ["movie", "series", "channel"]:
         raise HTTPException(status_code=404, detail="Invalid catalog type")
 
@@ -1828,6 +2051,7 @@ async def get_catalog(token: str, media_type: str, id: str, extra: Optional[str]
             all_items = search_results.get("results", [])
             db_media_type = "tv" if media_type == "series" else "movie"
             items = [item for item in all_items if item.get("media_type") == db_media_type and _has_video_stream(item)]
+            items = _apply_member_restrictions(items, member_restrictions, user_id=token_data.get("user_id"))
         else:
             # ── Canlı Yayın kataloğu ──────────────────────────────────────
             if id.startswith("live_") and media_type == "channel":
@@ -1916,6 +2140,7 @@ async def get_catalog(token: str, media_type: str, id: str, extra: Optional[str]
                 all_items.sort(key=lambda m: int(m.get("release_year") or 0), reverse=True)
                 # Sadece gerçek video stream'i olan içerikleri göster (arşiv-only içerikler gizle)
                 all_items = [item for item in all_items if _has_video_stream(item)]
+                all_items = _apply_member_restrictions(all_items, member_restrictions, user_id=token_data.get("user_id"))
                 all_items = all_items[stremio_skip: stremio_skip + PAGE_SIZE]
                 metas = await asyncio.gather(*(convert_to_stremio_meta(item, lang) for item in all_items))
                 return {"metas": metas}
@@ -1945,6 +2170,7 @@ async def get_catalog(token: str, media_type: str, id: str, extra: Optional[str]
                         items = [i for i in items if genre_filter in (i.get("genres_tr") or [])]
 
                 items = [item for item in items if _has_video_stream(item)]
+                items = _apply_member_restrictions(items, member_restrictions, user_id=token_data.get("user_id"))
                 items = items[stremio_skip: stremio_skip + PAGE_SIZE]
                 metas = await asyncio.gather(*(convert_to_stremio_meta(item, lang) for item in items))
                 return {"metas": metas}
@@ -1979,6 +2205,7 @@ async def get_catalog(token: str, media_type: str, id: str, extra: Optional[str]
                     items = data.get("tv_shows", [])
 
                 items = [item for item in items if _has_video_stream(item)]
+                items = _apply_member_restrictions(items, member_restrictions, user_id=token_data.get("user_id"))
                 metas = await asyncio.gather(*(convert_to_stremio_meta(item, lang) for item in items))
                 return {"metas": metas}
 
@@ -1998,6 +2225,7 @@ async def get_catalog(token: str, media_type: str, id: str, extra: Optional[str]
                     else:
                         all_items = [i for i in all_items if genre_filter in (i.get("genres_tr") or [])]
 
+                all_items = _apply_member_restrictions(all_items, member_restrictions, user_id=token_data.get("user_id"))
                 all_items = all_items[stremio_skip: stremio_skip + PAGE_SIZE]
                 metas = await asyncio.gather(*(convert_to_stremio_meta(item, lang) for item in all_items))
                 return {"metas": metas}
@@ -2040,6 +2268,7 @@ async def get_catalog(token: str, media_type: str, id: str, extra: Optional[str]
                 # Sayfalama: cache'teki 60 içerikten ilgili sayfayı dön
                 skip = (page - 1) * PAGE_SIZE
                 page_items = all_similar[skip: skip + PAGE_SIZE]
+                page_items = _apply_member_restrictions(page_items, member_restrictions, user_id=token_data.get("user_id"))
 
                 if not page_items:
                     return {"metas": []}
@@ -2064,9 +2293,34 @@ async def get_catalog(token: str, media_type: str, id: str, extra: Optional[str]
 
                 # Sadece gerçek video stream'i olan içerikleri göster
                 all_items = [item for item in all_items if _has_video_stream(item)]
+                all_items = await _enrich_visibility(all_items)
+                all_items = _apply_member_restrictions(all_items, member_restrictions, user_id=token_data.get("user_id"))
                 # Film+dizi karışık liste — type filtresi yok
                 all_items = all_items[stremio_skip: stremio_skip + PAGE_SIZE]
                 metas = await asyncio.gather(*(convert_to_stremio_meta(item, lang) for item in all_items))
+                return {"metas": metas}
+
+            # ── Üyeye özel: "Sadece Seçili Videoları Göster" katalogları ────
+            elif id.startswith("selected_movies_") or id.startswith("selected_series_"):
+                from Backend import db as _db_sel
+
+                wanted_kind = "movie" if id.startswith("selected_movies_") else "series"
+                selected = member_restrictions.get("selected_videos") or []
+                selected = [
+                    v for v in selected
+                    if ((v.get("media_type") or "movie") == "tv") == (wanted_kind == "series")
+                ]
+                page_items = selected[stremio_skip: stremio_skip + PAGE_SIZE]
+
+                metas = []
+                for v in page_items:
+                    imdb_id = v.get("imdb_id")
+                    if not imdb_id:
+                        continue
+                    doc = await _db_sel.get_media_by_imdb(imdb_id)
+                    if not doc or not _has_video_stream(doc):
+                        continue
+                    metas.append(await convert_to_stremio_meta(doc, lang))
                 return {"metas": metas}
 
             # ── Admin: Özel (manuel) katalog ────────────────────────────
@@ -2096,6 +2350,8 @@ async def get_catalog(token: str, media_type: str, id: str, extra: Optional[str]
                     doc = await _db_custom.get_media_by_imdb(imdb_id)
                     if not doc or not _has_video_stream(doc):
                         continue
+                    if not _apply_member_restrictions([doc], member_restrictions, user_id=token_data.get("user_id")):
+                        continue
                     metas.append(await convert_to_stremio_meta(doc, lang))
                 return {"metas": metas}
 
@@ -2119,6 +2375,7 @@ async def get_catalog(token: str, media_type: str, id: str, extra: Optional[str]
 
     # Sadece video stream'i olan içerikleri kataloga ekle (arşiv-only içerikler gizle)
     items = [item for item in items if _has_video_stream(item)]
+    items = _apply_member_restrictions(items, member_restrictions, user_id=token_data.get("user_id"))
     metas = await asyncio.gather(*(convert_to_stremio_meta(item, lang) for item in items))
     return {"metas": metas}
 
@@ -2187,6 +2444,14 @@ async def get_meta(token: str, media_type: str, id: str, lang: str = "tr", token
 
     media = await db.get_media_details(imdb_id=imdb_id)
     if not media:
+        return {"meta": {}}
+
+    # Admin: bu üyeye özel erişim kısıtlaması (uye_detay.html) + içerik
+    # seviyesinde görünürlük (media_edit.html) — katalogda gizlenen bir
+    # içerik imdb_id doğrudan biliniyorsa meta uç noktasından da açılmasın
+    # diye burada da uygulanır.
+    member_restrictions = await db.get_member_access_restrictions(token)
+    if not _apply_member_restrictions([media], member_restrictions, user_id=token_data.get("user_id")):
         return {"meta": {}}
 
     if lang == "de":
@@ -2391,7 +2656,7 @@ async def get_streams(
         # PROXY_MODE=3 → sadece proxy
         proxy_url = (
             f"{_TG.HTTP_PROXY_URL}{stream_url}"
-            if _TG.PROXY and _TG.HTTP_PROXY_URL
+            if _TG.PROXY and _TG.HTTP_PROXY_URL and is_proxy_scope_member(token_data.get("user_id"))
             else None
         )
 
@@ -2455,6 +2720,14 @@ async def get_streams(
     )
 
     if not media_details or "telegram" not in media_details:
+        return {"streams": []}
+
+    # Admin: bu üyeye özel erişim kısıtlaması (uye_detay.html) + içerik
+    # seviyesinde görünürlük (media_edit.html) — katalogda gizlenen bir
+    # içerik imdb_id doğrudan biliniyorsa stream uç noktasından da
+    # izlenmesin diye burada da uygulanır.
+    member_restrictions = await db.get_member_access_restrictions(token)
+    if not _apply_member_restrictions([media_details], member_restrictions, user_id=token_data.get("user_id")):
         return {"streams": []}
 
     streams = []
@@ -2521,7 +2794,7 @@ async def get_streams(
             url = f"{_base_url}/dl/{token}/{_encoded_parts_id}/{_vtok}/{_safe_fn}"
             proxy_url = (
                 f"{Telegram.HTTP_PROXY_URL}{url}"
-                if Telegram.PROXY and Telegram.HTTP_PROXY_URL
+                if Telegram.PROXY and Telegram.HTTP_PROXY_URL and is_proxy_scope_member(token_data.get("user_id"))
                 else None
             )
             if Telegram.PROXY and proxy_url and Telegram.PROXY_MODE == 2:
@@ -2612,7 +2885,7 @@ async def get_streams(
         # PROXY_MODE=3 → sadece proxy
         proxy_url = (
             f"{Telegram.HTTP_PROXY_URL}{url}"
-            if Telegram.PROXY and Telegram.HTTP_PROXY_URL
+            if Telegram.PROXY and Telegram.HTTP_PROXY_URL and is_proxy_scope_member(token_data.get("user_id"))
             else None
         )
 

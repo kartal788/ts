@@ -95,7 +95,7 @@ async def plan_selection(client: Client, callback_query: CallbackQuery):
         [
             InlineKeyboardButton("✅ Onayla", callback_data=f"approve_{user_id}"),
             InlineKeyboardButton("❌ Reddet", callback_data=f"reject_{user_id}"),
-            InlineKeyboardButton("🚫 Banla", callback_data=f"ban_{user_id}"),
+            InlineKeyboardButton("🚫 Yasakla", callback_data=f"ban_{user_id}"),
         ]
     ])
 
@@ -128,6 +128,19 @@ async def plan_selection(client: Client, callback_query: CallbackQuery):
 
     await db.set_pending_payment(user_id, int(plan["days"]), 0, price=plan.get("price", 0),
                                   admin_messages=admin_messages, plan_id=plan.get("_id", ""))
+
+    # Yöneticinin tarayıcısına Web Push bildirimi gönder (Telegram'dan bağımsız)
+    try:
+        from Backend.helper.webpush import notify_admins as _notify_admins_push
+        import asyncio as _asyncio
+        _asyncio.create_task(_notify_admins_push(
+            title="Yeni Abonelik Talebi",
+            body=f"{plan['days']} gün — {plan.get('price', 0)} TL — {user_mention}",
+            url="/istekler",
+            tag="istek-abonelik",
+        ))
+    except Exception as _pe:
+        print(f"Web push bildirimi gönderilemedi: {_pe}")
 
 
 @Client.on_callback_query(filters.regex(r"^(approve|reject|ban|unban)_(\d+)$"))

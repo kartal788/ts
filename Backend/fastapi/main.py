@@ -69,9 +69,14 @@ from Backend.fastapi.routes.notification_routes import (
     my_content_requests,
     admin_list_content_requests,
     admin_review_content_requests,
+    admin_istekler_counter,
+    admin_push_public_key,
+    admin_push_subscribe,
+    admin_push_unsubscribe,
 )
 from Backend.fastapi.routes.api_routes import (
     list_media_api, delete_media_api, update_media_api, requery_media_api,
+    get_media_visibility_api, update_media_visibility_api,
     delete_movie_quality_api, delete_tv_quality_api,
     delete_tv_episode_api, delete_tv_season_api,
     rename_movie_quality_api, rename_tv_quality_api,
@@ -83,6 +88,7 @@ from Backend.fastapi.routes.api_routes import (
     update_subscription_plan_api, delete_subscription_plan_api,
     get_all_subscribers_api, manage_subscriber_api,
     get_all_tokens_api, assign_plan_api, link_token_user_api,
+    get_pending_subscription_requests_api, admin_review_subscription_request_api,
     get_settings_api, update_settings_api,
     export_settings_backup_api, import_settings_backup_api,
     invalidate_admin_sessions_api,
@@ -100,6 +106,10 @@ from Backend.fastapi.routes.uyeler_routes import (
     admin_uye_subscription_history_api,
     admin_uye_ban_api,
     admin_uye_clear_devices_api,
+    admin_uye_access_get_api,
+    admin_uye_access_save_api,
+    admin_uye_access_search_media_api,
+    admin_uye_access_lookup_media_api,
 )
 
 app = FastAPI(
@@ -394,6 +404,18 @@ try:
     app.mount("/static", StaticFiles(directory="Backend/fastapi/static"), name="static")
 except Exception:
     pass
+
+# Web Push service worker'ı kök scope'ta ("/") sunulmalıdır ki panelin tüm
+# sayfalarını (istekler, dashboard, vb.) kontrol edebilsin — bu yüzden
+# /static/sw.js yerine doğrudan /sw.js olarak servis edilir.
+@app.get("/sw.js")
+async def _service_worker():
+    from fastapi.responses import FileResponse
+    return FileResponse(
+        "Backend/fastapi/static/sw.js",
+        media_type="application/javascript",
+        headers={"Service-Worker-Allowed": "/", "Cache-Control": "no-cache"},
+    )
 
 @app.on_event("startup")
 async def _startup():
@@ -1106,6 +1128,14 @@ async def update_media(request: Request, tmdb_id: int, db_index: int, media_type
 async def requery_media(request: Request, tmdb_id: int, db_index: int, media_type: str, _: bool = Depends(require_auth)):
     return await requery_media_api(request, tmdb_id, db_index, media_type)
 
+@app.get("/api/media/visibility")
+async def get_media_visibility(tmdb_id: int, db_index: int, media_type: str = Query(regex="^(movie|tv)$"), _: bool = Depends(require_auth)):
+    return await get_media_visibility_api(tmdb_id, db_index, media_type)
+
+@app.put("/api/media/visibility")
+async def update_media_visibility(request: Request, tmdb_id: int, db_index: int, media_type: str = Query(regex="^(movie|tv)$"), _: bool = Depends(require_auth)):
+    return await update_media_visibility_api(request, tmdb_id, db_index, media_type)
+
 @app.delete("/api/media/delete-quality")
 async def delete_movie_quality(tmdb_id: int, db_index: int, id: str, _: bool = Depends(require_auth)):
     return await delete_movie_quality_api(tmdb_id, db_index, id)
@@ -1328,6 +1358,27 @@ async def admin_uye_unban(member_id: str, _: bool = Depends(require_auth)):
 @app.post("/api/admin/uyeler/{member_id}/clear-devices")
 async def admin_uye_clear_devices(member_id: str, _: bool = Depends(require_auth)):
     return await admin_uye_clear_devices_api(member_id)
+
+@app.get("/api/admin/uyeler/{member_id}/access")
+async def admin_uye_access_get(member_id: str, _: bool = Depends(require_auth)):
+    return await admin_uye_access_get_api(member_id)
+
+@app.post("/api/admin/uyeler/{member_id}/access")
+async def admin_uye_access_save(member_id: str, payload: dict, _: bool = Depends(require_auth)):
+    return await admin_uye_access_save_api(member_id, payload)
+
+@app.get("/api/admin/uyeler/{member_id}/access/search-media")
+async def admin_uye_access_search_media(
+    member_id: str, q: str = "", page: int = 1, page_size: int = 15, _: bool = Depends(require_auth)
+):
+    return await admin_uye_access_search_media_api(member_id, q, page, page_size)
+
+@app.get("/api/admin/uyeler/{member_id}/access/lookup-media")
+async def admin_uye_access_lookup_media(
+    member_id: str, imdb_id: str = "", tmdb_id: str = "", media_type: str = "",
+    _: bool = Depends(require_auth),
+):
+    return await admin_uye_access_lookup_media_api(member_id, imdb_id, tmdb_id, media_type)
 # ─────────────────────────────────────────────────────────────────────────────
 
 @app.get("/istatistik", response_class=HTMLResponse)
@@ -1346,6 +1397,33 @@ async def admin_istekler_api(_: bool = Depends(require_auth)):
 @app.post("/api/admin/istekler/aksiyon")
 async def admin_istekler_aksiyon_api(request: Request, _: bool = Depends(require_auth)):
     return await admin_review_content_requests(request)
+
+# --- Bekleyen Abonelik Talepleri (İstekler sayfası) ---
+@app.get("/api/admin/istekler/abonelikler")
+async def get_pending_subscription_requests(_: bool = Depends(require_auth)):
+    return await get_pending_subscription_requests_api()
+
+@app.post("/api/admin/istekler/abonelikler/{user_id}/aksiyon")
+async def review_pending_subscription_request(user_id: int, payload: dict, _: bool = Depends(require_auth)):
+    return await admin_review_subscription_request_api(user_id, payload)
+
+# --- İstekler sidebar rozeti (bekleyen içerik + abonelik talebi sayısı) ---
+@app.get("/api/admin/istekler/sayac")
+async def admin_istekler_sayac_api(_: bool = Depends(require_auth)):
+    return await admin_istekler_counter()
+
+# --- Web Push (yöneticinin tarayıcısına bildirim) ---
+@app.get("/api/admin/push/public-key")
+async def admin_push_public_key_api(_: bool = Depends(require_auth)):
+    return await admin_push_public_key()
+
+@app.post("/api/admin/push/abone-ol")
+async def admin_push_subscribe_api(request: Request, _: bool = Depends(require_auth)):
+    return await admin_push_subscribe(request)
+
+@app.post("/api/admin/push/abonelik-iptal")
+async def admin_push_unsubscribe_api(request: Request, _: bool = Depends(require_auth)):
+    return await admin_push_unsubscribe(request)
 # ─────────────────────────────────────────────────────────────────────────────
 
 @app.get("/api/istatistik/bandwidth")

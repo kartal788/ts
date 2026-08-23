@@ -784,3 +784,369 @@ async def admin_uye_clear_devices_api(member_id: str) -> dict:
     except Exception:
         _logger.error("admin_uye_clear_devices_api error", exc_info=True)
         raise HTTPException(status_code=500, detail="Sunucu hatası")
+
+
+# ─── API: /api/admin/uyeler/{member_id}/access (GET/POST) ────────────────────
+
+async def admin_uye_access_get_api(member_id: str) -> dict:
+    """
+    Üyenin admin tarafından tanımlanmış erişim kısıtlamalarını (görebileceği
+    kataloglar, azami sertifika/yaş sınırı, video whitelist'i) ve seçim
+    arayüzü için tüm katalog listesini döner.
+
+    main.py'ye eklenecek route:
+      @app.get("/api/admin/uyeler/{member_id}/access")
+      async def admin_uye_access_get(member_id: str, _: bool = Depends(require_auth)):
+          return await admin_uye_access_get_api(member_id)
+    """
+    try:
+        resolved   = await _resolve_member(member_id)
+        user_token = resolved["user_token"]
+        if not user_token:
+            raise HTTPException(status_code=404, detail="Üyeye ait token bulunamadı")
+
+        restrictions = await db.get_member_access_restrictions(user_token)
+
+        from Backend.fastapi.routes.stremio_routes import ALL_BUILTIN_CATALOGS
+        _type_label = {"movie": "Film", "series": "Dizi", "channel": "Kanal"}
+
+        catalogs = [
+            {
+                "id":         cat_id,
+                "label":      info["label"],
+                "type":       info["type"],
+                "type_label": _type_label.get(info["type"], info["type"]),
+                "kind":       "builtin",
+            }
+            for cat_id, info in ALL_BUILTIN_CATALOGS.items()
+        ]
+        custom_raw = await db.get_custom_catalogs(active_only=False)
+        catalogs += [
+            {
+                "id":         f"custom_{c['_id']}",
+                "label":      c.get("name", "Katalog"),
+                "type":       "series" if c.get("media_type") == "series" else "movie",
+                "type_label": "Özel Katalog",
+                "kind":       "custom",
+            }
+            for c in custom_raw
+        ]
+
+        return {
+            "status":       "success",
+            "restrictions": restrictions,
+            "catalogs":     catalogs,
+        }
+    except HTTPException:
+        raise
+    except Exception:
+        _logger.error("admin_uye_access_get_api error", exc_info=True)
+        raise HTTPException(status_code=500, detail="Sunucu hatası")
+
+
+async def admin_uye_access_save_api(member_id: str, payload: dict) -> dict:
+    """
+    Üyenin erişim kısıtlamalarını kaydeder.
+    payload: {
+      "allowed_catalogs": list[str] | null,   # null = kısıtlama yok (tüm kataloglar)
+      "certification_max_age": int | null,     # null = sınır yok
+      "allowed_videos": [{"imdb_id","title","media_type","poster","year","rating"}],
+      "only_selected_videos": bool,            # true ise üye SADECE selected_videos'u görür
+      "selected_videos": [{"imdb_id","title","media_type","poster","year","rating"}],
+      "include_live_collection": bool          # true ise Canlı Yayın kataloğu da eklenir
+    }
+
+    main.py'ye eklenecek route:
+      @app.post("/api/admin/uyeler/{member_id}/access")
+      async def admin_uye_access_save(member_id: str, payload: dict, _: bool = Depends(require_auth)):
+          return await admin_uye_access_save_api(member_id, payload)
+    """
+    try:
+        resolved   = await _resolve_member(member_id)
+        user_token = resolved["user_token"]
+        if not user_token:
+            raise HTTPException(status_code=404, detail="Üyeye ait token bulunamadı")
+
+        allowed_catalogs = payload.get("allowed_catalogs")
+        if allowed_catalogs is not None and not isinstance(allowed_catalogs, list):
+            raise HTTPException(status_code=400, detail="allowed_catalogs bir liste veya null olmalı")
+
+        cert_max_age = payload.get("certification_max_age")
+        if cert_max_age is not None:
+            try:
+                cert_max_age = int(cert_max_age)
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail="certification_max_age geçersiz")
+
+        def _clean_video_list(raw, field_name: str) -> list:
+            if not isinstance(raw, list):
+                raise HTTPException(status_code=400, detail=f"{field_name} bir liste olmalı")
+            cleaned = []
+            for v in raw:
+                if not v.get("imdb_id"):
+                    continue
+                year = v.get("year")
+                try:
+                    year = int(year) if year not in (None, "") else None
+                except (TypeError, ValueError):
+                    year = None
+                rating = v.get("rating")
+                try:
+                    rating = float(rating) if rating not in (None, "") else None
+                except (TypeError, ValueError):
+                    rating = None
+                cleaned.append({
+                    "imdb_id":    v.get("imdb_id"),
+                    "title":      v.get("title", ""),
+                    "media_type": v.get("media_type", ""),
+                    "poster":     v.get("poster") or "",
+                    "year":       year,
+                    "rating":     rating,
+                })
+            return cleaned
+
+        allowed_videos   = _clean_video_list(payload.get("allowed_videos") or [], "allowed_videos")
+        only_selected    = bool(payload.get("only_selected_videos", False))
+        selected_videos  = _clean_video_list(payload.get("selected_videos") or [], "selected_videos")
+        include_live     = bool(payload.get("include_live_collection", False))
+
+        await db.save_member_access_restrictions(
+            user_token, allowed_catalogs, cert_max_age, allowed_videos,
+            only_selected, selected_videos, include_live,
+        )
+        return {"status": "success"}
+    except HTTPException:
+        raise
+    except Exception:
+        _logger.error("admin_uye_access_save_api error", exc_info=True)
+        raise HTTPException(status_code=500, detail="Sunucu hatası")
+
+
+# ─── API: /api/admin/uyeler/{member_id}/access/search-media ─────────────────
+
+async def admin_uye_access_search_media_api(
+    member_id: str, q: str, page: int = 1, page_size: int = 15,
+) -> dict:
+    """
+    Video whitelist'ine eklemek için film/dizi arama sonuçlarını döner
+    (imdb_id, başlık, tür, poster, puan, sertifika bilgisiyle).
+    page/page_size ile sayfalanabilir (ör. 6x4=24'lük poster ızgarası için).
+
+    main.py'ye eklenecek route:
+      @app.get("/api/admin/uyeler/{member_id}/access/search-media")
+      async def admin_uye_access_search_media(member_id: str, q: str = "", page: int = 1, page_size: int = 15, _: bool = Depends(require_auth)):
+          return await admin_uye_access_search_media_api(member_id, q, page, page_size)
+    """
+    try:
+        q = (q or "").strip()
+        if not q:
+            return {"status": "success", "results": [], "total_count": 0, "total_pages": 0, "page": 1}
+
+        page = max(1, page)
+        page_size = max(1, min(page_size, 50))
+
+        result = await db.search_documents(q, page=page, page_size=page_size)
+        items = result.get("results", [])
+        total_count = result.get("total_count", 0)
+        total_pages = max(1, (total_count + page_size - 1) // page_size)
+        results = [
+            {
+                "imdb_id":    i.get("imdb_id"),
+                "tmdb_id":    i.get("tmdb_id"),
+                "title":      i.get("title_tr") or i.get("title") or "",
+                "media_type": i.get("media_type"),
+                "poster":     i.get("poster_tr") or i.get("poster") or "",
+                "year":       i.get("release_year"),
+                "rating":     i.get("rating"),
+                "certification_tr": i.get("certification_tr"),
+                "certification_de": i.get("certification_de"),
+                "certification_us": i.get("certification_us"),
+            }
+            for i in items if i.get("imdb_id")
+        ]
+        return {
+            "status": "success",
+            "results": results,
+            "total_count": total_count,
+            "total_pages": total_pages,
+            "page": page,
+        }
+    except Exception:
+        _logger.error("admin_uye_access_search_media_api error", exc_info=True)
+        raise HTTPException(status_code=500, detail="Sunucu hatası")
+
+
+# ─── API: /api/admin/uyeler/{member_id}/access/lookup-media ─────────────────
+
+async def admin_uye_access_lookup_media_api(
+    member_id: str,
+    imdb_id: str = "",
+    tmdb_id: str = "",
+    media_type: str = "",
+) -> dict:
+    """
+    Video whitelist'ine (sertifika muafiyeti veya 'sadece seçili videolar')
+    doğrudan IMDB ID veya TMDB ID girerek video eklemek için kullanılır.
+    Önce kendi veritabanında arar, bulamazsa TMDB API'den çeker.
+
+    Ya imdb_id ya da (tmdb_id + media_type) parametresi gönderilmelidir.
+
+    main.py'ye eklenecek route:
+      @app.get("/api/admin/uyeler/{member_id}/access/lookup-media")
+      async def admin_uye_access_lookup_media(
+          member_id: str, imdb_id: str = "", tmdb_id: str = "", media_type: str = "",
+          _: bool = Depends(require_auth),
+      ):
+          return await admin_uye_access_lookup_media_api(member_id, imdb_id, tmdb_id, media_type)
+    """
+    try:
+        imdb_id = (imdb_id or "").strip()
+        tmdb_id = (tmdb_id or "").strip()
+        media_type = (media_type or "").strip().lower()
+        if not imdb_id and not tmdb_id:
+            raise HTTPException(status_code=400, detail="imdb_id veya tmdb_id gerekli")
+
+        from Backend.config import Telegram
+        import httpx
+
+        # ── 1) IMDB ID ile arama ────────────────────────────────────────
+        if imdb_id:
+            if not imdb_id.startswith("tt"):
+                raise HTTPException(status_code=400, detail="Geçersiz IMDB ID (tt ile başlamalı)")
+
+            local_doc = await db.get_media_by_imdb(imdb_id)
+            if local_doc:
+                return {
+                    "status": "success",
+                    "result": {
+                        "imdb_id":    imdb_id,
+                        "tmdb_id":    local_doc.get("tmdb_id"),
+                        "title":      local_doc.get("title_tr") or local_doc.get("title") or local_doc.get("name") or "",
+                        "media_type": local_doc.get("media_type"),
+                        "poster":     local_doc.get("poster_tr") or local_doc.get("poster") or "",
+                        "year":       local_doc.get("release_year"),
+                        "rating":     local_doc.get("rating"),
+                        "certification_tr": local_doc.get("certification_tr"),
+                        "certification_de": local_doc.get("certification_de"),
+                        "certification_us": local_doc.get("certification_us"),
+                    },
+                }
+
+            api_key = Telegram.TMDB_API
+            if not api_key:
+                raise HTTPException(status_code=404, detail="İçerik bulunamadı (TMDB API anahtarı yok)")
+            try:
+                with httpx.Client(timeout=8) as c:
+                    r = c.get(
+                        f"https://api.themoviedb.org/3/find/{imdb_id}",
+                        params={"api_key": api_key, "external_source": "imdb_id", "language": "tr-TR"},
+                    )
+                if not r.is_success:
+                    raise HTTPException(status_code=502, detail="TMDB API hatası")
+                data = r.json()
+            except HTTPException:
+                raise
+            except Exception as e:
+                raise HTTPException(status_code=502, detail=f"TMDB bağlantı hatası: {e}")
+
+            movie_results = data.get("movie_results") or []
+            tv_results    = data.get("tv_results") or []
+            hit, mt = (movie_results[0], "movie") if movie_results else (
+                (tv_results[0], "tv") if tv_results else (None, None)
+            )
+            if not hit:
+                raise HTTPException(status_code=404, detail="IMDB ID ile eşleşen içerik bulunamadı")
+
+            poster_path = hit.get("poster_path") or ""
+            return {
+                "status": "success",
+                "result": {
+                    "imdb_id":    imdb_id,
+                    "tmdb_id":    hit.get("id"),
+                    "title":      hit.get("title") or hit.get("name") or "",
+                    "media_type": mt,
+                    "poster":     f"https://image.tmdb.org/t/p/w300{poster_path}" if poster_path else "",
+                    "year":       (hit.get("release_date") or hit.get("first_air_date") or "")[:4] or None,
+                    "rating":     hit.get("vote_average"),
+                    "certification_tr": None,
+                    "certification_de": None,
+                    "certification_us": None,
+                },
+            }
+
+        # ── 2) TMDB ID ile arama (media_type zorunlu) ──────────────────
+        if media_type not in ("movie", "tv"):
+            raise HTTPException(status_code=400, detail="tmdb_id ile aramada media_type 'movie' veya 'tv' olmalı")
+        try:
+            tmdb_id_int = int(tmdb_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Geçersiz tmdb_id")
+
+        local_col = "tv" if media_type == "tv" else "movie"
+        local_doc = None
+        for db_idx in range(getattr(db, "current_db_index", 0), 0, -1):
+            db_key = f"storage_{db_idx}"
+            try:
+                found = await db.dbs[db_key][local_col].find_one({"tmdb_id": tmdb_id_int})
+            except Exception:
+                found = None
+            if found:
+                local_doc = found
+                break
+
+        if local_doc:
+            return {
+                "status": "success",
+                "result": {
+                    "imdb_id":    local_doc.get("imdb_id"),
+                    "tmdb_id":    tmdb_id_int,
+                    "title":      local_doc.get("title_tr") or local_doc.get("title") or local_doc.get("name") or "",
+                    "media_type": media_type,
+                    "poster":     local_doc.get("poster_tr") or local_doc.get("poster") or "",
+                    "year":       local_doc.get("release_year"),
+                    "rating":     local_doc.get("rating"),
+                    "certification_tr": local_doc.get("certification_tr"),
+                    "certification_de": local_doc.get("certification_de"),
+                    "certification_us": local_doc.get("certification_us"),
+                },
+            }
+
+        api_key = Telegram.TMDB_API
+        if not api_key:
+            raise HTTPException(status_code=404, detail="İçerik bulunamadı (TMDB API anahtarı yok)")
+        try:
+            with httpx.Client(timeout=8) as c:
+                r = c.get(
+                    f"https://api.themoviedb.org/3/{media_type}/{tmdb_id_int}",
+                    params={"api_key": api_key, "language": "tr-TR", "append_to_response": "external_ids"},
+                )
+            if not r.is_success:
+                raise HTTPException(status_code=404, detail="TMDB'de içerik bulunamadı")
+            meta = r.json()
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"TMDB bağlantı hatası: {e}")
+
+        poster_path = meta.get("poster_path") or ""
+        ext_ids = meta.get("external_ids") or {}
+        return {
+            "status": "success",
+            "result": {
+                "imdb_id":    ext_ids.get("imdb_id") or meta.get("imdb_id"),
+                "tmdb_id":    tmdb_id_int,
+                "title":      meta.get("title") or meta.get("name") or "",
+                "media_type": media_type,
+                "poster":     f"https://image.tmdb.org/t/p/w300{poster_path}" if poster_path else "",
+                "year":       (meta.get("release_date") or meta.get("first_air_date") or "")[:4] or None,
+                "rating":     meta.get("vote_average"),
+                "certification_tr": None,
+                "certification_de": None,
+                "certification_us": None,
+            },
+        }
+    except HTTPException:
+        raise
+    except Exception:
+        _logger.error("admin_uye_access_lookup_media_api error", exc_info=True)
+        raise HTTPException(status_code=500, detail="Sunucu hatası")

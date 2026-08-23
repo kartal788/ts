@@ -282,6 +282,8 @@ async def _handle_video_message(client: Client, message: Message):
                         year=_mode_snapshot.get("year"),
                         rating=_mode_snapshot.get("rating"),
                         genres=_mode_snapshot.get("genres"),
+                        visibility_mode=_mode_snapshot.get("visibility_mode"),
+                        visibility_member_ids=_mode_snapshot.get("visibility_member_ids"),
                     )
             else:
                 from Backend.helper.metadata import extract_default_id
@@ -370,6 +372,8 @@ async def _handle_video_message(client: Client, message: Message):
                         year=_manual_mode_snapshot.get("year"),
                         rating=_manual_mode_snapshot.get("rating"),
                         genres=_manual_mode_snapshot.get("genres"),
+                        visibility_mode=_manual_mode_snapshot.get("visibility_mode"),
+                        visibility_member_ids=_manual_mode_snapshot.get("visibility_member_ids"),
                     )
             else:
                 async with METADATA_SEMAPHORE:

@@ -3,79 +3,514 @@
 {% block title %}Abonelik Yönetimi - KARTAL{% endblock %}
 
 {% block content %}
-<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-    <div class="mb-8">
-        <h1 class="text-2xl sm:text-3xl font-bold">Abonelik Yönetimi</h1>
-        <p class="mt-2 text-sm theme-text-secondary">Abonelik planlarını yönetin ve aktif kullanıcıları görüntüleyin.</p>
-    </div>
+<style>
+    .subs-shell {
+        display: flex;
+        flex-direction: column;
+        gap: 1.5rem;
+    }
 
-    <!-- Abonelik Planları -->
-    <div class="mb-10">
-        <div class="flex items-center justify-between mb-4">
-            <h2 class="text-xl font-semibold">Abonelik Planları</h2>
-            <div class="flex gap-2">
-                <button onclick="openAddonModal()"
-                    class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors shadow-sm flex items-center">
-                    <i class="fas fa-box-open mr-2"></i> Ek Paketler
+    .page-hero,
+    .section-panel,
+    .table-shell,
+    .mobile-user-card,
+    .empty-state,
+    .modal-glass {
+        background: color-mix(in srgb, var(--card) 50%, transparent);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+        border: 1px solid var(--border);
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.22);
+    }
+
+    .page-hero,
+    .section-panel,
+    .table-shell,
+    .empty-state {
+        border-radius: 1.5rem;
+    }
+
+    .hero-glow {
+        position: relative;
+        overflow: hidden;
+        isolation: isolate;
+    }
+
+    .hero-glow::before {
+        content: "";
+        position: absolute;
+        inset: -30% auto auto -10%;
+        width: 16rem;
+        height: 16rem;
+        border-radius: 9999px;
+        background: color-mix(in srgb, var(--primary) 18%, transparent);
+        filter: blur(50px);
+        z-index: -1;
+        pointer-events: none;
+    }
+
+    .hero-glow::after {
+        content: "";
+        position: absolute;
+        inset: auto -5% -35% auto;
+        width: 14rem;
+        height: 14rem;
+        border-radius: 9999px;
+        background: color-mix(in srgb, var(--accent) 16%, transparent);
+        filter: blur(50px);
+        z-index: -1;
+        pointer-events: none;
+    }
+
+    .section-title {
+        color: var(--text);
+    }
+
+    .section-muted {
+        color: var(--text-sec);
+    }
+
+    .glass-btn {
+        border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+        background: color-mix(in srgb, var(--card) 92%, var(--bg));
+        color: var(--text);
+        transition: all 0.25s ease;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+    }
+
+    .glass-btn:hover {
+        transform: translateY(-1px);
+        border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
+        box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18);
+    }
+
+    .glass-btn-primary {
+        background: linear-gradient(
+            135deg,
+            color-mix(in srgb, var(--primary) 88%, white 8%),
+            color-mix(in srgb, var(--accent) 82%, var(--primary) 18%)
+        );
+        color: white;
+        border: 1px solid color-mix(in srgb, var(--primary) 50%, transparent);
+        box-shadow: 0 10px 26px color-mix(in srgb, var(--primary) 22%, transparent);
+    }
+
+    .glass-btn-primary:hover {
+        filter: brightness(1.05);
+        box-shadow: 0 14px 34px color-mix(in srgb, var(--primary) 28%, transparent);
+    }
+
+    .glass-btn-purple {
+        background: linear-gradient(135deg, #a855f7, #7e22ce);
+        color: #ffffff;
+        border-color: transparent;
+    }
+
+    .glass-btn-danger {
+        background: linear-gradient(135deg, #ef4444, #dc2626);
+        color: #ffffff;
+        border-color: transparent;
+    }
+
+    .glass-btn-warning {
+        background: linear-gradient(135deg, #f59e0b, #d97706);
+        color: #ffffff;
+        border-color: transparent;
+    }
+
+    .glass-btn-success {
+        background: linear-gradient(135deg, #22c55e, #16a34a);
+        color: #ffffff;
+        border-color: transparent;
+    }
+
+    .glass-input,
+    .glass-select {
+        width: 100%;
+        border-radius: 1rem;
+        border: 1px solid color-mix(in srgb, var(--border) 90%, transparent);
+        background: color-mix(in srgb, var(--bg) 68%, transparent);
+        color: var(--text);
+        padding: 0.85rem 1rem;
+        outline: none;
+        transition: all 0.2s ease;
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.02);
+    }
+
+    .glass-input::placeholder {
+        color: color-mix(in srgb, var(--text-sec) 85%, transparent);
+    }
+
+    .glass-input:focus,
+    .glass-select:focus {
+        border-color: color-mix(in srgb, var(--primary) 65%, var(--border));
+        box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 12%, transparent);
+    }
+
+    .plan-card {
+        position: relative;
+        overflow: hidden;
+        border-radius: 1.5rem;
+        background: linear-gradient(
+            180deg,
+            color-mix(in srgb, var(--card) 96%, var(--bg)),
+            color-mix(in srgb, var(--card) 88%, var(--bg))
+        );
+        border: 1px solid color-mix(in srgb, var(--border) 90%, transparent);
+        box-shadow: 0 12px 30px rgba(0,0,0,0.18);
+        transition: transform 0.28s ease, border-color 0.28s ease, box-shadow 0.28s ease;
+    }
+
+    .plan-card::before {
+        content: "";
+        position: absolute;
+        inset: -25% auto auto -5%;
+        width: 8rem;
+        height: 8rem;
+        border-radius: 9999px;
+        background: color-mix(in srgb, var(--primary) 18%, transparent);
+        filter: blur(36px);
+        pointer-events: none;
+    }
+
+    .plan-card:hover {
+        transform: translateY(-4px);
+        border-color: color-mix(in srgb, var(--primary) 30%, var(--border));
+        box-shadow: 0 18px 42px rgba(0,0,0,0.24);
+    }
+
+    .plan-actions,
+    .addon-actions {
+        opacity: 0;
+        transform: translateY(-4px);
+        transition: all 0.22s ease;
+    }
+
+    .plan-card:hover .plan-actions,
+    .addon-card:hover .addon-actions {
+        opacity: 1;
+        transform: translateY(0);
+    }
+
+    .addon-card {
+        position: relative;
+        border-radius: 1.35rem;
+        background: color-mix(in srgb, var(--card) 92%, var(--bg));
+        border: 1px solid color-mix(in srgb, var(--border) 90%, transparent);
+        box-shadow: 0 10px 26px rgba(0,0,0,0.16);
+        transition: transform 0.24s ease, border-color 0.24s ease;
+    }
+
+    .addon-card:hover {
+        transform: translateY(-3px);
+        border-color: color-mix(in srgb, var(--primary) 28%, var(--border));
+    }
+
+    .metric-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.45rem;
+        padding: 0.45rem 0.8rem;
+        border-radius: 9999px;
+        font-size: 0.78rem;
+        font-weight: 700;
+        letter-spacing: 0.03em;
+        border: 1px solid transparent;
+    }
+
+    .badge-active {
+        background: color-mix(in srgb, #22c55e 16%, transparent);
+        color: #86efac;
+        border-color: color-mix(in srgb, #22c55e 28%, transparent);
+    }
+
+    .badge-expired {
+        background: color-mix(in srgb, #ef4444 14%, transparent);
+        color: #fca5a5;
+        border-color: color-mix(in srgb, #ef4444 26%, transparent);
+    }
+
+    .pill-soft {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.2rem 0.65rem;
+        border-radius: 9999px;
+        font-size: 0.72rem;
+        font-weight: 700;
+        background: color-mix(in srgb, var(--primary) 12%, transparent);
+        color: var(--text-sec);
+        border: 1px solid color-mix(in srgb, var(--primary) 20%, transparent);
+    }
+
+    .table-shell {
+        overflow: hidden;
+    }
+
+    .subs-table {
+        width: 100%;
+        border-collapse: separate;
+        border-spacing: 0;
+    }
+
+    .subs-table thead th {
+        background: color-mix(in srgb, var(--bg) 65%, transparent);
+        color: var(--text-sec);
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        border-bottom: 1px solid color-mix(in srgb, var(--border) 92%, transparent);
+    }
+
+    .subs-table tbody tr {
+        transition: background 0.22s ease;
+    }
+
+    .subs-table tbody tr:hover {
+        background: color-mix(in srgb, var(--primary) 6%, transparent);
+    }
+
+    .subs-table td {
+        border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+        color: var(--text);
+    }
+
+    .subs-table tbody tr:last-child td {
+        border-bottom: none;
+    }
+
+    .action-chip {
+        border-radius: 9999px;
+        padding: 0.45rem 0.8rem;
+        font-size: 0.72rem;
+        font-weight: 700;
+        border: 1px solid transparent;
+        transition: all 0.2s ease;
+        white-space: nowrap;
+    }
+
+    .action-chip:hover {
+        transform: translateY(-1px);
+    }
+
+    .mobile-user-card {
+        border-radius: 1.35rem;
+        padding: 1rem;
+    }
+
+    .mobile-user-card + .mobile-user-card {
+        margin-top: 0.9rem;
+    }
+
+    .mobile-grid {
+        display: none;
+    }
+
+    .pagination-shell {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        flex-wrap: wrap;
+    }
+
+    .pagination-text {
+        color: var(--text-sec);
+    }
+
+    .pagination-btn {
+        min-width: 92px;
+    }
+
+    .modal-backdrop {
+        background: rgba(4, 8, 18, 0.58);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+    }
+
+    .modal-glass {
+        border-radius: 1.6rem;
+        padding: 1.4rem;
+        border: 1px solid color-mix(in srgb, var(--border) 95%, transparent);
+        width: min(92vw, 30rem);
+        max-height: calc(100dvh - 2rem);
+        overflow-y: auto;
+    }
+
+    .modal-glass-wide {
+        width: min(94vw, 42rem);
+    }
+
+    .modal-field label {
+        color: var(--text-sec);
+        font-size: 0.82rem;
+        font-weight: 700;
+        margin-bottom: 0.55rem;
+        display: block;
+    }
+
+    .text-soft {
+        color: var(--text-sec);
+    }
+
+    .no-scrollbar::-webkit-scrollbar {
+        display: none;
+    }
+
+    .no-scrollbar {
+        -ms-overflow-style: none;
+        scrollbar-width: none;
+    }
+
+    @media (max-width: 1024px) {
+        .subs-table th,
+        .subs-table td {
+            padding-left: 1rem;
+            padding-right: 1rem;
+        }
+    }
+
+    @media (max-width: 767px) {
+        .desktop-table-wrap {
+            display: none;
+        }
+
+        .mobile-grid {
+            display: block;
+        }
+
+        .page-hero {
+            padding: 1.25rem;
+            border-radius: 1.35rem;
+        }
+
+        .section-panel {
+            padding: 1rem;
+            border-radius: 1.35rem;
+        }
+
+        .pagination-shell {
+            flex-direction: column;
+            align-items: stretch;
+        }
+
+        .pagination-shell .controls {
+            width: 100%;
+            display: grid;
+            grid-template-columns: 1fr auto 1fr;
+            gap: 0.6rem;
+            align-items: center;
+        }
+
+        .pagination-btn {
+            width: 100%;
+        }
+
+        .plan-actions,
+        .addon-actions {
+            opacity: 1;
+            transform: none;
+        }
+    }
+</style>
+
+<div class="subs-shell py-2 sm:py-4">
+    <!-- Hero -->
+    <section class="page-hero hero-glow p-5 sm:p-6 lg:p-8">
+        <div class="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+                <div class="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-bold tracking-[0.18em] uppercase mb-3"
+                     style="border-color: color-mix(in srgb, var(--primary) 28%, var(--border)); color: var(--text-sec); background: color-mix(in srgb, var(--primary) 10%, transparent);">
+                    <i class="fas fa-layer-group text-[11px]" style="color: var(--primary);"></i>
+                    Abonelik Kontrol Merkezi
+                </div>
+                <h1 class="text-2xl sm:text-3xl lg:text-4xl font-extrabold tracking-tight section-title">
+                    Abonelik Yönetimi
+                </h1>
+                <p class="mt-2 text-sm sm:text-base section-muted max-w-2xl">
+                    Abonelik planlarını yönetin ve aktif kullanıcıları görüntüleyin.
+                </p>
+            </div>
+
+            <div class="flex flex-wrap gap-3">
+                <button onclick="openAddonModal()" class="glass-btn glass-btn-purple rounded-2xl px-5 py-3 text-sm font-bold inline-flex items-center gap-2">
+                    <i class="fas fa-box-open"></i>
+                    Ek Paketler
                 </button>
-                <button onclick="openPlanModal()"
-                    class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors shadow-sm flex items-center">
-                    <i class="fas fa-plus mr-2"></i> Plan Ekle
+                <button onclick="openPlanModal()" class="glass-btn glass-btn-primary rounded-2xl px-5 py-3 text-sm font-bold inline-flex items-center gap-2">
+                    <i class="fas fa-plus"></i>
+                    Plan Ekle
                 </button>
             </div>
         </div>
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6" id="plans-container">
-            <div class="col-span-full text-center text-gray-500 py-8">
+    </section>
+
+    <!-- Abonelik Planları -->
+    <section class="section-panel p-4 sm:p-5 lg:p-6">
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-5">
+            <div>
+                <h2 class="text-lg sm:text-xl font-bold section-title">Abonelik Planları</h2>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-5" id="plans-container">
+            <div class="empty-state col-span-full text-center px-6 py-10 text-soft">
                 <i class="fas fa-spinner fa-spin mr-2"></i> Planlar yükleniyor...
             </div>
         </div>
-    </div>
+    </section>
 
     <!-- Kullanıcı Abonelikleri -->
-    <div class="mb-10">
-        <div class="flex items-center justify-between mb-3">
-            <h2 class="text-xl font-semibold">Kullanıcı Abonelikleri</h2>
-            <button onclick="fetchSubscribers()"
-                class="bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200 px-4 py-2 rounded-md text-sm font-medium transition-colors shadow-sm flex items-center">
-                <i class="fas fa-sync-alt mr-2"></i> Yenile
-            </button>
+    <section class="section-panel p-4 sm:p-5 lg:p-6">
+        <div class="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 mb-5">
+            <div>
+                <h2 class="text-lg sm:text-xl font-bold section-title">Kullanıcı Abonelikleri</h2>
+                <p class="text-sm section-muted mt-1">Ara, filtrele, sayfalandır ve abonelik erişimini yönet.</p>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-3">
+                <button onclick="fetchSubscribers()" class="glass-btn rounded-2xl px-5 py-3 text-sm font-bold inline-flex items-center gap-2">
+                    <i class="fas fa-rotate-right"></i>
+                    Yenile
+                </button>
+            </div>
         </div>
 
         <!-- Arama ve Filtre -->
-        <div class="flex flex-wrap gap-3 mb-3 items-center">
-            <input id="sub-search" type="text" placeholder="🔍 İsim, kullanıcı adı veya ID ile ara..."
-                class="flex-1 min-w-[200px] border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-primary bg-white dark:bg-gray-800 text-text"
-                oninput="renderSubPage()">
-            <select id="sub-filter"
-                class="border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm focus:outline-none bg-white dark:bg-gray-800 text-text"
-                onchange="renderSubPage()">
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5">
+            <input
+                id="sub-search"
+                type="text"
+                placeholder="🔍 İsim, kullanıcı adı veya ID ile ara..."
+                class="glass-input"
+                oninput="subPage=1; renderSubPage()"
+            >
+            <select id="sub-filter" class="glass-select" onchange="subPage=1; renderSubPage()">
                 <option value="all">Tüm Durumlar</option>
                 <option value="active">🟢 Aktif</option>
                 <option value="expired">🔴 Süresi Dolmuş</option>
             </select>
-            <select id="sub-page-size"
-                class="border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm focus:outline-none bg-white dark:bg-gray-800 text-text"
-                onchange="subPage=1; renderSubPage()">
+            <select id="sub-page-size" class="glass-select" onchange="subPage=1; renderSubPage()">
                 <option value="10">10 / sayfa</option>
                 <option value="25">25 / sayfa</option>
                 <option value="50">50 / sayfa</option>
             </select>
         </div>
 
-        <div class="theme-card border rounded-xl overflow-hidden shadow-sm">
-            <div class="overflow-x-auto">
-                <table class="w-full text-sm text-left">
-                    <thead class="text-xs uppercase bg-gray-50 dark:bg-gray-800 dark:text-gray-300 border-b">
+        <!-- Masaüstü Tablosu -->
+        <div class="desktop-table-wrap table-shell">
+            <div class="overflow-x-auto no-scrollbar">
+                <table class="subs-table min-w-[780px] text-sm">
+                    <thead>
                         <tr>
-                            <th class="px-4 sm:px-6 py-4 font-semibold">Kullanıcı Bilgileri</th>
-                            <th class="px-4 sm:px-6 py-4 font-semibold text-center">Durum</th>
-                            <th class="px-4 sm:px-6 py-4 font-semibold text-center hidden sm:table-cell">Bitiş Tarihi</th>
-                            <th class="px-4 sm:px-6 py-4 font-semibold text-right">İşlemler</th>
+                            <th class="px-6 py-4 text-left font-semibold">Kullanıcı Bilgileri</th>
+                            <th class="px-6 py-4 text-center font-semibold">Durum</th>
+                            <th class="px-6 py-4 text-center font-semibold">Bitiş Tarihi</th>
+                            <th class="px-6 py-4 text-right font-semibold">İşlemler</th>
                         </tr>
                     </thead>
-                    <tbody id="subscribers-tbody" class="divide-y divide-gray-100 dark:divide-gray-800">
+                    <tbody id="subscribers-tbody">
                         <tr>
-                            <td colspan="4" class="px-6 py-8 text-center text-gray-500">
+                            <td colspan="4" class="px-6 py-8 text-center text-soft">
                                 <i class="fas fa-spinner fa-spin mr-2"></i> Yükleniyor...
                             </td>
                         </tr>
@@ -84,201 +519,213 @@
             </div>
         </div>
 
-        <!-- Sayfalama -->
-        <div class="flex flex-col sm:flex-row items-center justify-between mt-3 gap-2 text-sm text-text opacity-70" id="sub-pagination">
-            <span id="sub-page-info"></span>
-            <div class="flex gap-2">
-                <button id="sub-btn-prev" onclick="subChangePage(-1)"
-                    class="px-3 py-1 rounded border border-gray-300 hover:bg-gray-100 transition">‹ Önceki</button>
-                <span id="sub-page-num" class="px-3 py-1 font-semibold"></span>
-                <button id="sub-btn-next" onclick="subChangePage(1)"
-                    class="px-3 py-1 rounded border border-gray-300 hover:bg-gray-100 transition">Sonraki ›</button>
+        <!-- Mobil Kartlar -->
+        <div id="subscribers-mobile" class="mobile-grid mt-1">
+            <div class="empty-state text-center px-4 py-8 text-soft">
+                <i class="fas fa-spinner fa-spin mr-2"></i> Yükleniyor...
             </div>
         </div>
-    </div>
+
+        <!-- Sayfalama -->
+        <div class="pagination-shell mt-5" id="sub-pagination">
+            <div id="sub-page-info" class="pagination-text text-sm"></div>
+            <div class="controls">
+                <button id="sub-btn-prev" onclick="subChangePage(-1)"
+                    class="glass-btn pagination-btn rounded-xl px-4 py-2.5 text-sm font-semibold">
+                    ‹ Önceki
+                </button>
+                <span id="sub-page-num" class="text-sm font-bold text-center section-title px-2"></span>
+                <button id="sub-btn-next" onclick="subChangePage(1)"
+                    class="glass-btn pagination-btn rounded-xl px-4 py-2.5 text-sm font-semibold">
+                    Sonraki ›
+                </button>
+            </div>
+        </div>
+    </section>
 </div>
 
 <!-- Plan Modal -->
-<div id="plan-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden z-50">
-    <div class="relative top-10 mx-auto p-5 border shadow-lg rounded-md theme-card w-11/12 max-w-md">
-        <div class="mt-3">
-            <h3 class="text-lg leading-6 font-medium text-center mb-4" id="plan-modal-title">Yeni Plan Ekle</h3>
-            <form id="plan-form" onsubmit="submitPlanForm(event)">
-                <input type="hidden" id="plan-id">
-
-                <div class="mb-4">
-                    <label class="block text-sm font-bold mb-2">Plan Etiketi <span class="font-normal text-gray-400">(örn. 1 Ay, 6 Ay)</span></label>
-                    <input type="text" id="plan-label" placeholder="örn. 1 Aylık"
-                        class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none dark:bg-gray-700 dark:text-white dark:border-gray-600">
-                </div>
-
-                <div class="mb-4 flex items-center gap-2">
-                    <input type="checkbox" id="plan-unlimited" onchange="toggleUnlimited(this)" class="w-4 h-4 accent-blue-600">
-                    <label class="text-sm font-bold">Sınırsız (süre yok)</label>
-                </div>
-
-                <div class="mb-4" id="days-field">
-                    <label class="block text-sm font-bold mb-2">Süre (Gün)</label>
-                    <input type="number" id="plan-days"
-                        class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none dark:bg-gray-700 dark:text-white dark:border-gray-600"
-                        min="1">
-                </div>
-
-                <div class="mb-4">
-                    <label class="block text-sm font-bold mb-2">Fiyat (₺)</label>
-                    <div class="flex gap-2 items-center">
-                        <div class="relative flex-1">
-                            <span class="absolute left-3 top-1/2 -translate-y-1/2 font-bold text-gray-500">₺</span>
-                            <input type="number" id="plan-price"
-                                class="shadow appearance-none border rounded w-full py-2 pl-8 pr-3 leading-tight focus:outline-none dark:bg-gray-700 dark:text-white dark:border-gray-600"
-                                required min="0" step="0.01" placeholder="0.00">
-                        </div>
-                        <!-- Hidden currency field always TRY -->
-                        <input type="hidden" id="plan-currency" value="TRY">
-                    </div>
-                </div>
-
-                <div class="mb-4">
-                    <label class="block text-sm font-bold mb-2">Günlük Veri Limiti (GB) <span class="font-normal text-gray-400">— 0 = sınırsız</span></label>
-                    <input type="number" id="plan-daily-limit"
-                        class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none dark:bg-gray-700 dark:text-white dark:border-gray-600"
-                        min="0" step="0.1" placeholder="0">
-                </div>
-
-                <div class="mb-4">
-                    <label class="block text-sm font-bold mb-2">Aylık Veri Limiti (GB) <span class="font-normal text-gray-400">— 0 = sınırsız</span></label>
-                    <input type="number" id="plan-monthly-limit"
-                        class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none dark:bg-gray-700 dark:text-white dark:border-gray-600"
-                        min="0" step="0.1" placeholder="0">
-                </div>
-
-                <div class="mb-4">
-                    <label class="block text-sm font-bold mb-2">Hız Limiti (Mbps) <span class="font-normal text-gray-400">— 0 = sınırsız</span></label>
-                    <input type="number" id="plan-speed-limit"
-                        class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none dark:bg-gray-700 dark:text-white dark:border-gray-600"
-                        min="0" step="1" placeholder="0">
-                </div>
-
-                <div class="mb-4">
-                    <label class="block text-sm font-bold mb-2">Aylık İstek Limiti <span class="font-normal text-gray-400">— 0 = sınırsız</span></label>
-                    <input type="number" id="plan-request-limit"
-                        class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none dark:bg-gray-700 dark:text-white dark:border-gray-600"
-                        min="0" step="1" placeholder="0">
-                    <p class="text-xs text-gray-400 mt-1">Abonelerin /istek komutuyla ayda kaç içerik talep edebileceği</p>
-                </div>
-
-                <div class="flex justify-end gap-2 mt-6">
-                    <button type="button" onclick="closePlanModal()"
-                        class="bg-gray-300 hover:bg-gray-400 text-gray-800 px-4 py-2 rounded shadow">İptal</button>
-                    <button type="submit"
-                        class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded shadow">Kaydet</button>
-                </div>
-            </form>
+<div id="plan-modal" class="fixed inset-0 hidden z-50 modal-backdrop items-center justify-center p-4">
+    <div class="modal-glass">
+        <div class="flex items-start justify-between gap-4 mb-5">
+            <div>
+                <h3 class="text-xl font-bold section-title" id="plan-modal-title">Yeni Plan Ekle</h3>
+                <p class="text-sm text-soft mt-1">Bir abonelik planı oluştur veya güncelle.</p>
+            </div>
+            <button onclick="closePlanModal()" class="glass-btn rounded-full w-10 h-10 flex items-center justify-center flex-shrink-0">
+                <i class="fas fa-xmark"></i>
+            </button>
         </div>
+
+        <form id="plan-form" onsubmit="submitPlanForm(event)" class="space-y-4">
+            <input type="hidden" id="plan-id">
+
+            <div class="modal-field">
+                <label for="plan-label">Plan Etiketi <span class="font-normal">(örn. 1 Ay, 6 Ay)</span></label>
+                <input type="text" id="plan-label" placeholder="örn. 1 Aylık" class="glass-input">
+            </div>
+
+            <div class="flex items-center gap-2">
+                <input type="checkbox" id="plan-unlimited" onchange="toggleUnlimited(this)" class="w-4 h-4 accent-blue-600">
+                <label class="text-sm font-bold section-title" for="plan-unlimited">Sınırsız (süre yok)</label>
+            </div>
+
+            <div class="modal-field" id="days-field">
+                <label for="plan-days">Süre (Gün)</label>
+                <input type="number" id="plan-days" class="glass-input" min="1">
+            </div>
+
+            <div class="modal-field">
+                <label for="plan-price">Fiyat (₺)</label>
+                <div class="relative">
+                    <span class="absolute left-4 top-1/2 -translate-y-1/2 font-bold text-soft">₺</span>
+                    <input type="number" id="plan-price" class="glass-input" style="padding-left: 2rem;" required min="0" step="0.01" placeholder="0.00">
+                </div>
+                <input type="hidden" id="plan-currency" value="TRY">
+            </div>
+
+            <div class="modal-field">
+                <label for="plan-daily-limit">Günlük Veri Limiti (GB) <span class="font-normal">— 0 = sınırsız</span></label>
+                <input type="number" id="plan-daily-limit" class="glass-input" min="0" step="0.1" placeholder="0">
+            </div>
+
+            <div class="modal-field">
+                <label for="plan-monthly-limit">Aylık Veri Limiti (GB) <span class="font-normal">— 0 = sınırsız</span></label>
+                <input type="number" id="plan-monthly-limit" class="glass-input" min="0" step="0.1" placeholder="0">
+            </div>
+
+            <div class="modal-field">
+                <label for="plan-speed-limit">Hız Limiti (Mbps) <span class="font-normal">— 0 = sınırsız</span></label>
+                <input type="number" id="plan-speed-limit" class="glass-input" min="0" step="1" placeholder="0">
+            </div>
+
+            <div class="modal-field">
+                <label for="plan-request-limit">Aylık İstek Limiti <span class="font-normal">— 0 = sınırsız</span></label>
+                <input type="number" id="plan-request-limit" class="glass-input" min="0" step="1" placeholder="0">
+                <p class="text-xs text-soft mt-1">Abonelerin /istek komutuyla ayda kaç içerik talep edebileceği</p>
+            </div>
+
+            <div class="flex flex-col-reverse sm:flex-row justify-end gap-3 pt-2">
+                <button type="button" onclick="closePlanModal()" class="glass-btn rounded-2xl px-5 py-3 text-sm font-bold">
+                    İptal
+                </button>
+                <button type="submit" class="glass-btn glass-btn-primary rounded-2xl px-5 py-3 text-sm font-bold">
+                    Kaydet
+                </button>
+            </div>
+        </form>
     </div>
 </div>
 
 <!-- Ek Paketler Modal -->
-<div id="addon-list-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden z-50">
-    <div class="relative top-10 mx-auto p-5 border shadow-lg rounded-md theme-card w-11/12 max-w-2xl">
-        <div class="mt-3">
-            <div class="flex items-center justify-between mb-4">
-                <h3 class="text-lg font-semibold">📦 Ek Paketler</h3>
-                <div class="flex gap-2">
-                    <button onclick="openAddonFormModal()"
-                        class="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1.5 rounded text-sm font-medium flex items-center">
-                        <i class="fas fa-plus mr-1"></i> Yeni Paket
-                    </button>
-                    <button onclick="closeAddonModal()" class="text-gray-400 hover:text-gray-600 text-xl font-bold px-2">&times;</button>
-                </div>
+<div id="addon-list-modal" class="fixed inset-0 hidden z-50 modal-backdrop items-center justify-center p-4">
+    <div class="modal-glass modal-glass-wide">
+        <div class="flex items-start justify-between gap-4 mb-4">
+            <div>
+                <h3 class="text-xl font-bold section-title">📦 Ek Paketler</h3>
+                <p class="text-sm text-soft mt-1">Bu paketler yalnızca <b>/yukselt</b> komutunda aktif abonelere görünür.</p>
             </div>
-            <p class="text-sm text-gray-500 mb-4">Bu paketler yalnızca <b>/yukselt</b> komutunda aktif abonelere görünür.</p>
-            <div id="addon-packages-container" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div class="col-span-full text-center text-gray-400 py-6">
-                    <i class="fas fa-spinner fa-spin mr-2"></i> Yükleniyor...
-                </div>
+            <div class="flex items-center gap-2 flex-shrink-0">
+                <button onclick="openAddonFormModal()"
+                    class="glass-btn glass-btn-purple rounded-2xl px-4 py-2.5 text-sm font-bold inline-flex items-center gap-2">
+                    <i class="fas fa-plus"></i> Yeni Paket
+                </button>
+                <button onclick="closeAddonModal()" class="glass-btn rounded-full w-10 h-10 flex items-center justify-center">
+                    <i class="fas fa-xmark"></i>
+                </button>
+            </div>
+        </div>
+        <div id="addon-packages-container" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div class="empty-state col-span-full text-center px-6 py-10 text-soft">
+                <i class="fas fa-spinner fa-spin mr-2"></i> Yükleniyor...
             </div>
         </div>
     </div>
 </div>
 
 <!-- Ek Paket Ekle / Düzenle Modal -->
-<div id="addon-form-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden z-[60]">
-    <div class="relative top-10 mx-auto p-5 border shadow-lg rounded-md theme-card w-11/12 max-w-md">
-        <div class="mt-3">
-            <h3 class="text-lg leading-6 font-medium text-center mb-4" id="addon-form-title">Yeni Ek Paket</h3>
-            <div>
-                <input type="hidden" id="addon-id">
-                <div class="mb-3">
-                    <label class="block text-sm font-bold mb-1">Paket Adı <span class="text-red-500">*</span></label>
-                    <input type="text" id="addon-label" placeholder="örn. 50 GB Ek Data"
-                        class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none dark:bg-gray-700 dark:text-white dark:border-gray-600">
-                </div>
-                <div class="mb-3">
-                    <label class="block text-sm font-bold mb-1">Fiyat (₺) <span class="text-red-500">*</span></label>
-                    <input type="number" id="addon-price" min="0" step="0.01" placeholder="0.00"
-                        class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none dark:bg-gray-700 dark:text-white dark:border-gray-600">
-                </div>
-                <div class="mb-3">
-                    <label class="block text-sm font-bold mb-1">Ek Abonelik Süresi (Gün) <span class="font-normal text-gray-400">— 0 = süre eklemez</span></label>
-                    <input type="number" id="addon-extra-days" min="0" step="1" placeholder="0"
-                        class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none dark:bg-gray-700 dark:text-white dark:border-gray-600">
-                </div>
-                <div class="mb-3">
-                    <label class="block text-sm font-bold mb-1">Ek Günlük Limit (GB) <span class="font-normal text-gray-400">— 0 = değişmez</span></label>
-                    <input type="number" id="addon-extra-daily" min="0" step="0.1" placeholder="0"
-                        class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none dark:bg-gray-700 dark:text-white dark:border-gray-600">
-                </div>
-                <div class="mb-3">
-                    <label class="block text-sm font-bold mb-1">Ek Aylık Limit (GB) <span class="font-normal text-gray-400">— 0 = değişmez</span></label>
-                    <input type="number" id="addon-extra-monthly" min="0" step="0.1" placeholder="0"
-                        class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none dark:bg-gray-700 dark:text-white dark:border-gray-600">
-                </div>
-                <div class="mb-3">
-                    <label class="block text-sm font-bold mb-1">Ek Hız (Mbps) <span class="font-normal text-gray-400">— 0 = değişmez</span></label>
-                    <input type="number" id="addon-extra-speed" min="0" step="1" placeholder="0"
-                        class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none dark:bg-gray-700 dark:text-white dark:border-gray-600">
-                </div>
-                <div class="mb-3">
-                    <label class="block text-sm font-bold mb-1">Ek İstek Hakkı <span class="font-normal text-gray-400">— 0 = değişmez</span></label>
-                    <input type="number" id="addon-extra-requests" min="0" step="1" placeholder="0"
-                        class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none dark:bg-gray-700 dark:text-white dark:border-gray-600">
-                    <p class="text-xs text-gray-400 mt-1">Kullanıcının aylık /istek hakkına eklenecek miktar</p>
-                </div>
-                <div class="flex justify-end gap-2 mt-6">
-                    <button type="button" onclick="closeAddonFormModal()"
-                        class="bg-gray-300 hover:bg-gray-400 text-gray-800 px-4 py-2 rounded shadow">İptal</button>
-                    <button type="button" onclick="submitAddonForm()"
-                        class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded shadow">Kaydet</button>
-                </div>
+<div id="addon-form-modal" class="fixed inset-0 hidden z-[60] modal-backdrop items-center justify-center p-4">
+    <div class="modal-glass">
+        <div class="flex items-start justify-between gap-4 mb-5">
+            <h3 class="text-xl font-bold section-title" id="addon-form-title">Yeni Ek Paket</h3>
+            <button onclick="closeAddonFormModal()" class="glass-btn rounded-full w-10 h-10 flex items-center justify-center flex-shrink-0">
+                <i class="fas fa-xmark"></i>
+            </button>
+        </div>
+        <div class="space-y-4">
+            <input type="hidden" id="addon-id">
+            <div class="modal-field">
+                <label for="addon-label">Paket Adı <span class="text-red-400">*</span></label>
+                <input type="text" id="addon-label" placeholder="örn. 50 GB Ek Data" class="glass-input">
+            </div>
+            <div class="modal-field">
+                <label for="addon-price">Fiyat (₺) <span class="text-red-400">*</span></label>
+                <input type="number" id="addon-price" min="0" step="0.01" placeholder="0.00" class="glass-input">
+            </div>
+            <div class="modal-field">
+                <label for="addon-extra-days">Ek Abonelik Süresi (Gün) <span class="font-normal">— 0 = süre eklemez</span></label>
+                <input type="number" id="addon-extra-days" min="0" step="1" placeholder="0" class="glass-input">
+            </div>
+            <div class="modal-field">
+                <label for="addon-extra-daily">Ek Günlük Limit (GB) <span class="font-normal">— 0 = değişmez</span></label>
+                <input type="number" id="addon-extra-daily" min="0" step="0.1" placeholder="0" class="glass-input">
+            </div>
+            <div class="modal-field">
+                <label for="addon-extra-monthly">Ek Aylık Limit (GB) <span class="font-normal">— 0 = değişmez</span></label>
+                <input type="number" id="addon-extra-monthly" min="0" step="0.1" placeholder="0" class="glass-input">
+            </div>
+            <div class="modal-field">
+                <label for="addon-extra-speed">Ek Hız (Mbps) <span class="font-normal">— 0 = değişmez</span></label>
+                <input type="number" id="addon-extra-speed" min="0" step="1" placeholder="0" class="glass-input">
+            </div>
+            <div class="modal-field">
+                <label for="addon-extra-requests">Ek İstek Hakkı <span class="font-normal">— 0 = değişmez</span></label>
+                <input type="number" id="addon-extra-requests" min="0" step="1" placeholder="0" class="glass-input">
+                <p class="text-xs text-soft mt-1">Kullanıcının aylık /istek hakkına eklenecek miktar</p>
+            </div>
+            <div class="flex flex-col-reverse sm:flex-row justify-end gap-3 pt-2">
+                <button type="button" onclick="closeAddonFormModal()" class="glass-btn rounded-2xl px-5 py-3 text-sm font-bold">
+                    İptal
+                </button>
+                <button type="button" onclick="submitAddonForm()" class="glass-btn glass-btn-purple rounded-2xl px-5 py-3 text-sm font-bold">
+                    Kaydet
+                </button>
             </div>
         </div>
     </div>
 </div>
 
 <!-- Kullanıcı İşlem Modal -->
-<div id="user-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden z-50">
-    <div class="relative top-10 mx-auto p-5 border shadow-lg rounded-md theme-card w-11/12 max-w-md">
-        <div class="mt-3">
-            <h3 class="text-lg leading-6 font-medium text-center mb-2" id="user-modal-title">Kullanıcı Yönet</h3>
-            <div class="text-sm text-gray-500 dark:text-gray-400 mb-4 text-center" id="user-modal-desc"></div>
-            <form id="user-form">
-                <input type="hidden" id="manage-user-id">
-                <input type="hidden" id="manage-action">
-                <div class="mb-4" id="days-input-group">
-                    <label class="block text-sm font-bold mb-2">Gün Sayısı (<span id="days-action-label"></span>)</label>
-                    <input type="number" id="manage-days"
-                        class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none dark:bg-gray-700 dark:text-white dark:border-gray-600"
-                        min="1" value="30">
-                </div>
-                <div class="flex justify-end gap-2 mt-6">
-                    <button type="button" onclick="closeUserModal()"
-                        class="bg-gray-300 hover:bg-gray-400 text-gray-800 px-4 py-2 rounded shadow">İptal</button>
-                    <button type="button" onclick="submitUserForm()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded shadow"
-                        id="btn-user-save">Onayla</button>
-                </div>
-            </form>
+<div id="user-modal" class="fixed inset-0 hidden z-50 modal-backdrop items-center justify-center p-4">
+    <div class="modal-glass">
+        <div class="flex items-start justify-between gap-4 mb-5">
+            <div>
+                <h3 class="text-xl font-bold section-title" id="user-modal-title">Kullanıcı Yönet</h3>
+                <div class="text-sm text-soft mt-1" id="user-modal-desc"></div>
+            </div>
+            <button onclick="closeUserModal()" class="glass-btn rounded-full w-10 h-10 flex items-center justify-center flex-shrink-0">
+                <i class="fas fa-xmark"></i>
+            </button>
         </div>
+
+        <form id="user-form" onsubmit="submitUserForm(event)" class="space-y-4">
+            <input type="hidden" id="manage-user-id">
+            <input type="hidden" id="manage-action">
+
+            <div class="modal-field" id="days-input-group">
+                <label for="manage-days">Gün Sayısı (<span id="days-action-label"></span>)</label>
+                <input type="number" id="manage-days" class="glass-input" min="1" value="30">
+            </div>
+
+            <div class="flex flex-col-reverse sm:flex-row justify-end gap-3 pt-2">
+                <button type="button" onclick="closeUserModal()" class="glass-btn rounded-2xl px-5 py-3 text-sm font-bold">
+                    İptal
+                </button>
+                <button type="submit" class="glass-btn glass-btn-primary rounded-2xl px-5 py-3 text-sm font-bold" id="btn-user-save">
+                    Onayla
+                </button>
+            </div>
+        </form>
     </div>
 </div>
 
@@ -292,64 +739,93 @@
     }
 
     function planIcon(p) {
-        if (p.is_unlimited) return '♾️';
-        if (p.days >= 365) return '🏆';
-        if (p.days >= 180) return '⭐';
-        if (p.days >= 30)  return '📅';
-        return '🗓️';
+        if (p.is_unlimited) return 'fa-infinity';
+        if (p.days >= 365) return 'fa-trophy';
+        if (p.days >= 180) return 'fa-star';
+        if (p.days >= 30)  return 'fa-calendar-days';
+        return 'fa-calendar';
     }
 
     // ---- Planlar ----
     async function fetchPlans() {
+        const container = document.getElementById('plans-container');
+        container.innerHTML = `
+            <div class="empty-state col-span-full text-center px-6 py-10 text-soft">
+                <i class="fas fa-spinner fa-spin mr-2"></i> Planlar yükleniyor...
+            </div>
+        `;
         try {
             const res = await fetch('/api/admin/subscriptions/plans');
-            const container = document.getElementById('plans-container');
-            if (res.ok) {
-                const data = await res.json();
-                const plans = data.data || data.plans || [];
-                if (!plans.length) {
-                    container.innerHTML = '<div class="col-span-full text-center text-gray-500 py-8">Plan bulunamadı. Yeni bir plan oluşturun.</div>';
-                    return;
-                }
-                container.innerHTML = plans.map(p => {
-                    const title = planTitle(p);
-                    const icon = planIcon(p);
-                    const daysLabel = p.is_unlimited ? 'Süresiz' : `${p.days} gün`;
-                    const priceVal = p.price != null ? Number(p.price).toLocaleString('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0,00';
-                    const dailyLbl  = p.daily_limit_gb  ? `${p.daily_limit_gb} GB/gün`  : '∞ Günlük';
-                    const monthlyLbl = p.monthly_limit_gb ? `${p.monthly_limit_gb} GB/ay` : '∞ Aylık';
-                    const speedLbl  = p.speed_limit_mbps ? `${p.speed_limit_mbps} Mbps` : '∞ Hız';
-                    const requestLbl = p.monthly_request_limit ? `${p.monthly_request_limit} istek/ay` : '∞ İstek';
-                    // Escape values for inline onclick
-                    const safeLabel = (p.label || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
-                    const safeCurrency = (p.currency || 'TRY').replace(/'/g, "\\'");
-                    return `
-          <div class="theme-card rounded-xl border p-5 shadow-sm relative group">
-            <div class="absolute right-3 top-3 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-              <button type="button"
-                onclick="openPlanModal('${p._id}', ${p.days || 0}, ${p.price || 0}, '${safeLabel}', '${safeCurrency}', ${!!p.is_unlimited}, ${p.daily_limit_gb || 0}, ${p.monthly_limit_gb || 0}, ${p.speed_limit_mbps || 0}, ${p.monthly_request_limit || 0})"
-                class="text-blue-500 hover:text-blue-700 p-1 rounded hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors" title="Düzenle">
-                <i class="fas fa-edit"></i>
-              </button>
-              <button type="button" onclick="deletePlan('${p._id}')"
-                class="text-red-500 hover:text-red-700 p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors" title="Sil">
-                <i class="fas fa-trash"></i>
-              </button>
-            </div>
-            <div class="flex items-center">
-              <div class="flex-shrink-0 bg-yellow-100 dark:bg-yellow-900/30 p-3 rounded-lg text-2xl">${icon}</div>
-              <div class="ml-4">
-                <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400">${title}</h3>
-                <p class="text-2xl font-bold">₺${priceVal}</p>
-                <p class="text-xs text-gray-400 mt-0.5">${daysLabel}</p>
-                <p class="text-xs text-gray-400 mt-0.5">${dailyLbl} · ${monthlyLbl} · ${speedLbl}</p>
-                <p class="text-xs text-gray-400 mt-0.5">📩 ${requestLbl}</p>
-              </div>
-            </div>
-          </div>`;
-                }).join('');
+            if (!res.ok) throw new Error('Failed to fetch plans');
+
+            const data = await res.json();
+            const plans = data.data || data.plans || [];
+
+            if (!plans.length) {
+                container.innerHTML = `
+                    <div class="empty-state col-span-full text-center px-6 py-10 text-soft">
+                        <i class="fas fa-box-open text-2xl mb-3"></i>
+                        <div class="font-semibold mb-1">Plan bulunamadı</div>
+                        <div class="text-sm">Yeni bir plan oluşturun.</div>
+                    </div>
+                `;
+                return;
             }
-        } catch (err) { console.error(err); }
+
+            container.innerHTML = plans.map(p => {
+                const title = planTitle(p);
+                const icon = planIcon(p);
+                const daysLabel = p.is_unlimited ? 'Süresiz' : `${p.days} gün`;
+                const priceVal = p.price != null ? Number(p.price).toLocaleString('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0,00';
+                const dailyLbl   = p.daily_limit_gb  ? `${p.daily_limit_gb} GB/gün`  : '∞ Günlük';
+                const monthlyLbl = p.monthly_limit_gb ? `${p.monthly_limit_gb} GB/ay` : '∞ Aylık';
+                const speedLbl   = p.speed_limit_mbps ? `${p.speed_limit_mbps} Mbps` : '∞ Hız';
+                const requestLbl = p.monthly_request_limit ? `${p.monthly_request_limit} istek/ay` : '∞ İstek';
+                const safeLabel = (p.label || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                const safeCurrency = (p.currency || 'TRY').replace(/'/g, "\\'");
+
+                return `
+                <div class="plan-card p-5 sm:p-6">
+                    <div class="plan-actions absolute right-4 top-4 flex gap-2">
+                        <button type="button"
+                            onclick="openPlanModal('${p._id}', ${p.days || 0}, ${p.price || 0}, '${safeLabel}', '${safeCurrency}', ${!!p.is_unlimited}, ${p.daily_limit_gb || 0}, ${p.monthly_limit_gb || 0}, ${p.speed_limit_mbps || 0}, ${p.monthly_request_limit || 0})"
+                            class="glass-btn rounded-full w-9 h-9 flex items-center justify-center" title="Düzenle">
+                            <i class="fas fa-pen text-sm"></i>
+                        </button>
+                        <button type="button" onclick="deletePlan('${p._id}')"
+                            class="glass-btn glass-btn-danger rounded-full w-9 h-9 flex items-center justify-center" title="Sil">
+                            <i class="fas fa-trash text-sm"></i>
+                        </button>
+                    </div>
+
+                    <div class="flex items-start gap-4">
+                        <div class="w-14 h-14 rounded-2xl flex items-center justify-center shrink-0"
+                             style="background: color-mix(in srgb, var(--primary) 16%, transparent); border: 1px solid color-mix(in srgb, var(--primary) 24%, transparent);">
+                            <i class="fas ${icon} text-xl" style="color: var(--primary);"></i>
+                        </div>
+
+                        <div class="min-w-0">
+                            <div class="text-sm font-semibold section-muted">${title}</div>
+                            <div class="mt-1 text-3xl font-extrabold section-title tracking-tight">₺${priceVal}</div>
+                            <div class="text-xs text-soft mt-0.5">${daysLabel}</div>
+                            <div class="flex flex-wrap gap-1.5 mt-3">
+                                <span class="pill-soft">${dailyLbl}</span>
+                                <span class="pill-soft">${monthlyLbl}</span>
+                                <span class="pill-soft">${speedLbl}</span>
+                                <span class="pill-soft">📩 ${requestLbl}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>`;
+            }).join('');
+        } catch (err) {
+            console.error(err);
+            container.innerHTML = `
+                <div class="empty-state col-span-full text-center px-6 py-10 text-soft">
+                    <i class="fas fa-triangle-exclamation mr-2"></i> Planlar yüklenemedi.
+                </div>
+            `;
+        }
     }
 
     function toggleUnlimited(cb) {
@@ -384,10 +860,19 @@
         document.getElementById('plan-speed-limit').value = speedLimit || 0;
         document.getElementById('plan-request-limit').value = requestLimit || 0;
         document.getElementById('plan-modal-title').innerText = id ? 'Planı Düzenle' : 'Yeni Plan Ekle';
-        document.getElementById('plan-modal').classList.remove('hidden');
+
+        const modal = document.getElementById('plan-modal');
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+        document.body.classList.add('overflow-hidden');
     }
 
-    function closePlanModal() { document.getElementById('plan-modal').classList.add('hidden'); }
+    function closePlanModal() {
+        const modal = document.getElementById('plan-modal');
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
+        document.body.classList.remove('overflow-hidden');
+    }
 
     async function submitPlanForm(e) {
         e.preventDefault();
@@ -404,19 +889,29 @@
             speed_limit_mbps: parseFloat(document.getElementById('plan-speed-limit').value) || 0,
             monthly_request_limit: parseInt(document.getElementById('plan-request-limit').value) || 0,
         };
-        const res = await fetch(id ? `/api/admin/subscriptions/plans/${id}` : '/api/admin/subscriptions/plans', {
-            method: id ? 'PUT' : 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
-        if (res.ok) { closePlanModal(); fetchPlans(); }
-        else alert('Plan kaydedilemedi.');
+        try {
+            const res = await fetch(id ? `/api/admin/subscriptions/plans/${id}` : '/api/admin/subscriptions/plans', {
+                method: id ? 'PUT' : 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            if (res.ok) { closePlanModal(); fetchPlans(); }
+            else alert('Plan kaydedilemedi.');
+        } catch (err) {
+            console.error(err);
+            alert('Plan kaydedilemedi.');
+        }
     }
 
     async function deletePlan(id) {
         if (!confirm('Bu planı silmek istediğinizden emin misiniz?')) return;
-        const res = await fetch(`/api/admin/subscriptions/plans/${id}`, { method: 'DELETE' });
-        if (res.ok) fetchPlans(); else alert('Silme işlemi başarısız.');
+        try {
+            const res = await fetch(`/api/admin/subscriptions/plans/${id}`, { method: 'DELETE' });
+            if (res.ok) fetchPlans(); else alert('Silme işlemi başarısız.');
+        } catch (err) {
+            console.error(err);
+            alert('Silme işlemi başarısız.');
+        }
     }
 
     // ---- Abone Listesi ----
@@ -434,69 +929,168 @@
         });
     }
 
+    function getStatusBadge(status) {
+        return status === 'active'
+            ? '<span class="metric-badge badge-active"><i class="fas fa-circle text-[8px]"></i> Aktif</span>'
+            : '<span class="metric-badge badge-expired"><i class="fas fa-circle text-[8px]"></i> Süresi Dolmuş</span>';
+    }
+
+    function formatExpiry(expiryValue) {
+        if (!expiryValue) return 'Yok';
+        // Backend tarihleri UTC olarak üretiyor ama saat dilimi eki (Z/+00:00) içermiyor.
+        // Bu yüzden tarayıcının string'i kendi yerel saatiymiş gibi yorumlamasını
+        // engellemek için, eksikse sonuna 'Z' ekleyip UTC olduğunu açıkça belirtiyoruz.
+        let normalized = String(expiryValue);
+        if (!/[zZ]|[+-]\d{2}:?\d{2}$/.test(normalized)) {
+            normalized += 'Z';
+        }
+        const d = new Date(normalized);
+        return d.toLocaleDateString('tr-TR', { timeZone: 'Europe/Istanbul', day: '2-digit', month: 'short', year: 'numeric' }) +
+            ' ' + d.toLocaleTimeString('tr-TR', { timeZone: 'Europe/Istanbul', hour: '2-digit', minute: '2-digit' });
+    }
+
+    function getUserDisplayName(u) {
+        let name = u.first_name || '';
+        if (u.username) name += (name ? ' ' : '') + `(@${u.username})`;
+        if (!name) name = `Kullanıcı ${u._id}`;
+        return name;
+    }
+
+    function renderDesktopRows(slice) {
+        const tbody = document.getElementById('subscribers-tbody');
+        if (!slice.length) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="4" class="px-6 py-10 text-center text-soft">
+                        Aramanızla eşleşen kullanıcı bulunamadı.
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+
+        tbody.innerHTML = slice.map(u => {
+            const expiry = formatExpiry(u.subscription_expiry);
+            const name = getUserDisplayName(u);
+            const safeName = name.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+            const statusBadge = getStatusBadge(u.subscription_status);
+
+            return `
+                <tr>
+                    <td class="px-6 py-4">
+                        <div class="font-semibold section-title">${name}</div>
+                        <div class="text-xs text-soft mt-1">ID: ${u._id}</div>
+                    </td>
+                    <td class="px-6 py-4 text-center">${statusBadge}</td>
+                    <td class="px-6 py-4 text-center text-sm section-title">${expiry}</td>
+                    <td class="px-6 py-4">
+                        <div class="flex justify-end gap-2 flex-wrap">
+                            <button onclick="openUserModal(${u._id}, '${safeName}', 'extend')"
+                                class="action-chip glass-btn-success">Uzat</button>
+                            <button onclick="openUserModal(${u._id}, '${safeName}', 'reduce')"
+                                class="action-chip glass-btn-warning">Kıs</button>
+                            <button onclick="openUserModal(${u._id}, '${safeName}', 'delete')"
+                                class="action-chip glass-btn-danger">Sil</button>
+                        </div>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    function renderMobileCards(slice) {
+        const mobileWrap = document.getElementById('subscribers-mobile');
+        if (!slice.length) {
+            mobileWrap.innerHTML = `
+                <div class="empty-state text-center px-4 py-8 text-soft">
+                    Aramanızla eşleşen kullanıcı bulunamadı.
+                </div>
+            `;
+            return;
+        }
+
+        mobileWrap.innerHTML = slice.map(u => {
+            const expiry = formatExpiry(u.subscription_expiry);
+            const name = getUserDisplayName(u);
+            const safeName = name.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+            const statusBadge = getStatusBadge(u.subscription_status);
+
+            return `
+                <div class="mobile-user-card">
+                    <div class="flex items-start justify-between gap-3 mb-3">
+                        <div class="min-w-0">
+                            <div class="font-semibold section-title break-words">${name}</div>
+                            <div class="text-xs text-soft mt-1 break-all">ID: ${u._id}</div>
+                        </div>
+                        <div class="shrink-0">${statusBadge}</div>
+                    </div>
+
+                    <div class="rounded-2xl px-4 py-3 mb-4"
+                         style="background: color-mix(in srgb, var(--bg) 55%, transparent); border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);">
+                        <div class="text-[11px] uppercase tracking-[0.14em] text-soft font-bold mb-1">Bitiş Tarihi</div>
+                        <div class="text-sm font-semibold section-title">${expiry}</div>
+                    </div>
+
+                    <div class="grid grid-cols-3 gap-2">
+                        <button onclick="openUserModal(${u._id}, '${safeName}', 'extend')"
+                            class="action-chip glass-btn-success w-full">Uzat</button>
+                        <button onclick="openUserModal(${u._id}, '${safeName}', 'reduce')"
+                            class="action-chip glass-btn-warning w-full">Kıs</button>
+                        <button onclick="openUserModal(${u._id}, '${safeName}', 'delete')"
+                            class="action-chip glass-btn-danger w-full">Sil</button>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
     function renderSubPage() {
         const filtered = getSubFiltered();
         const pageSize = parseInt(document.getElementById('sub-page-size').value);
         const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
         if (subPage > totalPages) subPage = totalPages;
-        const start = (subPage - 1) * pageSize;
+        const start = filtered.length ? (subPage - 1) * pageSize : 0;
         const slice = filtered.slice(start, start + pageSize);
 
-        document.getElementById('sub-page-info').textContent = `${start + 1}–${Math.min(start + pageSize, filtered.length)} / ${filtered.length} kullanıcı`;
+        document.getElementById('sub-page-info').textContent = filtered.length
+            ? `${start + 1}–${Math.min(start + pageSize, filtered.length)} / ${filtered.length} kullanıcı`
+            : '0 / 0 kullanıcı';
         document.getElementById('sub-page-num').textContent = `Sayfa ${subPage} / ${totalPages}`;
-        document.getElementById('sub-btn-prev').disabled = subPage <= 1;
-        document.getElementById('sub-btn-next').disabled = subPage >= totalPages;
 
-        const tbody = document.getElementById('subscribers-tbody');
-        if (!slice.length) {
-            tbody.innerHTML = '<tr><td colspan="4" class="px-6 py-8 text-center text-gray-500">Aramanızla eşleşen kullanıcı bulunamadı.</td></tr>';
-            return;
-        }
+        const prevBtn = document.getElementById('sub-btn-prev');
+        const nextBtn = document.getElementById('sub-btn-next');
+        prevBtn.disabled = subPage <= 1;
+        nextBtn.disabled = subPage >= totalPages;
+        prevBtn.style.opacity = subPage <= 1 ? '0.45' : '1';
+        nextBtn.style.opacity = subPage >= totalPages ? '0.45' : '1';
 
-        tbody.innerHTML = slice.map(u => {
-            const statusColor = u.subscription_status === 'active'
-                ? 'bg-green-100 text-green-800'
-                : 'bg-red-100 text-red-800';
-            const statusLabel = u.subscription_status === 'active' ? 'Aktif' : 'Süresi Dolmuş';
-            let expiry = 'Yok';
-            if (u.subscription_expiry) {
-                const d = new Date(u.subscription_expiry);
-                expiry = d.toLocaleDateString('tr-TR', { timeZone: 'Europe/Istanbul', day: '2-digit', month: 'short', year: 'numeric' }) +
-                    ' ' + d.toLocaleTimeString('tr-TR', { timeZone: 'Europe/Istanbul', hour: '2-digit', minute: '2-digit' });
-            }
-            let name = u.first_name || '';
-            if (u.username) name += (name ? ' ' : '') + `(@${u.username})`;
-            if (!name) name = `Kullanıcı ${u._id}`;
-            const safeName = name.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-            return `<tr class="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
-        <td class="px-4 sm:px-6 py-4">
-          <div class="font-medium">${name}</div>
-          <div class="text-xs text-gray-500">ID: ${u._id}</div>
-          <div class="text-xs text-gray-400 sm:hidden mt-0.5">${expiry}</div>
-        </td>
-        <td class="px-4 sm:px-6 py-4 text-center">
-          <span class="px-2 py-1 rounded ${statusColor} text-xs font-bold uppercase tracking-wider">${statusLabel}</span>
-        </td>
-        <td class="px-4 sm:px-6 py-4 text-center text-sm hidden sm:table-cell">${expiry}</td>
-        <td class="px-4 sm:px-6 py-4 text-right">
-          <div class="flex justify-end gap-1 sm:gap-2 flex-wrap">
-            <button onclick="openUserModal(${u._id}, '${safeName}', 'extend')"
-              class="bg-green-50 text-green-600 hover:bg-green-100 px-2 py-1 rounded text-xs font-medium border border-green-200">Uzat</button>
-            <button onclick="openUserModal(${u._id}, '${safeName}', 'reduce')"
-              class="bg-yellow-50 text-yellow-600 hover:bg-yellow-100 px-2 py-1 rounded text-xs font-medium border border-yellow-200">Kıs</button>
-            <button onclick="openUserModal(${u._id}, '${safeName}', 'delete')"
-              class="bg-red-50 text-red-600 hover:bg-red-100 px-2 py-1 rounded text-xs font-medium border border-red-200">İptal</button>
-          </div>
-        </td>
-      </tr>`;
-        }).join('');
+        renderDesktopRows(slice);
+        renderMobileCards(slice);
     }
 
-    function subChangePage(dir) { subPage += dir; renderSubPage(); }
+    function subChangePage(dir) {
+        const filtered = getSubFiltered();
+        const pageSize = parseInt(document.getElementById('sub-page-size').value);
+        const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+        subPage += dir;
+        if (subPage < 1) subPage = 1;
+        if (subPage > totalPages) subPage = totalPages;
+        renderSubPage();
+    }
 
     async function fetchSubscribers() {
-        document.getElementById('subscribers-tbody').innerHTML =
-            '<tr><td colspan="4" class="px-6 py-8 text-center text-gray-500"><i class="fas fa-spinner fa-spin mr-2"></i> Yükleniyor...</td></tr>';
+        document.getElementById('subscribers-tbody').innerHTML = `
+            <tr>
+                <td colspan="4" class="px-6 py-8 text-center text-soft">
+                    <i class="fas fa-spinner fa-spin mr-2"></i> Yükleniyor...
+                </td>
+            </tr>
+        `;
+        document.getElementById('subscribers-mobile').innerHTML = `
+            <div class="empty-state text-center px-4 py-8 text-soft">
+                <i class="fas fa-spinner fa-spin mr-2"></i> Yükleniyor...
+            </div>
+        `;
         try {
             const res = await fetch('/api/admin/subscriptions/users');
             if (res.ok) {
@@ -504,68 +1098,110 @@
                 allUsers = data.data || [];
                 subPage = 1;
                 renderSubPage();
+            } else {
+                throw new Error('Failed to fetch users');
             }
-        } catch (err) { console.error(err); }
+        } catch (err) {
+            console.error(err);
+            document.getElementById('subscribers-tbody').innerHTML = `
+                <tr>
+                    <td colspan="4" class="px-6 py-8 text-center text-soft">
+                        <i class="fas fa-triangle-exclamation mr-2"></i> Kullanıcılar yüklenemedi.
+                    </td>
+                </tr>
+            `;
+            document.getElementById('subscribers-mobile').innerHTML = `
+                <div class="empty-state text-center px-4 py-8 text-soft">
+                    <i class="fas fa-triangle-exclamation mr-2"></i> Kullanıcılar yüklenemedi.
+                </div>
+            `;
+        }
     }
 
     function openUserModal(userId, userName, action) {
         document.getElementById('manage-user-id').value = userId;
         document.getElementById('manage-action').value = action;
-        let title = '', desc = '', btnColor = 'bg-blue-600 hover:bg-blue-700', showDays = true;
+        let title = '', desc = '', btnClasses = 'glass-btn glass-btn-primary rounded-2xl px-5 py-3 text-sm font-bold', showDays = true;
         if (action === 'extend') {
             title = 'Aboneliği Uzat';
             desc = `<b>${userName}</b> kullanıcısının aboneliğine gün ekle.`;
             document.getElementById('days-action-label').innerText = 'eklenecek';
+            btnClasses = 'glass-btn glass-btn-success rounded-2xl px-5 py-3 text-sm font-bold';
         } else if (action === 'reduce') {
             title = 'Aboneliği Kıs';
             desc = `<b>${userName}</b> kullanıcısının aboneliğinden gün çıkar.`;
             document.getElementById('days-action-label').innerText = 'çıkarılacak';
-            btnColor = 'bg-yellow-600 hover:bg-yellow-700';
+            btnClasses = 'glass-btn glass-btn-warning rounded-2xl px-5 py-3 text-sm font-bold';
         } else {
-            title = 'Aboneliği İptal Et';
-            desc = `<b>Uyarı:</b> Bu işlem <b>${userName}</b> kullanıcısının aboneliğini tamamen iptal edecektir.`;
+            title = 'Üyeliği Sil';
+            desc = `<b>Uyarı:</b> Bu işlem <b>${userName}</b> kullanıcısına ait üyeliği, hatırlatmaları, içerik isteklerini, izleme geçmişini, eklentilerini ve abonelik geçmişini <b>kalıcı olarak</b> silecektir. Kullanıcı hiç abone olmamış gibi olacaktır. Bu işlem geri alınamaz.`;
             showDays = false;
-            btnColor = 'bg-red-600 hover:bg-red-700';
+            btnClasses = 'glass-btn glass-btn-danger rounded-2xl px-5 py-3 text-sm font-bold';
         }
         document.getElementById('user-modal-title').innerText = title;
         document.getElementById('user-modal-desc').innerHTML = desc;
-        document.getElementById('days-input-group').className = showDays ? 'mb-4' : 'hidden';
-        document.getElementById('btn-user-save').className = `${btnColor} text-white px-4 py-2 rounded shadow`;
+        document.getElementById('days-input-group').style.display = showDays ? 'block' : 'none';
+        document.getElementById('btn-user-save').className = btnClasses;
+        document.getElementById('btn-user-save').innerText = (action === 'delete') ? 'Sil' : 'Onayla';
         if (!showDays) { document.getElementById('manage-days').value = 0; document.getElementById('manage-days').removeAttribute('required'); }
         else document.getElementById('manage-days').setAttribute('required', 'required');
-        document.getElementById('user-modal').classList.remove('hidden');
+
+        const modal = document.getElementById('user-modal');
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+        document.body.classList.add('overflow-hidden');
     }
 
-    function closeUserModal() { document.getElementById('user-modal').classList.add('hidden'); }
+    function closeUserModal() {
+        const modal = document.getElementById('user-modal');
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
+        document.body.classList.remove('overflow-hidden');
+    }
 
-    async function submitUserForm() {
+    async function submitUserForm(e) {
+        if (e) e.preventDefault();
         const userId = document.getElementById('manage-user-id').value;
         const action = document.getElementById('manage-action').value;
         const days = document.getElementById('manage-days').value;
-        const res = await fetch(`/api/admin/subscriptions/users/${userId}/manage`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action, days: parseInt(days) || 0 })
-        });
-        if (res.ok) { closeUserModal(); fetchSubscribers(); }
-        else alert('Kullanıcı güncellenemedi.');
+        if (action === 'delete' && !confirm('Bu kullanıcıya ait TÜM veriler (üyelik, hatırlatmalar, istekler, izleme geçmişi, eklentiler) kalıcı olarak silinecek. Emin misiniz?')) {
+            return;
+        }
+        try {
+            const res = await fetch(`/api/admin/subscriptions/users/${userId}/manage`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action, days: parseInt(days) || 0 })
+            });
+            if (res.ok) { closeUserModal(); fetchSubscribers(); }
+            else alert('Kullanıcı güncellenemedi.');
+        } catch (err) {
+            console.error(err);
+            alert('Kullanıcı güncellenemedi.');
+        }
     }
 
     // ---- Ek Paketler ----
     let allAddonPackages = [];
 
     async function openAddonModal() {
-        document.getElementById('addon-list-modal').classList.remove('hidden');
+        const modal = document.getElementById('addon-list-modal');
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+        document.body.classList.add('overflow-hidden');
         await fetchAddonPackages();
     }
 
     function closeAddonModal() {
-        document.getElementById('addon-list-modal').classList.add('hidden');
+        const modal = document.getElementById('addon-list-modal');
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
+        document.body.classList.remove('overflow-hidden');
     }
 
     async function fetchAddonPackages() {
         const container = document.getElementById('addon-packages-container');
-        container.innerHTML = '<div class="col-span-full text-center text-gray-400 py-6"><i class="fas fa-spinner fa-spin mr-2"></i> Yükleniyor...</div>';
+        container.innerHTML = '<div class="empty-state col-span-full text-center px-6 py-10 text-soft"><i class="fas fa-spinner fa-spin mr-2"></i> Yükleniyor...</div>';
         try {
             const res = await fetch('/api/admin/addon-packages');
             if (res.ok) {
@@ -573,18 +1209,18 @@
                 allAddonPackages = data.data || [];
                 renderAddonPackages();
             } else {
-                container.innerHTML = '<div class="col-span-full text-center text-red-400 py-6">Paketler yüklenemedi.</div>';
+                container.innerHTML = '<div class="empty-state col-span-full text-center px-6 py-10 text-soft">Paketler yüklenemedi.</div>';
             }
         } catch (err) {
             console.error(err);
-            container.innerHTML = '<div class="col-span-full text-center text-red-400 py-6">Bağlantı hatası.</div>';
+            container.innerHTML = '<div class="empty-state col-span-full text-center px-6 py-10 text-soft">Bağlantı hatası.</div>';
         }
     }
 
     function renderAddonPackages() {
         const container = document.getElementById('addon-packages-container');
         if (!allAddonPackages.length) {
-            container.innerHTML = '<div class="col-span-full text-center text-gray-400 py-6">Henüz ek paket oluşturulmamış. Yeni bir paket ekleyin.</div>';
+            container.innerHTML = '<div class="empty-state col-span-full text-center px-6 py-10 text-soft">Henüz ek paket oluşturulmamış. Yeni bir paket ekleyin.</div>';
             return;
         }
         container.innerHTML = allAddonPackages.map(pkg => {
@@ -594,28 +1230,29 @@
             if (pkg.extra_monthly_gb) extras.push(`📦 +${pkg.extra_monthly_gb} GB/ay`);
             if (pkg.extra_speed_mbps) extras.push(`⚡ +${pkg.extra_speed_mbps} Mbps`);
             if (pkg.extra_requests)   extras.push(`📩 +${pkg.extra_requests} istek/ay`);
-            const extraHtml = extras.map(e => `<span class="text-xs bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 px-2 py-0.5 rounded-full">${e}</span>`).join(' ');
-            const safeLabel = (pkg.label || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+            const extraHtml = extras.map(e => `<span class="pill-soft">${e}</span>`).join(' ');
+            const safeLabel = (pkg.label || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
             const priceVal = Number(pkg.price || 0).toLocaleString('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2});
             return `
-            <div class="theme-card rounded-xl border p-4 shadow-sm relative group">
-                <div class="absolute right-3 top-3 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+            <div class="addon-card p-4">
+                <div class="addon-actions absolute right-3 top-3 flex gap-2">
                     <button type="button"
                         onclick="openAddonFormModal('${pkg._id}', '${safeLabel}', ${pkg.price||0}, ${pkg.extra_days||0}, ${pkg.extra_daily_gb||0}, ${pkg.extra_monthly_gb||0}, ${pkg.extra_speed_mbps||0}, ${pkg.extra_requests||0})"
-                        class="text-blue-500 hover:text-blue-700 p-1 rounded hover:bg-blue-50 dark:hover:bg-blue-900/30" title="Düzenle">
-                        <i class="fas fa-edit"></i>
+                        class="glass-btn rounded-full w-8 h-8 flex items-center justify-center" title="Düzenle">
+                        <i class="fas fa-pen text-xs"></i>
                     </button>
                     <button type="button" onclick="deleteAddonPackage('${pkg._id}')"
-                        class="text-red-500 hover:text-red-700 p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/30" title="Sil">
-                        <i class="fas fa-trash"></i>
+                        class="glass-btn glass-btn-danger rounded-full w-8 h-8 flex items-center justify-center" title="Sil">
+                        <i class="fas fa-trash text-xs"></i>
                     </button>
                 </div>
                 <div class="flex items-start gap-3">
-                    <div class="bg-purple-100 dark:bg-purple-900/30 p-2 rounded-lg text-xl">📦</div>
+                    <div class="w-11 h-11 rounded-xl flex items-center justify-center shrink-0 text-lg"
+                         style="background: color-mix(in srgb, #a855f7 16%, transparent); border: 1px solid color-mix(in srgb, #a855f7 24%, transparent);">📦</div>
                     <div class="flex-1 min-w-0">
-                        <h4 class="font-semibold text-sm truncate">${pkg.label || 'İsimsiz Paket'}</h4>
-                        <p class="text-xl font-bold mt-0.5">₺${priceVal}</p>
-                        <div class="flex flex-wrap gap-1 mt-2">${extraHtml || '<span class="text-xs text-gray-400">İçerik tanımlanmamış</span>'}</div>
+                        <h4 class="font-semibold text-sm section-title truncate">${pkg.label || 'İsimsiz Paket'}</h4>
+                        <p class="text-xl font-bold section-title mt-0.5">₺${priceVal}</p>
+                        <div class="flex flex-wrap gap-1 mt-2">${extraHtml || '<span class="text-xs text-soft">İçerik tanımlanmamış</span>'}</div>
                     </div>
                 </div>
             </div>`;
@@ -641,11 +1278,16 @@
         document.getElementById('addon-extra-speed').value = extraSpeed;
         document.getElementById('addon-extra-requests').value = extraRequests;
         document.getElementById('addon-form-title').innerText = id ? 'Ek Paketi Düzenle' : 'Yeni Ek Paket';
-        document.getElementById('addon-form-modal').classList.remove('hidden');
+
+        const modal = document.getElementById('addon-form-modal');
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
     }
 
     function closeAddonFormModal() {
-        document.getElementById('addon-form-modal').classList.add('hidden');
+        const modal = document.getElementById('addon-form-modal');
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
     }
 
     async function submitAddonForm() {
@@ -664,28 +1306,54 @@
         const url = id ? `/api/admin/addon-packages/${id}` : '/api/admin/addon-packages';
         const method = id ? 'PUT' : 'POST';
 
-        const res = await fetch(url, {
-            method,
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
-        if (res.ok) {
-            closeAddonFormModal();
-            await fetchAddonPackages();
-        } else {
+        try {
+            const res = await fetch(url, {
+                method,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            if (res.ok) {
+                closeAddonFormModal();
+                await fetchAddonPackages();
+            } else {
+                alert('Paket kaydedilemedi.');
+            }
+        } catch (err) {
+            console.error(err);
             alert('Paket kaydedilemedi.');
         }
     }
 
     async function deleteAddonPackage(pkgId) {
         if (!confirm('Bu ek paketi silmek istediğinize emin misiniz?')) return;
-        const res = await fetch(`/api/admin/addon-packages/${pkgId}`, { method: 'DELETE' });
-        if (res.ok) {
-            await fetchAddonPackages();
-        } else {
+        try {
+            const res = await fetch(`/api/admin/addon-packages/${pkgId}`, { method: 'DELETE' });
+            if (res.ok) { await fetchAddonPackages(); }
+            else { alert('Paket silinemedi.'); }
+        } catch (err) {
+            console.error(err);
             alert('Paket silinemedi.');
         }
     }
+
+    document.addEventListener('click', (e) => {
+        const planModal = document.getElementById('plan-modal');
+        const userModal = document.getElementById('user-modal');
+        const addonListModal = document.getElementById('addon-list-modal');
+        const addonFormModal = document.getElementById('addon-form-modal');
+        if (e.target === planModal) closePlanModal();
+        if (e.target === userModal) closeUserModal();
+        if (e.target === addonListModal) closeAddonModal();
+        if (e.target === addonFormModal) closeAddonFormModal();
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            closePlanModal();
+            closeUserModal();
+            closeAddonFormModal();
+        }
+    });
 
     document.addEventListener('DOMContentLoaded', () => { fetchPlans(); fetchSubscribers(); });
 </script>

@@ -49,6 +49,12 @@ _DEFAULTS: Dict[str, Any] = {
     "proxy_type": "HTTPS",
     "http_proxy_url": "",
     "proxy_mode": 1,
+    #----- Proxy hangi üyelere uygulanacak: "subscribers" (tüm aktif aboneler,
+    #----- varsayılan) veya "selected" (yalnızca proxy_scope_member_ids'teki
+    #----- üyeler). Kapsam dışı üyeler PROXY_MODE'dan bağımsız olarak her
+    #----- zaman doğrudan (proxy'siz) link alır.
+    "proxy_scope_mode": "subscribers",
+    "proxy_scope_member_ids": [],
     "default_device_limit": 0,
     "yenileme": "",
     "hiz_limiti": "",
@@ -113,6 +119,8 @@ _SETTINGS_TO_TELEGRAM_ATTR: Dict[str, str] = {
     "proxy_type": "PROXY_TYPE",
     "http_proxy_url": "HTTP_PROXY_URL",
     "proxy_mode": "PROXY_MODE",
+    "proxy_scope_mode": "PROXY_SCOPE_MODE",
+    "proxy_scope_member_ids": "PROXY_SCOPE_MEMBER_IDS",
     "default_device_limit": "DEFAULT_DEVICE_LIMIT",
     "yenileme": "YENILEME",
     "hiz_limiti": "HIZ_LIMITI",
@@ -152,6 +160,8 @@ def _seed_from_env() -> Dict[str, Any]:
         "proxy_type":           Telegram.PROXY_TYPE,
         "http_proxy_url":       Telegram.HTTP_PROXY_URL,
         "proxy_mode":           Telegram.PROXY_MODE,
+        "proxy_scope_mode":       Telegram.PROXY_SCOPE_MODE,
+        "proxy_scope_member_ids": list(Telegram.PROXY_SCOPE_MEMBER_IDS),
         "default_device_limit": Telegram.DEFAULT_DEVICE_LIMIT,
         "yenileme":             Telegram.YENILEME,
         "hiz_limiti":           Telegram.HIZ_LIMITI,

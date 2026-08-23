@@ -42,6 +42,62 @@ from Backend.helper.modal import Episode, MovieSchema, QualityDetail, QualityPar
 from Backend.helper.task_manager import delete_message
 
 
+def is_proxy_scope_member(user_id) -> bool:
+    """
+    Ayarlar sayfasındaki "Proxy Kimlere Uygulansın?" seçimine göre, verilen
+    üyenin (user_id) proxy kapsamında olup olmadığını belirler.
+
+    Backend.config.Telegram.PROXY_SCOPE_MODE / PROXY_SCOPE_MEMBER_IDS
+    SettingsManager tarafından panelden canlı olarak güncellenir (bkz.
+    Backend/helper/settings_manager.py). mode="subscribers" (varsayılan)
+    ise tüm üyeler kapsamdadır; mode="selected" ise yalnızca
+    PROXY_SCOPE_MEMBER_IDS'teki üyeler kapsamdadır — kapsam dışı üyeler
+    Proxy Modu ne olursa olsun her zaman doğrudan (proxy'siz) link alır.
+    """
+    from Backend.config import Telegram
+    if getattr(Telegram, "PROXY_SCOPE_MODE", "subscribers") != "selected":
+        return True
+    try:
+        uid = int(user_id)
+    except (TypeError, ValueError):
+        return False
+    try:
+        allowed_ids = {int(m) for m in (getattr(Telegram, "PROXY_SCOPE_MEMBER_IDS", None) or [])}
+    except (TypeError, ValueError):
+        allowed_ids = set()
+    return uid in allowed_ids
+
+
+def is_media_visible_to_member(media_doc: Optional[Dict[str, Any]], user_id) -> bool:
+    """
+    Bir içerik dokümanının 'visibility' alanına göre, verilen üyenin (user_id)
+    bu içeriği görüp göremeyeceğini / erişip erişemeyeceğini belirler.
+
+    visibility şeması:
+      {"mode": "subscribers", "member_ids": []}          → varsayılan: aktif
+                                                              aboneliği olan tüm
+                                                              üyelere açık
+      {"mode": "selected",    "member_ids": [123, 456]}  → yalnızca listedeki
+                                                              üye ID'lerine açık
+
+    'visibility' alanı hiç tanımlı değilse (eski kayıtlar) → herkese açık kabul edilir.
+    Abonelik aktifliği kontrolü bu fonksiyonun kapsamı dışındadır; çağıran taraf
+    (_check_subscription vb.) ayrıca kontrol etmelidir.
+    """
+    vis = (media_doc or {}).get("visibility") or {}
+    if vis.get("mode") != "selected":
+        return True
+    try:
+        uid = int(user_id)
+    except (TypeError, ValueError):
+        return False
+    try:
+        allowed_ids = {int(m) for m in (vis.get("member_ids") or [])}
+    except (TypeError, ValueError):
+        allowed_ids = set()
+    return uid in allowed_ids
+
+
 def convert_objectid_to_str(document: Dict[str, Any]) -> Dict[str, Any]:
     for key, value in document.items():
         if isinstance(value, ObjectId):
@@ -260,6 +316,32 @@ class Database:
             )
         except Exception as idx_err:
             LOGGER.warning(f"movie search_text_idx: {idx_err}")
+
+        # ── updated_on index (varsayılan sıralama için) ──────────────────────
+        # _get_sort_dict() arama yokken {"updated_on": DESCENDING} kullanıyor.
+        # Index olmadan bu sıralama tamamen bellekte yapılır ve büyük
+        # koleksiyonlarda (özellikle nested seasons/episodes içeren "tv"
+        # koleksiyonunda) MongoDB'nin 32MB in-memory sort limitini aşarak
+        # "Sort exceeded memory limit" hatasına -> 500 Internal Server Error'a
+        # yol açar. Bu genelde en dolu/eski storage DB'sine denk gelen son
+        # sayfalarda görülür (bkz. _paginate_collection).
+        try:
+            await db["tv"].create_index(
+                [("updated_on", DESCENDING)],
+                name="updated_on_idx",
+                background=True,
+            )
+        except Exception as idx_err:
+            LOGGER.warning(f"tv updated_on_idx: {idx_err}")
+
+        try:
+            await db["movie"].create_index(
+                [("updated_on", DESCENDING)],
+                name="updated_on_idx",
+                background=True,
+            )
+        except Exception as idx_err:
+            LOGGER.warning(f"movie updated_on_idx: {idx_err}")
 
     async def disconnect(self):
         for client in self.clients.values():
@@ -724,47 +806,84 @@ class Database:
             return result.modified_count > 0
             
         elif action == "delete":
-            # Aboneliği iptal et — tüm plan/addon alanlarını da temizle
-            result = await self.dbs["tracking"]["users"].update_one(
-                {"_id": user_id},
-                {"$unset": {
-                    "subscription_expiry": "",
-                    "subscription_status": "",
-                    "plan_id": "",
-                    "pending_payment": "",
-                    "pending_addon": "",
-                    "addon_extra_daily_gb": "",
-                    "addon_extra_monthly_gb": "",
-                    "addon_extra_speed_mbps": "",
-                    "addon_extra_requests": "",
-                    "reminder_sent": "",
-                }}
-            )
-            # Token limitlerini sıfırla
+            # Üyeliği TAMAMEN sil — kullanıcı hiç abone olmamış gibi olsun.
+            # Aşağıdaki her adım o kullanıcıya ait ilgili tüm kayıtları temizler:
+            # API token'ı (ve dolayısıyla eklentileri/limitleri), izleme geçmişi,
+            # hatırlatmalar, içerik istekleri, abonelik geçmişi ve web paneli oturumu.
+
+            # 1) Kullanıcının API token kaydını bul (varsa) — izleme geçmişini
+            #    silmek ve token'ı kaldırmak için gerekli.
+            token_doc = None
             try:
-                await self.dbs["tracking"]["api_tokens"].update_many(
-                    {"$or": [{"user_id": user_id}, {"user_id": str(user_id)}]},
-                    {"$set": {
-                        "limits.daily_limit_gb":        0,
-                        "limits.monthly_limit_gb":      0,
-                        "limits.speed_limit_mbps":      0,
-                        "limits.monthly_request_limit": 0,
-                    }}
+                token_doc = await self.dbs["tracking"]["api_tokens"].find_one(
+                    {"$or": [{"user_id": user_id}, {"user_id": str(user_id)}]}
                 )
             except Exception as e:
-                print(f"manage_subscriber delete: token reset error: {e}")
-            # Bu ayki istek sayacını sıfırla
+                print(f"manage_subscriber delete: token lookup error: {e}")
+
+            # 2) İzleme geçmişini (stream_analytics) sil
+            if token_doc and token_doc.get("token"):
+                try:
+                    await self.purge_stream_analytics_for_token(token_doc["token"])
+                except Exception as e:
+                    print(f"manage_subscriber delete: stream analytics purge error: {e}")
+
+            # 3) API token'ını (limitler, eklentiler, portal bilgileri dahil) tamamen sil
+            try:
+                await self.dbs["tracking"]["api_tokens"].delete_many(
+                    {"$or": [{"user_id": user_id}, {"user_id": str(user_id)}]}
+                )
+            except Exception as e:
+                print(f"manage_subscriber delete: token delete error: {e}")
+
+            # 4) Hatırlatmaları (tv/movie reminders) sil
+            try:
+                await self.delete_user_reminders(user_id)
+            except Exception as e:
+                print(f"manage_subscriber delete: reminders delete error: {e}")
+
+            # 5) İçerik isteklerini sil
             try:
                 await self.delete_user_content_requests(user_id)
             except Exception as e:
-                print(f"manage_subscriber delete: request count reset error: {e}")
-            if result.modified_count > 0:
-                try:
-                    await self.log_subscription_event(user_id, {"type": "admin_delete"})
-                except Exception:
-                    pass
-            return result.modified_count > 0
-            
+                print(f"manage_subscriber delete: content requests delete error: {e}")
+
+            # 6) Abonelik geçmişini (subscription_history) sil
+            try:
+                await self.dbs["tracking"]["subscription_history"].delete_many({"user_id": user_id})
+            except Exception as e:
+                print(f"manage_subscriber delete: subscription history delete error: {e}")
+
+            # 7) Web paneli (üye) oturumunu geçersiz kıl
+            try:
+                await self.invalidate_member_session(user_id)
+            except Exception as e:
+                print(f"manage_subscriber delete: member session invalidate error: {e}")
+
+            # 8) Kullanıcı kaydındaki tüm abonelik/eklenti/plan alanlarını temizle
+            try:
+                await self.dbs["tracking"]["users"].update_one(
+                    {"_id": user_id},
+                    {"$unset": {
+                        "subscription_expiry": "",
+                        "subscription_status": "",
+                        "plan_id": "",
+                        "pending_payment": "",
+                        "pending_addon": "",
+                        "addon_extra_daily_gb": "",
+                        "addon_extra_monthly_gb": "",
+                        "addon_extra_speed_mbps": "",
+                        "addon_extra_requests": "",
+                        "reminder_sent": "",
+                        "expiry_notified": "",
+                    }}
+                )
+            except Exception as e:
+                print(f"manage_subscriber delete: user fields unset error: {e}")
+
+            # Kullanıcı işlem başında bulunmuştu; tüm temizlik adımları denendi.
+            return True
+
         return False
 
     async def delete_user_reminders(self, user_id: int) -> dict:
@@ -1200,6 +1319,7 @@ class Database:
                 certification_tr=metadata_info.get('certification_tr'),
                 certification_de=metadata_info.get('certification_de'),
                 certification_us=metadata_info.get('certification_us'),
+                visibility=metadata_info.get('visibility'),
                 telegram=[QualityDetail(
                     quality=metadata_info['quality'],
                     id=metadata_info['encoded_string'],
@@ -1249,6 +1369,7 @@ class Database:
                 certification_tr=metadata_info.get('certification_tr'),
                 certification_de=metadata_info.get('certification_de'),
                 certification_us=metadata_info.get('certification_us'),
+                visibility=metadata_info.get('visibility'),
                 seasons=[Season(
                     season_number=metadata_info['season_number'],
                     episodes=[Episode(
@@ -2088,6 +2209,84 @@ class Database:
                     LOGGER.error(f"Error migrating document tmdb_id {tmdb_id} to {new_db_key}: {migrate_error}")
                     return False
             raise
+
+    async def get_media_visibility(self, media_type: str, tmdb_id: int, db_index: int) -> Dict[str, Any]:
+        """
+        İçeriğin görünürlük ayarını döner.
+        Dönen format: {"mode": "subscribers"|"selected", "member_ids": [int, ...]}
+          - "subscribers" (varsayılan): aktif aboneliği olan tüm üyeler görebilir/erişebilir.
+          - "selected": yalnızca member_ids içindeki üyeler görebilir/erişebilir.
+        """
+        doc = await self.get_document(media_type, tmdb_id, db_index)
+        vis = (doc or {}).get("visibility") or {}
+        mode = vis.get("mode") if vis.get("mode") in ("subscribers", "selected") else "subscribers"
+        try:
+            member_ids = sorted({int(m) for m in (vis.get("member_ids") or [])})
+        except (TypeError, ValueError):
+            member_ids = []
+        return {"mode": mode, "member_ids": member_ids}
+
+    async def save_media_visibility(
+        self, media_type: str, tmdb_id: int, db_index: int, mode: str, member_ids: List[Any]
+    ) -> bool:
+        """
+        İçeriğin görünürlük ayarını kaydeder.
+          mode="subscribers" → member_ids yok sayılır, boş liste olarak kaydedilir.
+          mode="selected"    → yalnızca member_ids'teki üyelere açık.
+        """
+        if mode not in ("subscribers", "selected"):
+            raise ValueError("Geçersiz görünürlük modu (mode 'subscribers' veya 'selected' olmalı)")
+
+        clean_ids: List[int] = []
+        if mode == "selected":
+            for m in (member_ids or []):
+                try:
+                    clean_ids.append(int(m))
+                except (TypeError, ValueError):
+                    continue
+            clean_ids = sorted(set(clean_ids))
+
+        return await self.update_document(media_type, tmdb_id, db_index, {
+            "visibility": {"mode": mode, "member_ids": clean_ids},
+        })
+
+    async def get_visibility_map(self, imdb_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+        """
+        Verilen imdb_id listesi için, tüm shard'lar (storage_1..N) ve her iki
+        koleksiyon (movie/tv) taranarak {imdb_id: {"mode":..., "member_ids":...}}
+        şeklinde bir görünürlük haritası döner.
+
+        Harici kaynaklardan (TMDB trendleri, platform koleksiyon önbelleği gibi)
+        gelen ve DB dokümanının 'visibility' alanını taşımayan katalog öğelerini
+        filtrelemeden önce zenginleştirmek için kullanılır.
+        Bulunamayan / visibility alanı olmayan imdb_id'ler haritada yer almaz —
+        bu durumda çağıran taraf içeriği herkese açık kabul etmelidir.
+        """
+        imdb_ids = [i for i in set(imdb_ids or []) if i]
+        if not imdb_ids:
+            return {}
+
+        result: Dict[str, Dict[str, Any]] = {}
+        for db_idx in range(self.current_db_index, 0, -1):
+            db_key = f"storage_{db_idx}"
+            for coll_name in ("movie", "tv"):
+                cursor = self.dbs[db_key][coll_name].find(
+                    {"imdb_id": {"$in": imdb_ids}},
+                    {"imdb_id": 1, "visibility": 1},
+                )
+                async for doc in cursor:
+                    imdb_id = doc.get("imdb_id")
+                    if not imdb_id or imdb_id in result:
+                        continue
+                    vis = doc.get("visibility") or {}
+                    mode = vis.get("mode") if vis.get("mode") in ("subscribers", "selected") else "subscribers"
+                    try:
+                        member_ids = sorted({int(m) for m in (vis.get("member_ids") or [])})
+                    except (TypeError, ValueError):
+                        member_ids = []
+                    result[imdb_id] = {"mode": mode, "member_ids": member_ids}
+
+        return result
 
     async def delete_document(self, media_type: str, tmdb_id: int, db_index: int) -> bool:
         db_key = f"storage_{db_index}"
@@ -3183,6 +3382,69 @@ class Database:
         result = await self.dbs["tracking"]["api_tokens"].update_one(
             {"token": token},
             {"$set": {"hidden_catalogs": hidden_catalogs, "catalog_order": catalog_order}}
+        )
+        return result.modified_count > 0
+
+    # ── Üye erişim kısıtlamaları (admin → uye_detay.html) ────────────────────
+    # Admin tarafından tek tek üyelere atanan: görebileceği kataloglar,
+    # en fazla görebileceği içerik yaş sınırı (sertifika) ve sertifika
+    # sınırından bağımsız her zaman erişebileceği video whitelist'i.
+    # api_tokens dokümanı üzerinde "access_restrictions" alanı altında saklanır.
+
+    async def get_member_access_restrictions(self, token: str) -> dict:
+        """Bir üyenin (token) admin tarafından tanımlanmış erişim kısıtlamalarını döner.
+        allowed_catalogs: None → kısıtlama yok (tüm kataloglar), list → sadece bu id'ler
+        certification_max_age: None → sınır yok, int → izin verilen en yüksek yaş sınırı
+        allowed_videos: [{"imdb_id","title","media_type"}] → sertifika sınırından muaf videolar
+        only_selected_videos: bool → True ise üye SADECE selected_videos listesindeki
+            içerikleri görebilir (katalog/sertifika kısıtlamalarının hepsinin önüne geçer)
+        selected_videos: [{"imdb_id","title","media_type"}] → only_selected_videos=True
+            iken üyenin görebileceği tek içerik kümesi
+        include_live_collection: bool → only_selected_videos=True iken, film/dizi
+            whitelist'ine ek olarak üyenin Canlı Yayın kataloğunu (tüm kanallar) da
+            görebilmesini sağlar.
+        """
+        if not token:
+            return {
+                "allowed_catalogs":        None,
+                "certification_max_age":   None,
+                "allowed_videos":          [],
+                "only_selected_videos":    False,
+                "selected_videos":         [],
+                "include_live_collection": False,
+            }
+        doc = await self.dbs["tracking"]["api_tokens"].find_one({"token": token})
+        restr = (doc or {}).get("access_restrictions") or {}
+        return {
+            "allowed_catalogs":        restr.get("allowed_catalogs"),
+            "certification_max_age":   restr.get("certification_max_age"),
+            "allowed_videos":          restr.get("allowed_videos", []),
+            "only_selected_videos":    bool(restr.get("only_selected_videos", False)),
+            "selected_videos":         restr.get("selected_videos", []),
+            "include_live_collection": bool(restr.get("include_live_collection", False)),
+        }
+
+    async def save_member_access_restrictions(
+        self,
+        token: str,
+        allowed_catalogs: Optional[list],
+        certification_max_age: Optional[int],
+        allowed_videos: list,
+        only_selected_videos: bool = False,
+        selected_videos: Optional[list] = None,
+        include_live_collection: bool = False,
+    ) -> bool:
+        """Bir üyenin erişim kısıtlamalarını kaydeder/günceller."""
+        result = await self.dbs["tracking"]["api_tokens"].update_one(
+            {"token": token},
+            {"$set": {"access_restrictions": {
+                "allowed_catalogs":        allowed_catalogs,
+                "certification_max_age":   certification_max_age,
+                "allowed_videos":          allowed_videos,
+                "only_selected_videos":    bool(only_selected_videos),
+                "selected_videos":         selected_videos or [],
+                "include_live_collection": bool(include_live_collection),
+            }}}
         )
         return result.modified_count > 0
 
@@ -4650,6 +4912,92 @@ class Database:
         """
         result = await self.dbs["tracking"]["content_requests"].delete_many({"user_id": user_id})
         return result.deleted_count
+
+    # ─────────────────────────────────────────────────────────────────────
+    # İstekler sayacı + Web Push (yönetici tarayıcı bildirimleri)
+    # ─────────────────────────────────────────────────────────────────────
+    # base.html'deki "İstekler" sidebar linkinin yanında gösterilen sayı
+    # (bekleyen içerik talebi + bekleyen abonelik talebi) ve yöneticinin
+    # tarayıcısına gönderilen Web Push bildirimleri için kullanılan yardımcılar.
+
+    async def get_istekler_pending_count(self) -> dict:
+        """
+        İstekler sidebar rozeti için bekleyen talep sayılarını döner.
+        content_pending      → bekleyen içerik (film/dizi) talebi sayısı
+        subscription_pending → bekleyen abonelik (ödeme) talebi sayısı
+        total                → ikisinin toplamı (rozette gösterilen sayı)
+        """
+        try:
+            content_pending = await self.dbs["tracking"]["content_requests"].count_documents(
+                {"status": "pending"}
+            )
+        except Exception:
+            content_pending = 0
+        try:
+            subscription_pending = await self.dbs["tracking"]["users"].count_documents(
+                {"pending_payment": {"$exists": True, "$ne": None}}
+            )
+        except Exception:
+            subscription_pending = 0
+        return {
+            "content_pending": content_pending,
+            "subscription_pending": subscription_pending,
+            "total": content_pending + subscription_pending,
+        }
+
+    async def get_or_create_vapid_keys(self) -> dict:
+        """
+        Web Push bildirimleri için VAPID anahtar çiftini döner. İlk çağrıda
+        henüz anahtar yoksa üretir ve tracking.settings koleksiyonuna kaydeder
+        (sunucu her yeniden başladığında aynı anahtarlar kullanılır, aksi
+        halde tarayıcıdaki eski abonelikler geçersiz kalırdı).
+        """
+        col = self.dbs["tracking"]["settings"]
+        doc = await col.find_one({"_id": "vapid_keys"})
+        if doc and doc.get("public_key") and doc.get("private_key"):
+            return {"public_key": doc["public_key"], "private_key": doc["private_key"]}
+
+        from cryptography.hazmat.primitives.asymmetric import ec
+        from cryptography.hazmat.primitives import serialization
+        import base64
+
+        priv = ec.generate_private_key(ec.SECP256R1())
+        pub_bytes = priv.public_key().public_bytes(
+            serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint
+        )
+        priv_bytes = priv.private_numbers().private_value.to_bytes(32, "big")
+
+        def _b64u(b: bytes) -> str:
+            return base64.urlsafe_b64encode(b).rstrip(b"=").decode()
+
+        keys = {"public_key": _b64u(pub_bytes), "private_key": _b64u(priv_bytes)}
+        await col.update_one({"_id": "vapid_keys"}, {"$set": keys}, upsert=True)
+        return keys
+
+    async def add_push_subscription(self, subscription: dict, user_agent: str = "") -> None:
+        """Yöneticinin tarayıcısından gelen Push aboneliğini kaydeder/günceller."""
+        endpoint = (subscription or {}).get("endpoint")
+        if not endpoint:
+            return
+        await self.dbs["tracking"]["push_subscriptions"].update_one(
+            {"_id": endpoint},
+            {"$set": {
+                "endpoint":    endpoint,
+                "subscription": subscription,
+                "user_agent":  (user_agent or "")[:300],
+                "updated_at":  datetime.utcnow(),
+            }},
+            upsert=True,
+        )
+
+    async def remove_push_subscription(self, endpoint: str) -> None:
+        if not endpoint:
+            return
+        await self.dbs["tracking"]["push_subscriptions"].delete_one({"_id": endpoint})
+
+    async def list_push_subscriptions(self) -> list:
+        cursor = self.dbs["tracking"]["push_subscriptions"].find({})
+        return await cursor.to_list(length=1000)
 
     async def cleanup_expired_ip_bans(self) -> int:
         """

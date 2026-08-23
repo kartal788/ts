@@ -56,7 +56,9 @@ from fastapi import Request, Query, HTTPException
 from fastapi.responses import JSONResponse
 
 from Backend import db
+from Backend.helper.database import is_media_visible_to_member
 from Backend.config import Telegram
+from Backend.helper.webpush import notify_admins as _notify_admins_push
 
 _logger = logging.getLogger(__name__)
 
@@ -167,6 +169,15 @@ async def _dispatch_tv(tmdb_id: int):
         _logger.info("TV hatırlatma: tmdb_id=%s kaydı var ama user_ids boş.", tmdb_id)
         return
 
+    # İçerik seviyesinde görünürlük (media_edit.html → "Sadece seçtiğim üye(ler)") —
+    # hatırlatma kaydedildikten sonra içerik kısıtlanmış olabilir; bildirim
+    # sadece görme/erişim izni olan üyelere gönderilir.
+    media_doc = await db.get_document("tv", tmdb_id, db_index)
+    user_ids = [uid for uid in user_ids if is_media_visible_to_member(media_doc, uid)]
+    if not user_ids:
+        _logger.info("TV hatırlatma: tmdb_id=%s görünürlük kısıtlaması nedeniyle hiçbir üyeye gönderilmiyor.", tmdb_id)
+        return
+
     _logger.info(
         "TV hatırlatma gönderiliyor: tmdb_id=%s '%s' — %d bölüm, %d abone",
         tmdb_id, title, len(episodes), len(user_ids),
@@ -265,6 +276,15 @@ async def _dispatch_movie(tmdb_id: int):
     user_ids: list[int] = doc.get("user_ids") or []
     if not user_ids:
         _logger.info("Film hatırlatma: tmdb_id=%s kaydı var ama user_ids boş.", tmdb_id)
+        return
+
+    # İçerik seviyesinde görünürlük (media_edit.html → "Sadece seçtiğim üye(ler)") —
+    # hatırlatma kaydedildikten sonra içerik kısıtlanmış olabilir; bildirim
+    # sadece görme/erişim izni olan üyelere gönderilir.
+    media_doc = await db.get_document("movie", tmdb_id, db_index)
+    user_ids = [uid for uid in user_ids if is_media_visible_to_member(media_doc, uid)]
+    if not user_ids:
+        _logger.info("Film hatırlatma: tmdb_id=%s görünürlük kısıtlaması nedeniyle hiçbir üyeye gönderilmiyor.", tmdb_id)
         return
 
     _logger.info(
@@ -943,6 +963,15 @@ async def submit_content_request(request: Request):
     result = await _content_requests_col().insert_one(doc)
     request_id = str(result.inserted_id)
 
+    # Yöneticinin tarayıcısına Web Push bildirimi gönder (Telegram'dan bağımsız)
+    _push_type_label = {"movie": "🎬 Film", "tv": "📺 Dizi", "unknown": "🎥 İçerik"}.get(media_type, "🎥 İçerik")
+    asyncio.create_task(_notify_admins_push(
+        title="Yeni İçerik Talebi",
+        body=f"{_push_type_label} talebi: {title or raw_link}",
+        url="/istekler",
+        tag="istek-icerik",
+    ))
+
     # Aynı zamanda hatırlatma da kur (TMDB link ise)
     reminder_set = False
     if media_type in ("tv", "movie") and tmdb_id:
@@ -1280,12 +1309,64 @@ async def _notify_requester(user_id: int, doc: dict, new_status: str) -> None:
         _logger.warning("Kullanıcıya bildirim gönderilemedi (%s): %s", user_id, e)
 
 
+async def _notify_admins_web_action(
+    admin_name: str,
+    requester_names: list,
+    title: str,
+    media_type: str,
+    link: str,
+    new_status: str,
+) -> None:
+    """
+    Panelden (istekler.html) onay/red işlemi yapıldığında yöneticinin botuna
+    (APPROVER_IDS / OWNER_ID) yeni bir bilgilendirme mesajı gönderir.
+    Örn: "Ahmet'in Inception talebi web üzerinden onaylandı."
+    """
+    try:
+        from Backend.pyrofork.bot import StreamBot as _StreamBot
+    except Exception:
+        _StreamBot = None
+        _logger.warning("StreamBot import edilemedi, panel-aksiyon admin bildirimi gönderilemedi.")
+        return
+    if not _StreamBot:
+        return
+
+    label = "✅ Onaylandı" if new_status == "approved" else "❌ Reddedildi"
+    type_label = {"movie": "🎬 Film", "tv": "📺 Dizi", "unknown": "🎥 Bilinmiyor"}.get(
+        media_type, "?"
+    )
+    names_str = ", ".join(_html.escape(str(n)) for n in requester_names) if requester_names else "Bilinmeyen"
+    title_str = f"\n<b>📌 Başlık:</b> {_html.escape(title)}" if title else ""
+    link_str = f"\n<b>🔗 Link:</b> {link}" if link else ""
+    admin_str = f"\n<b>👮 İşlemi Yapan:</b> {_html.escape(admin_name)}" if admin_name else ""
+
+    text = (
+        f"<b>🌐 Web Panelinden İşlem — {label}</b>\n\n"
+        f"<b>👤 Talep Eden:</b> {names_str}\n"
+        f"<b>📂 Tür:</b> {type_label}{title_str}{link_str}{admin_str}"
+    )
+
+    approver_ids = Telegram.APPROVER_IDS if Telegram.APPROVER_IDS else [Telegram.OWNER_ID]
+    for approver_id in approver_ids:
+        try:
+            await _StreamBot.send_message(
+                approver_id,
+                text,
+                parse_mode=enums.ParseMode.HTML,
+                disable_web_page_preview=True,
+            )
+        except Exception as e:
+            _logger.warning("Panel aksiyonu admin bildirimi gönderilemedi (%s): %s", approver_id, e)
+
+
 async def admin_review_content_requests(request: Request) -> dict:
     """
     Yönetici panelinden toplu onay/red işlemi.
     Body: { "request_ids": ["<id>", ...], "action": "approve" | "reject" }
     Bir gruptaki tüm talepler (aynı içeriği isteyen tüm üyeler) tek seferde
     onaylanır/reddedilir ve her üyeye Telegram bildirimi gönderilir.
+    Ayrıca yöneticinin botuna da (APPROVER_IDS / OWNER_ID) işlemi özetleyen
+    yeni bir mesaj gönderilir.
     """
     try:
         body = await request.json()
@@ -1303,6 +1384,24 @@ async def admin_review_content_requests(request: Request) -> dict:
     label = "✅ Onaylandı" if new_status == "approved" else "❌ Reddedildi"
     updated = 0
     notified_users: set = set()
+
+    # İşlemi yapan yöneticinin adı (panel oturumundan).
+    # NOT: get_current_user()'ın döndürdüğü "name", session["username"]
+    # yani rastgele üretilmiş OTP giriş kullanıcı adıdır (ör. "kızılaslan7430"),
+    # Telegram adı DEĞİLDİR. Gerçek Telegram görünen adı login sırasında
+    # session["member"]["name"] içine admin_doc["display_name"] olarak
+    # yazılır (bkz. template_routes.py login endpoint) — o yüzden burada
+    # onu kullanıyoruz.
+    try:
+        admin_name = (request.session.get("member") or {}).get("name") or "Yönetici"
+    except Exception:
+        admin_name = "Yönetici"
+
+    # Panel botuna gönderilecek özet mesaj için toplanan bilgiler
+    action_requester_names: list = []
+    action_title = ""
+    action_media_type = ""
+    action_link = ""
 
     try:
         from Backend.pyrofork.bot import StreamBot as _StreamBot
@@ -1326,10 +1425,25 @@ async def admin_review_content_requests(request: Request) -> dict:
         )
         updated += 1
 
+        if not action_title and doc.get("title"):
+            action_title = doc["title"]
+        if not action_media_type:
+            action_media_type = doc.get("media_type", "unknown")
+        if not action_link and doc.get("link"):
+            action_link = doc["link"]
+
         user_id = doc.get("user_id")
         if user_id and user_id not in notified_users:
             notified_users.add(user_id)
             await _notify_requester(user_id, doc, new_status)
+
+            # Talep sahibinin görünen adını yakala (panel botu mesajı için)
+            try:
+                _u_doc = await db.get_user(user_id)
+                _r_name = (_u_doc or {}).get("first_name") or (_u_doc or {}).get("username") or str(user_id)
+            except Exception:
+                _r_name = str(user_id)
+            action_requester_names.append(_r_name)
 
         # Bu talep için yöneticilere gönderilmiş bot mesajlarını güncelle:
         # onayla/reddet butonlarını kaldır ve panelden alınan kararı göster.
@@ -1368,4 +1482,72 @@ async def admin_review_content_requests(request: Request) -> dict:
                         am.get("chat_id"), am.get("message_id"), e
                     )
 
+    # Yöneticinin botuna işlemi özetleyen yeni bir mesaj gönder
+    # (örn. "Ahmet'in Inception talebi web üzerinden onaylandı.")
+    if updated > 0:
+        await _notify_admins_web_action(
+            admin_name=admin_name,
+            requester_names=action_requester_names,
+            title=action_title,
+            media_type=action_media_type,
+            link=action_link,
+            new_status=new_status,
+        )
+
     return {"ok": True, "updated": updated, "status": new_status}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# İstekler sayacı (base.html sidebar rozeti) + Web Push (yönetici bildirimleri)
+# ─────────────────────────────────────────────────────────────────────────────
+# GET  /api/admin/istekler/sayac        → bekleyen içerik + abonelik talebi sayısı
+# GET  /api/admin/push/public-key       → tarayıcının abone olması için VAPID public key
+# POST /api/admin/push/abone-ol         → tarayıcının Push aboneliğini kaydeder
+# POST /api/admin/push/abonelik-iptal   → tarayıcının Push aboneliğini siler
+
+async def admin_istekler_counter() -> dict:
+    """
+    base.html'deki 'İstekler' sidebar linkinin yanındaki rozet için bekleyen
+    talep sayısını döner. Örn: 2 bekleyen film/dizi talebi + 5 bekleyen
+    abonelik talebi varsa total=7 döner ve arayüzde '7' olarak gösterilir.
+    """
+    return await db.get_istekler_pending_count()
+
+
+async def admin_push_public_key() -> dict:
+    """Tarayıcının PushManager.subscribe() çağrısında kullanacağı VAPID public key."""
+    vapid = await db.get_or_create_vapid_keys()
+    return {"public_key": vapid["public_key"]}
+
+
+async def admin_push_subscribe(request: Request) -> dict:
+    """
+    Yönetici tarayıcısı bildirim iznini verdikten sonra tarayıcının ürettiği
+    PushSubscription nesnesini kaydeder.
+    Body: { "subscription": { "endpoint": str, "keys": {"p256dh": str, "auth": str} } }
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Geçersiz JSON")
+
+    subscription = body.get("subscription")
+    if not subscription or not subscription.get("endpoint"):
+        raise HTTPException(status_code=400, detail="Geçersiz abonelik verisi")
+
+    user_agent = request.headers.get("user-agent", "")
+    await db.add_push_subscription(subscription, user_agent=user_agent)
+    return {"ok": True}
+
+
+async def admin_push_unsubscribe(request: Request) -> dict:
+    """Yönetici bildirimleri kapattığında ilgili aboneliği DB'den siler."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    endpoint = (body or {}).get("endpoint", "")
+    if endpoint:
+        await db.remove_push_subscription(endpoint)
+    return {"ok": True}

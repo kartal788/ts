@@ -121,6 +121,15 @@ CSRF_PROTECTED_PREFIXES = (
     "/api/uye/hatirla",       # /api/uye/hatirla ve /api/uye/hatirla/...
     "/api/uye/film-hatirla",  # /api/uye/film-hatirla ve /api/uye/film-hatirla/...
     "/set-theme",
+    # DÜZELTME: yayin_routes.py'deki /api/yayin (POST), /api/yayin/{id}
+    # (PUT/DELETE), /api/yayin/{id}/start ve /api/yayin/{id}/stop
+    # session-cookie tabanlı require_auth ile korunuyordu ama bu prefix
+    # listesinde YOKTU — yani CSRF middleware'i bu path'leri "korunmuyor"
+    # sayıp doğrudan geçiriyordu. start/stop endpoint'leri body gerektirmediği
+    # için basit bir <form method="POST"> ile CORS preflight'a takılmadan
+    # tetiklenebiliyordu (test ile doğrulandı). "/api/yayin" hem tam eşleşen
+    # hem "/api/yayin/..." alt path'lerini de startswith ile kapsar.
+    "/api/yayin",
 )
 
 # Tamamen muaf tutulan path'ler (CSRF token henüz mevcut değil veya public)

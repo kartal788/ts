@@ -35,6 +35,8 @@ def _serialize_mode(mode: dict | None) -> dict:
         "genres": mode.get("genres"),
         "season": mode.get("season"),
         "next_episode": mode.get("next_episode"),
+        "visibility_mode": mode.get("visibility_mode", "subscribers"),
+        "visibility_member_ids": mode.get("visibility_member_ids", []),
     }
 
 
@@ -91,6 +93,33 @@ async def manual_add_start_api(payload: dict) -> dict:
         "media_type": media_type, "year": year,
         "rating": rating, "genres": genres,
     }
+
+    # Görünürlük: "Aktif aboneliği olan tüm üyeler" (varsayılan) veya
+    # "Sadece seçtiğim üye(ler)". media_edit.html'deki aynı mekanizmayla
+    # tutarlı — bkz. Backend/helper/database.py -> is_media_visible_to_member.
+    visibility_mode = (payload.get("visibility_mode") or "subscribers").strip()
+    if visibility_mode not in ("subscribers", "selected"):
+        raise HTTPException(status_code=400, detail="Geçersiz görünürlük modu.")
+
+    visibility_member_ids: list[int] = []
+    if visibility_mode == "selected":
+        raw_ids = payload.get("visibility_member_ids") or []
+        if not isinstance(raw_ids, list):
+            raise HTTPException(status_code=400, detail="visibility_member_ids bir liste olmalı.")
+        for m in raw_ids:
+            try:
+                visibility_member_ids.append(int(m))
+            except (TypeError, ValueError):
+                continue
+        visibility_member_ids = sorted(set(visibility_member_ids))
+        if not visibility_member_ids:
+            raise HTTPException(
+                status_code=400,
+                detail="'Sadece seçtiğim üye(ler)' seçildiğinde en az bir üye seçilmelidir.",
+            )
+
+    new_mode["visibility_mode"] = visibility_mode
+    new_mode["visibility_member_ids"] = visibility_member_ids
 
     if media_type == "tv":
         try:

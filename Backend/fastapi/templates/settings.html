@@ -340,6 +340,53 @@
                     </select>
                 </div>
             </div>
+
+            <!-- Proxy kapsamı: kimlere uygulansın -->
+            <div class="mt-5 pt-5 border-t border-white/5">
+                <label class="s-label mb-2 block">👁️ Proxy Kimlere Uygulansın?</label>
+                <div class="space-y-2">
+                    <label class="flex items-start gap-3 p-3 border rounded-md cursor-pointer hover:bg-white/5">
+                        <input type="radio" name="s-proxy_scope_mode" value="subscribers"
+                            id="s-proxy_scope_subscribers" class="mt-1" checked>
+                        <div>
+                            <div class="font-medium text-sm">Aktif aboneliği olan tüm üyeler</div>
+                            <div class="text-xs text-text-secondary">
+                                Varsayılan — yukarıdaki Proxy Modu ayarı tüm aktif abonelere uygulanır.
+                            </div>
+                        </div>
+                    </label>
+                    <label class="flex items-start gap-3 p-3 border rounded-md cursor-pointer hover:bg-white/5">
+                        <input type="radio" name="s-proxy_scope_mode" value="selected"
+                            id="s-proxy_scope_mode_selected" class="mt-1">
+                        <div>
+                            <div class="font-medium text-sm">Sadece seçtiğim üye(ler)</div>
+                            <div class="text-xs text-text-secondary">
+                                Proxy Modu yalnızca aşağıda seçtiğin üyelere uygulanır; kapsam dışındaki
+                                üyeler Proxy Modu ne olursa olsun her zaman doğrudan (proxy'siz) link alır.
+                            </div>
+                        </div>
+                    </label>
+                </div>
+
+                <div id="s-proxy_scope_picker" class="mt-3 hidden">
+                    <label class="s-label">Üye Ara ve Seç</label>
+                    <div class="relative">
+                        <input type="text" id="s-proxy_scope_search" autocomplete="off"
+                            placeholder="İsim veya kullanıcı ID ile ara…" class="s-input">
+                        <div id="s-proxy_scope_results"
+                            class="hidden absolute z-10 mt-1 w-full theme-card border rounded-md max-h-56 overflow-y-auto divide-y shadow-lg"></div>
+                    </div>
+                    <div class="mt-3">
+                        <label class="s-label">Seçili Üyeler</label>
+                        <div id="s-proxy_scope_selected"
+                            class="flex flex-wrap gap-2 min-h-[2.5rem] p-2 border border-dashed rounded-md">
+                            <span class="text-text-secondary text-xs" id="s-proxy_scope_selected-empty">
+                                Henüz üye seçilmedi.
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- Brute-force Koruması -->
@@ -598,6 +645,116 @@ textarea.s-input { font-family: inherit; resize: vertical; line-height: 1.5; }
 const LIST_KEYS = ['auth_channels', 'approver_ids', 'extra_databases', 'multi_tokens'];
 let currentSettings = {{ settings | tojson }};
 
+// ---------- Proxy kapsamı: kimler görebilir/erişebilir ----------
+let proxyScopeAllMembers = [];
+let proxyScopeSelectedIds = new Set();
+let proxyScopeMembersLoaded = false;
+
+function escapeHtmlProxyScope(s) {
+    const d = document.createElement('div');
+    d.textContent = s == null ? '' : String(s);
+    return d.innerHTML;
+}
+
+async function loadProxyScopeMembers() {
+    if (proxyScopeMembersLoaded) return;
+    try {
+        const res = await fetch('/api/admin/uyeler', { credentials: 'same-origin' });
+        if (!res.ok) throw new Error('load failed');
+        const data = await res.json();
+        proxyScopeAllMembers = data.members || [];
+        proxyScopeMembersLoaded = true;
+        renderProxyScopeSelected();
+    } catch (e) {
+        console.error('Üye listesi alınamadı:', e);
+    }
+}
+
+function toggleProxyScopePicker() {
+    const mode = document.querySelector('input[name="s-proxy_scope_mode"]:checked')?.value || 'subscribers';
+    document.getElementById('s-proxy_scope_picker').classList.toggle('hidden', mode !== 'selected');
+    if (mode === 'selected') loadProxyScopeMembers();
+}
+
+function renderProxyScopeSelected() {
+    const wrap = document.getElementById('s-proxy_scope_selected');
+    const emptyHint = document.getElementById('s-proxy_scope_selected-empty');
+    wrap.querySelectorAll('.proxy-scope-chip').forEach(el => el.remove());
+
+    if (proxyScopeSelectedIds.size === 0) {
+        emptyHint.classList.remove('hidden');
+        return;
+    }
+    emptyHint.classList.add('hidden');
+
+    proxyScopeSelectedIds.forEach(uid => {
+        const m = proxyScopeAllMembers.find(x => String(x.user_id) === String(uid));
+        const label = m ? (m.user_name || `Kullanıcı ${uid}`) : `Kullanıcı ${uid}`;
+        const chip = document.createElement('span');
+        chip.className = 'proxy-scope-chip inline-flex items-center gap-1 bg-blue-100 text-blue-800 text-xs font-medium px-2 py-1 rounded-full';
+        chip.innerHTML = `${escapeHtmlProxyScope(label)} <button type="button" class="ml-1 text-blue-800 hover:text-blue-950" aria-label="Kaldır">×</button>`;
+        chip.querySelector('button').addEventListener('click', () => {
+            proxyScopeSelectedIds.delete(uid);
+            renderProxyScopeSelected();
+        });
+        wrap.appendChild(chip);
+    });
+}
+
+function renderProxyScopeResults(query) {
+    const box = document.getElementById('s-proxy_scope_results');
+    const q = (query || '').trim().toLowerCase();
+    if (!q) {
+        box.classList.add('hidden');
+        box.innerHTML = '';
+        return;
+    }
+    const matches = proxyScopeAllMembers.filter(m => {
+        const name = (m.user_name || '').toLowerCase();
+        const uid = String(m.user_id || '');
+        return name.includes(q) || uid.includes(q);
+    }).slice(0, 20);
+
+    box.innerHTML = '';
+    if (matches.length === 0) {
+        box.classList.remove('hidden');
+        box.innerHTML = '<div class="p-3 text-sm text-text-secondary">Sonuç bulunamadı</div>';
+        return;
+    }
+    box.classList.remove('hidden');
+    matches.forEach(m => {
+        const row = document.createElement('div');
+        row.className = 'flex items-center justify-between p-2 hover:bg-white/5 cursor-pointer text-sm';
+        const statusLabel = m.subscription_status === 'active' ? 'Aktif' : (m.subscription_status || '-');
+        row.innerHTML = `<span>${escapeHtmlProxyScope(m.user_name || ('Kullanıcı ' + m.user_id))} <span class="text-text-secondary text-xs">(${escapeHtmlProxyScope(String(m.user_id))} · ${escapeHtmlProxyScope(statusLabel)})</span></span>`;
+        row.addEventListener('click', () => {
+            proxyScopeSelectedIds.add(String(m.user_id));
+            renderProxyScopeSelected();
+            document.getElementById('s-proxy_scope_search').value = '';
+            box.classList.add('hidden');
+        });
+        box.appendChild(row);
+    });
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('input[name="s-proxy_scope_mode"]').forEach(r => {
+        r.addEventListener('change', toggleProxyScopePicker);
+    });
+    const proxyScopeSearchInput = document.getElementById('s-proxy_scope_search');
+    if (proxyScopeSearchInput) {
+        proxyScopeSearchInput.addEventListener('input', (e) => renderProxyScopeResults(e.target.value));
+        proxyScopeSearchInput.addEventListener('focus', (e) => {
+            if (e.target.value.trim()) renderProxyScopeResults(e.target.value);
+        });
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('#s-proxy_scope_picker')) {
+                document.getElementById('s-proxy_scope_results').classList.add('hidden');
+            }
+        });
+    }
+});
+
 function escapeHtmlAttr(str) {
     return String(str ?? '').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 }
@@ -808,6 +965,14 @@ function renderSettings(s) {
     document.getElementById('s-http_proxy_url').value = s.http_proxy_url || '';
     document.getElementById('s-proxy_mode').value = String(s.proxy_mode ?? 1);
 
+    const proxyScopeMode = s.proxy_scope_mode === 'selected' ? 'selected' : 'subscribers';
+    document.getElementById(
+        proxyScopeMode === 'selected' ? 's-proxy_scope_mode_selected' : 's-proxy_scope_subscribers'
+    ).checked = true;
+    proxyScopeSelectedIds = new Set((s.proxy_scope_member_ids || []).map(String));
+    renderProxyScopeSelected();
+    toggleProxyScopePicker();
+
     document.getElementById('s-brute_window').value = s.brute_window ?? '';
     document.getElementById('s-brute_max').value = s.brute_max ?? '';
     document.getElementById('s-brute_ban').value = s.brute_ban ?? '';
@@ -874,6 +1039,8 @@ function buildPayload() {
         proxy_type: document.getElementById('s-proxy_type').value,
         http_proxy_url: document.getElementById('s-http_proxy_url').value.trim(),
         proxy_mode: toInt('s-proxy_mode', 1),
+        proxy_scope_mode: document.querySelector('input[name="s-proxy_scope_mode"]:checked')?.value || 'subscribers',
+        proxy_scope_member_ids: Array.from(proxyScopeSelectedIds).map(x => parseInt(x, 10)).filter(Number.isFinite),
 
         brute_window: toInt('s-brute_window', 60),
         brute_max: toInt('s-brute_max', 5),
@@ -886,6 +1053,12 @@ function buildPayload() {
 }
 
 async function saveSettings() {
+    const scopeMode = document.querySelector('input[name="s-proxy_scope_mode"]:checked')?.value || 'subscribers';
+    if (scopeMode === 'selected' && proxyScopeSelectedIds.size === 0) {
+        showStatus("❌ Proxy kapsamı için 'Sadece seçtiğim üye(ler)' seçildiyse en az bir üye seçmelisin.", false);
+        return;
+    }
+
     const fab = document.getElementById('save-btn-fab');
     const originalFab = fab.innerHTML;
     fab.disabled = true;

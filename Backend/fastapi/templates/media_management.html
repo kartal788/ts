@@ -4,28 +4,46 @@
 
 {% block content %}
 <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-    <!-- Header -->
-    <div class="mb-8 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div>
-            <h1 class="text-3xl font-bold">Medya Yönetimi</h1>
-            <p class="theme-text-secondary mt-2">Film ve dizi koleksiyonlarınızı yönetin</p>
-        </div>
+    <!-- Unified toolbar -->
+    <section class="glass-panel rounded-3xl p-4 sm:p-5 mb-6 sm:mb-8">
+        <div class="flex flex-col xl:flex-row xl:items-center gap-4">
+            <h1 class="text-xl sm:text-2xl font-extrabold tracking-tight text-text shrink-0">
+                <i class="fa-solid fa-clapperboard text-primary mr-2"></i>Medya Kütüphanesi
+            </h1>
 
-        <div class="flex space-x-2">
-            <a href="/media/manage?media_type=movie"
-                class="px-4 py-2 rounded-md transition-colors text-sm font-medium {% if media_type == 'movie' %}bg-blue-600 text-white{% else %}theme-card border hover:bg-gray-50{% endif %}">
-                Movies
-            </a>
-            <a href="/media/manage?media_type=tv"
-                class="px-4 py-2 rounded-md transition-colors text-sm font-medium {% if media_type == 'tv' %}bg-blue-600 text-white{% else %}theme-card border hover:bg-gray-50{% endif %}">
-                TV Shows
-            </a>
-            <button type="button" id="manual-add-toggle-btn" onclick="toggleManualAddPanel()"
-                class="px-4 py-2 rounded-md transition-colors text-sm font-medium theme-card border hover:bg-gray-50">
-                📎 İçerik Ekle
-            </button>
+            <div class="relative flex-1 min-w-0">
+                <i class="fa-solid fa-magnifying-glass absolute left-4 top-1/2 -translate-y-1/2 text-text-secondary text-sm"></i>
+                <input type="text" id="search-input"
+                       placeholder="{{ media_type|title }} başlığına göre ara..."
+                       class="w-full pl-11 pr-24 py-3 rounded-2xl bg-background text-text placeholder:text-text-secondary border border-border focus:outline-none focus:ring-2 focus:ring-primary/60 focus:border-primary transition">
+                <div class="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                    <button onclick="clearSearch()" title="Temizle"
+                            class="w-9 h-9 inline-flex items-center justify-center rounded-xl text-text-secondary hover:bg-surface-2 transition">
+                        <i class="fa-solid fa-rotate-left"></i>
+                    </button>
+                    <button onclick="searchMedia()" title="Ara"
+                            class="w-9 h-9 inline-flex items-center justify-center rounded-xl bg-primary text-white shadow-lg shadow-primary/20">
+                        <i class="fa-solid fa-magnifying-glass"></i>
+                    </button>
+                </div>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2">
+                <a href="/media/manage?media_type=movie"
+                   class="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-full text-sm font-bold transition border {% if media_type == 'movie' %}bg-primary text-white border-primary shadow-lg shadow-primary/20{% else %}glass-panel text-text hover:bg-surface-2 border-hairline{% endif %}">
+                    <i class="fa-solid fa-film"></i> Filmler
+                </a>
+                <a href="/media/manage?media_type=tv"
+                   class="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-full text-sm font-bold transition border {% if media_type == 'tv' %}bg-primary text-white border-primary shadow-lg shadow-primary/20{% else %}glass-panel text-text hover:bg-surface-2 border-hairline{% endif %}">
+                    <i class="fa-solid fa-tv"></i> Diziler
+                </a>
+                <button type="button" id="manual-add-toggle-btn" onclick="toggleManualAddPanel()"
+                   class="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-full text-sm font-bold transition border glass-panel text-text hover:bg-surface-2 border-hairline">
+                    <i class="fa-solid fa-paperclip"></i> İçerik Ekle
+                </button>
+            </div>
         </div>
-    </div>
+    </section>
 
     <!-- İçerik Ekle -->
     <div class="theme-card p-6 rounded-lg shadow mb-8 hidden" id="manual-add-panel">
@@ -106,6 +124,54 @@
                     otomatik sayaç yerine o kullanılır.
                 </p>
             </div>
+
+            <!-- Görünürlük -->
+            <div class="md:col-span-4 border-t pt-4 mt-1">
+                <label class="block text-sm font-medium mb-2">👁️ Görünürlük</label>
+                <div class="space-y-2">
+                    <label class="flex items-start gap-3 p-3 border rounded-md cursor-pointer hover:bg-gray-50">
+                        <input type="radio" name="manual-add-visibility-mode" value="subscribers"
+                            id="manual-add-visibility-subscribers" class="mt-1" checked>
+                        <div>
+                            <div class="font-medium text-sm">Aktif aboneliği olan tüm üyeler</div>
+                            <div class="theme-text-secondary text-xs">
+                                Varsayılan — eklenecek içerik, aktif aboneliği olan tüm üyelere açık olur.
+                            </div>
+                        </div>
+                    </label>
+                    <label class="flex items-start gap-3 p-3 border rounded-md cursor-pointer hover:bg-gray-50">
+                        <input type="radio" name="manual-add-visibility-mode" value="selected"
+                            id="manual-add-visibility-mode-selected" class="mt-1">
+                        <div>
+                            <div class="font-medium text-sm">Sadece seçtiğim üye(ler)</div>
+                            <div class="theme-text-secondary text-xs">
+                                Eklenecek içerik yalnızca aşağıda seçtiğin üyelere görünür ve erişilebilir olur.
+                            </div>
+                        </div>
+                    </label>
+                </div>
+
+                <div id="manual-add-visibility-picker" class="mt-3 hidden">
+                    <label class="block text-sm font-medium mb-1">Üye Ara ve Seç</label>
+                    <div class="relative">
+                        <input type="text" id="manual-add-visibility-search" autocomplete="off"
+                            placeholder="İsim veya kullanıcı ID ile ara…"
+                            class="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent text-sm">
+                        <div id="manual-add-visibility-results"
+                            class="hidden absolute z-10 mt-1 w-full theme-card border rounded-md max-h-56 overflow-y-auto divide-y shadow-lg"></div>
+                    </div>
+                    <div class="mt-3">
+                        <label class="block text-sm font-medium mb-1">Seçili Üyeler</label>
+                        <div id="manual-add-visibility-selected"
+                            class="flex flex-wrap gap-2 min-h-[2.5rem] p-2 border border-dashed rounded-md">
+                            <span class="theme-text-secondary text-xs" id="manual-add-visibility-selected-empty">
+                                Henüz üye seçilmedi.
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <div class="md:col-span-4">
                 <button onclick="startManualAdd()"
                     class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-md transition-colors text-sm font-medium shadow-sm">
@@ -155,92 +221,78 @@
         </div>
     </div>
 
-    <!-- Search and Filters -->
-    <div class="theme-card p-6 rounded-lg shadow mb-8">
-        <div class="flex flex-col md:flex-row gap-4">
-            <div class="flex-1">
-                <input type="text" id="search-input" placeholder="{{ media_type|title }} ara..."
-                    class="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent text-sm">
-            </div>
-            <div class="flex gap-2">
-                <button onclick="searchMedia()"
-                    class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-md transition-colors text-sm font-medium shadow-sm">
-                    Search
-                </button>
-                <button onclick="clearSearch()"
-                    class="border border-gray-300 px-6 py-2 rounded-md hover:bg-gray-50 transition-colors text-sm font-medium">
-                    Clear
-                </button>
-            </div>
-        </div>
-    </div>
-
     <!-- Loading Indicator -->
-    <div id="loading" class="text-center py-12 hidden">
-        <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary mb-4"></div>
-        <p class="theme-text-secondary">{{ media_type|title }} yükleniyor...</p>
+    <div id="loading" class="hidden text-center py-16">
+        <div class="inline-flex items-center justify-center w-14 h-14 rounded-full border border-hairline glass-panel mb-4">
+            <div class="animate-spin rounded-full h-7 w-7 border-b-2 border-primary"></div>
+        </div>
+        <p class="text-text-secondary">{{ media_type|title }} yükleniyor...</p>
     </div>
 
     <!-- Error Display -->
-    <div id="error-display" class="hidden mb-8">
-        <div class="theme-card p-6 rounded-lg shadow border-l-4 border-red-500">
-            <div class="flex items-center mb-4">
-                <svg class="h-6 w-6 text-red-500 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                        d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.996-.833-2.764 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
-                </svg>
-                <h3 class="text-lg font-semibold text-red-700">Medya Yüklenirken Hata</h3>
+    <div id="error-display" class="hidden mb-6 sm:mb-8">
+        <div class="glass-panel rounded-3xl p-5 sm:p-6 border border-red-500/30">
+            <div class="flex items-start gap-3">
+                <div class="w-11 h-11 rounded-2xl bg-red-500/15 flex items-center justify-center shrink-0">
+                    <i class="fa-solid fa-triangle-exclamation text-red-400"></i>
+                </div>
+                <div class="flex-1">
+                    <h3 class="text-lg font-bold text-red-300">Medya Yüklenirken Hata</h3>
+                    <p id="error-message" class="mt-2 text-sm text-red-200/90"></p>
+                    <button onclick="retryLoad()"
+                            class="mt-4 inline-flex items-center gap-2 bg-primary hover:bg-primary/90 text-white px-4 py-2.5 rounded-2xl transition font-bold shadow-lg shadow-primary/20">
+                        <i class="fa-solid fa-rotate-right"></i>
+                        Tekrar Dene
+                    </button>
+                </div>
             </div>
-            <p id="error-message" class="text-red-600 mb-4"></p>
-            <button onclick="retryLoad()"
-                class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md transition-colors text-sm shadow-sm">
-                Try Again
-            </button>
         </div>
     </div>
 
     <!-- Media Grid -->
     <div id="media-grid"
-        class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-4 mb-8">
+         class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4 sm:gap-5 mb-6 sm:mb-8">
         <!-- Media items will be loaded here via JavaScript -->
     </div>
 
     <!-- No Results Message -->
-    <div id="no-results" class="text-center py-12 hidden">
-        <div class="theme-card p-8 rounded-lg shadow">
-            <svg class="mx-auto h-16 w-16 text-gray-300 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                    d="M7 4V2a1 1 0 011-1h8a1 1 0 011 1v2h4a1 1 0 110 2h-1v12a2 2 0 01-2 2H6a2 2 0 01-2-2V6H3a1 1 0 110-2h4zM9 6v10h6V6H9z" />
-            </svg>
-            <h3 class="text-lg font-semibold theme-text-secondary mb-2">{{ media_type|title }} bulunamadı</h3>
-            <p class="theme-text-secondary text-sm mb-4">
+    <div id="no-results" class="hidden text-center py-16">
+        <div class="glass-panel rounded-3xl p-8 max-w-xl mx-auto">
+            <div class="mx-auto w-16 h-16 rounded-2xl bg-surface flex items-center justify-center mb-4 border border-hairline">
+                <i class="fa-solid fa-box-open text-3xl text-text-secondary"></i>
+            </div>
+            <h3 class="text-xl font-bold text-text mb-2">{{ media_type|title }} bulunamadı</h3>
+            <p class="text-sm text-text-secondary mb-6">
                 {% if media_type == 'movie' %}
-                Aramanızla eşleşen film bulunamadı
+                Aramanızla eşleşen film bulunamadı.
                 {% else %}
-                Aramanızla eşleşen dizi bulunamadı
+                Aramanızla eşleşen dizi bulunamadı.
                 {% endif %}
             </p>
             <button onclick="clearSearch()"
-                class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md transition-colors text-sm shadow-sm">
-                Show All {{ media_type|title }}s
+                    class="inline-flex items-center gap-2 bg-primary hover:bg-primary/90 text-white px-5 py-3 rounded-2xl transition font-bold shadow-lg shadow-primary/20">
+                <i class="fa-solid fa-clapperboard"></i>
+                Tüm {{ 'Filmleri' if media_type == 'movie' else 'Dizileri' }} Göster
             </button>
         </div>
     </div>
 
     <!-- Pagination -->
-    <div id="pagination" class="flex justify-center items-center space-x-2 mt-8 hidden">
-        <!-- Pagination will be loaded here via JavaScript -->
+    <div id="pagination" class="hidden mt-6 sm:mt-8">
+        <div class="glass-panel rounded-3xl p-3 sm:p-4 overflow-x-auto">
+            <div class="flex justify-center items-center gap-2 min-w-max px-1" id="pagination-inner"></div>
+        </div>
     </div>
 
     <!-- Media Info -->
-    <div id="media-info" class="theme-card p-4 rounded-lg shadow mt-6 hidden">
-        <div
-            class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 text-sm theme-text-secondary">
-            <span id="results-info"></span>
-            <span id="db-info"></span>
+    <div id="media-info" class="hidden mt-6">
+        <div class="glass-panel rounded-3xl p-4 sm:p-5">
+            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 text-sm text-text-secondary">
+                <span id="results-info"></span>
+                <span id="db-info"></span>
+            </div>
         </div>
     </div>
-</div>
 
 <script>
     let currentPage = 1;
@@ -357,15 +409,132 @@
         const isHidden = panel.classList.contains('hidden');
         if (isHidden) {
             panel.classList.remove('hidden');
-            btn.classList.add('bg-blue-600', 'text-white');
-            btn.classList.remove('theme-card', 'border', 'hover:bg-gray-50');
+            btn.classList.add('bg-primary', 'text-white', 'border-primary', 'shadow-lg', 'shadow-primary/20');
+            btn.classList.remove('glass-panel', 'text-text', 'hover:bg-surface-2', 'border-hairline');
             panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            loadManualAddVisibilityMembers();
         } else {
             panel.classList.add('hidden');
-            btn.classList.remove('bg-blue-600', 'text-white');
-            btn.classList.add('theme-card', 'border', 'hover:bg-gray-50');
+            btn.classList.remove('bg-primary', 'text-white', 'border-primary', 'shadow-lg', 'shadow-primary/20');
+            btn.classList.add('glass-panel', 'text-text', 'hover:bg-surface-2', 'border-hairline');
         }
     }
+
+    // ---------- İçerik Ekle: Görünürlük (kimler görebilir/erişebilir) ----------
+    let manualVisAllMembers = [];
+    let manualVisSelectedIds = new Set();
+    let manualVisMembersLoaded = false;
+
+    function escapeHtmlManualVis(s) {
+        const d = document.createElement('div');
+        d.textContent = s == null ? '' : String(s);
+        return d.innerHTML;
+    }
+
+    async function loadManualAddVisibilityMembers() {
+        if (manualVisMembersLoaded) return;
+        try {
+            const res = await fetch('/api/admin/uyeler', { credentials: 'same-origin' });
+            if (!res.ok) throw new Error('load failed');
+            const data = await res.json();
+            manualVisAllMembers = data.members || [];
+            manualVisMembersLoaded = true;
+        } catch (e) {
+            console.error('Üye listesi alınamadı:', e);
+        }
+    }
+
+    function toggleManualAddVisibilityPicker() {
+        const mode = document.querySelector('input[name="manual-add-visibility-mode"]:checked')?.value || 'subscribers';
+        document.getElementById('manual-add-visibility-picker').classList.toggle('hidden', mode !== 'selected');
+    }
+
+    function renderManualAddVisibilitySelected() {
+        const wrap = document.getElementById('manual-add-visibility-selected');
+        const emptyHint = document.getElementById('manual-add-visibility-selected-empty');
+        wrap.querySelectorAll('.manual-vis-chip').forEach(el => el.remove());
+
+        if (manualVisSelectedIds.size === 0) {
+            emptyHint.classList.remove('hidden');
+            return;
+        }
+        emptyHint.classList.add('hidden');
+
+        manualVisSelectedIds.forEach(uid => {
+            const m = manualVisAllMembers.find(x => String(x.user_id) === String(uid));
+            const label = m ? (m.user_name || `Kullanıcı ${uid}`) : `Kullanıcı ${uid}`;
+            const chip = document.createElement('span');
+            chip.className = 'manual-vis-chip inline-flex items-center gap-1 bg-blue-100 text-blue-800 text-xs font-medium px-2 py-1 rounded-full';
+            chip.innerHTML = `${escapeHtmlManualVis(label)} <button type="button" class="ml-1 text-blue-800 hover:text-blue-950" aria-label="Kaldır">×</button>`;
+            chip.querySelector('button').addEventListener('click', () => {
+                manualVisSelectedIds.delete(uid);
+                renderManualAddVisibilitySelected();
+            });
+            wrap.appendChild(chip);
+        });
+    }
+
+    function renderManualAddVisibilityResults(query) {
+        const box = document.getElementById('manual-add-visibility-results');
+        const q = (query || '').trim().toLowerCase();
+        if (!q) {
+            box.classList.add('hidden');
+            box.innerHTML = '';
+            return;
+        }
+        const matches = manualVisAllMembers.filter(m => {
+            const name = (m.user_name || '').toLowerCase();
+            const uid = String(m.user_id || '');
+            return name.includes(q) || uid.includes(q);
+        }).slice(0, 20);
+
+        box.innerHTML = '';
+        if (matches.length === 0) {
+            box.classList.remove('hidden');
+            box.innerHTML = '<div class="p-3 text-sm theme-text-secondary">Sonuç bulunamadı</div>';
+            return;
+        }
+        box.classList.remove('hidden');
+        matches.forEach(m => {
+            const row = document.createElement('div');
+            row.className = 'flex items-center justify-between p-2 hover:bg-gray-50 cursor-pointer text-sm';
+            const statusLabel = m.subscription_status === 'active' ? 'Aktif' : (m.subscription_status || '-');
+            row.innerHTML = `<span>${escapeHtmlManualVis(m.user_name || ('Kullanıcı ' + m.user_id))} <span class="theme-text-secondary text-xs">(${escapeHtmlManualVis(String(m.user_id))} · ${escapeHtmlManualVis(statusLabel)})</span></span>`;
+            row.addEventListener('click', () => {
+                manualVisSelectedIds.add(String(m.user_id));
+                renderManualAddVisibilitySelected();
+                document.getElementById('manual-add-visibility-search').value = '';
+                box.classList.add('hidden');
+            });
+            box.appendChild(row);
+        });
+    }
+
+    function resetManualAddVisibilityForm() {
+        document.getElementById('manual-add-visibility-subscribers').checked = true;
+        manualVisSelectedIds = new Set();
+        renderManualAddVisibilitySelected();
+        toggleManualAddVisibilityPicker();
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        document.querySelectorAll('input[name="manual-add-visibility-mode"]').forEach(r => {
+            r.addEventListener('change', toggleManualAddVisibilityPicker);
+        });
+        const manualVisSearchInput = document.getElementById('manual-add-visibility-search');
+        if (manualVisSearchInput) {
+            manualVisSearchInput.addEventListener('input', (e) => renderManualAddVisibilityResults(e.target.value));
+            manualVisSearchInput.addEventListener('focus', (e) => {
+                if (e.target.value.trim()) renderManualAddVisibilityResults(e.target.value);
+            });
+            document.addEventListener('click', (e) => {
+                if (!e.target.closest('#manual-add-visibility-picker')) {
+                    document.getElementById('manual-add-visibility-results').classList.add('hidden');
+                }
+            });
+        }
+        renderManualAddVisibilitySelected();
+    });
 
     async function loadManualAddStatus() {
         try {
@@ -429,6 +598,10 @@
             if (data.genres && data.genres.length) metaParts.push(`Tür: ${data.genres.join(', ')}`);
             if (data.poster) metaParts.push('Poster ayarlı');
             if (data.description) metaParts.push('Açıklama ayarlı');
+            if (data.visibility_mode === 'selected') {
+                const n = (data.visibility_member_ids || []).length;
+                metaParts.push(`🔒 Kısıtlı: ${n} üye`);
+            }
             document.getElementById('manual-add-active-meta').textContent = metaParts.join(' • ');
 
             if (isTv) {
@@ -466,7 +639,17 @@
             return;
         }
 
+        const visibilityMode = document.querySelector('input[name="manual-add-visibility-mode"]:checked')?.value || 'subscribers';
+        if (visibilityMode === 'selected' && manualVisSelectedIds.size === 0) {
+            errorEl.textContent = "'Sadece seçtiğim üye(ler)' seçildiğinde en az bir üye seçmelisin.";
+            return;
+        }
+
         const payload = { title, poster, description, media_type: manualAddType };
+        payload.visibility_mode = visibilityMode;
+        if (visibilityMode === 'selected') {
+            payload.visibility_member_ids = Array.from(manualVisSelectedIds);
+        }
         if (yearRaw) {
             payload.year = parseInt(yearRaw, 10);
         }
@@ -499,6 +682,7 @@
             document.getElementById('manual-add-description').value = '';
             document.getElementById('manual-add-rating').value = '';
             document.getElementById('manual-add-genre').value = '';
+            resetManualAddVisibilityForm();
             renderManualAddStatus(data);
         } catch (error) {
             errorEl.textContent = `Hata: ${error.message}`;
@@ -553,41 +737,100 @@
         }
     }
 
+    // ---------- Poster badge helpers ----------
+    function collectQualities(item) {
+        const out = [];
+        (item.telegram || []).forEach(q => out.push(q));
+        (item.seasons || []).forEach(s => (s.episodes || []).forEach(e => (e.telegram || []).forEach(q => out.push(q))));
+        return out;
+    }
+
+    function sizeToBytes(str) {
+        if (!str) return 0;
+        const m = String(str).trim().match(/([\d.]+)\s*([A-Za-z]+)/);
+        if (!m) return 0;
+        const mult = { B: 1, KB: 1024, MB: 1024 ** 2, GB: 1024 ** 3, TB: 1024 ** 4 };
+        return parseFloat(m[1]) * (mult[m[2].toUpperCase()] || 1);
+    }
+
+    function bytesToSize(bytes) {
+        if (!bytes) return '';
+        const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+        let i = 0, v = bytes;
+        while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+        return `${v.toFixed(v >= 100 || i === 0 ? 0 : 1)} ${units[i]}`;
+    }
+
+    function allQualityLabels(qualities) {
+        const norm = { '2160p': '4K', '4k': '4K', '1080p': '1080p', '720p': '720p', '480p': '480p', '360p': '360p' };
+        const rank = { '4K': 5, '1080p': 4, '720p': 3, '480p': 2, '360p': 1 };
+        const set = new Set();
+        qualities.forEach(q => { const k = String(q.quality || '').toLowerCase(); if (norm[k]) set.add(norm[k]); });
+        return Array.from(set).sort((a, b) => (rank[b] || 0) - (rank[a] || 0));
+    }
+
+    function mediaBadges(item) {
+        const qs = collectQualities(item);
+        if (!qs.length) return '';
+        const isSplit = qs.some(q => q.group_key || (q.parts && q.parts.length));
+        const totalBytes = qs.reduce((sum, q) => sum + sizeToBytes(q.size), 0);
+        const labels = allQualityLabels(qs);
+        const size = bytesToSize(totalBytes);
+        const qpills = labels.map((l, i) =>
+            `<span class="px-1.5 py-[3px] rounded-md ${i === 0 ? 'bg-primary text-white' : 'bg-white/20 text-white'} text-[10px] font-extrabold leading-none backdrop-blur-sm">${l}</span>`
+        ).join('');
+        const split = isSplit
+            ? `<span class="px-1.5 py-[3px] rounded-md bg-purple-600/90 text-white text-[10px] font-extrabold leading-none"><i class="fa-solid fa-puzzle-piece"></i></span>` : '';
+        const sizeTag = size
+            ? `<span class="px-1.5 py-[3px] rounded-md bg-black/70 text-white text-[10px] font-bold leading-none whitespace-nowrap"><i class="fa-solid fa-hard-drive mr-1 opacity-70"></i>${size}</span>` : '';
+        return `
+            <div class="absolute inset-x-0 bottom-0 px-2 pb-2 pt-10 bg-gradient-to-t from-black/85 via-black/40 to-transparent pointer-events-none">
+                <div class="flex items-end justify-between gap-2">
+                    <span class="flex items-center gap-1 flex-wrap">${qpills}${split}</span>
+                    ${sizeTag}
+                </div>
+            </div>`;
+    }
+
     // Create media card HTML
     function createMediaCard(item) {
         const title = item.title || item.name || 'Unknown Title';
-        const year = item.release_year || 'Unknown Year';
-        const rating = item.rating ? `⭐ ${parseFloat(item.rating).toFixed(1)}` : '';
+        const year = item.release_year || 'Bilinmiyor';
         const poster = item.poster || 'https://via.placeholder.com/300x450/e5e7eb/9ca3af?text=No+Image';
+        const safeTitle = title.replace(/"/g, '&quot;');
 
         return `
-        <div class="theme-card rounded-lg shadow hover:shadow-lg transition-all duration-300 group overflow-hidden">
-            <div class="relative">
-                <div class="aspect-w-2 aspect-h-3">
-                    <img src="${poster}" 
-                         alt="${title}" 
-                         class="w-full h-64 object-cover"
-                         onerror="this.src='https://via.placeholder.com/300x450/e5e7eb/9ca3af?text=No+Image'"
-                         loading="lazy">
+        <div class="group overflow-hidden rounded-3xl glass-panel border border-hairline hover:border-primary/30 transition-all duration-300 hover:-translate-y-1 hover:shadow-2xl">
+            <div class="relative overflow-hidden">
+                <img src="${poster}" alt="${title}" class="w-full aspect-[2/3] object-cover transition duration-300 group-hover:scale-105" onerror="this.src='https://via.placeholder.com/300x450/e5e7eb/9ca3af?text=No+Image'" loading="lazy">
+                <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+
+                <div class="absolute top-3 left-3">
+                    <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-black/60 text-white text-[11px] font-bold border border-hairline">
+                        <i class="fa-solid fa-calendar-days"></i> ${year}
+                    </span>
                 </div>
-                <div class="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-20 transition-all duration-300"></div>
+                ${mediaBadges(item)}
             </div>
-            <div class="p-3">
-                <h3 class="font-semibold text-sm mb-1 line-clamp-2 min-h-[2.5rem]" title="${title}">
-                    ${title}
-                </h3>
-                <div class="flex items-center justify-between text-xs theme-text-secondary mb-3">
-                    <span>${year}</span>
-                    ${rating ? `<span>${rating}</span>` : ''}
+
+            <div class="p-4">
+                <h3 class="font-bold text-sm sm:text-base text-text line-clamp-2 min-h-[2.75rem]" title="${title}">${title}</h3>
+                <div class="mt-2 flex items-center justify-between text-xs text-text-secondary">
+                    <span>DB #${item.db_index ?? '-'}</span>
+                    <span>${mediaType === 'movie' ? 'Film' : 'Dizi'}</span>
                 </div>
-                <div class="flex justify-between items-center">
-                    <a href="/media/edit?tmdb_id=${item.tmdb_id}&db_index=${item.db_index}&media_type=${mediaType}" 
-                       class="text-primary hover:underline text-xs font-medium px-2 py-1 rounded transition-colors hover:bg-blue-50">
-                        Düzenle
+
+                <div class="mt-4 flex gap-2">
+                    <a href="/media/edit?tmdb_id=${encodeURIComponent(item.tmdb_id)}&db_index=${encodeURIComponent(item.db_index)}&media_type=${encodeURIComponent(mediaType)}"
+                       class="flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 rounded-2xl bg-primary hover:bg-primary/90 text-white text-xs font-bold transition shadow-lg shadow-primary/20">
+                        <i class="fa-solid fa-pen-to-square"></i> Düzenle
                     </a>
-                    <button onclick="deleteMedia(${item.tmdb_id}, ${item.db_index}, '${title.replace(/'/g, "\\'")}')" 
-                            class="text-red-600 hover:underline text-xs font-medium px-2 py-1 rounded transition-colors hover:bg-red-50">
-                        Sil
+                    <button onclick="deleteMedia(this)"
+                            data-tmdb-id="${item.tmdb_id}"
+                            data-db-index="${item.db_index ?? ''}"
+                            data-title="${safeTitle}"
+                            class="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-2xl glass-panel hover:bg-red-500/10 text-red-300 text-xs font-bold transition border border-hairline">
+                        <i class="fa-solid fa-trash"></i>
                     </button>
                 </div>
             </div>
@@ -598,9 +841,11 @@
     // Update pagination
     function updatePagination(currentPage, totalPages) {
         const pagination = document.getElementById('pagination');
+        const paginationInner = document.getElementById('pagination-inner');
 
         if (totalPages <= 1) {
             pagination.classList.add('hidden');
+            paginationInner.innerHTML = '';
             return;
         }
 
@@ -610,11 +855,11 @@
         // Previous button
         if (currentPage > 1) {
             paginationHTML += `
-            <button onclick="loadMedia(${currentPage - 1}, '${currentSearch}')" 
-                    class="px-3 py-2 border rounded-md hover:bg-gray-50 transition-colors text-sm">
-                Önceki
-            </button>
-        `;
+                <button onclick='loadMedia(${currentPage - 1}, ${JSON.stringify(currentSearch)})'
+                        class="px-4 py-2 rounded-2xl glass-panel hover:bg-surface-2 text-text text-sm font-bold transition border border-hairline">
+                    Önceki
+                </button>
+            `;
         }
 
         // Page numbers
@@ -624,13 +869,13 @@
         // First page
         if (startPage > 1) {
             paginationHTML += `
-            <button onclick="loadMedia(1, '${currentSearch}')" 
-                    class="px-3 py-2 border rounded-md hover:bg-gray-50 transition-colors text-sm">
-                1
-            </button>
-        `;
+                <button onclick='loadMedia(1, ${JSON.stringify(currentSearch)})'
+                        class="px-4 py-2 rounded-2xl glass-panel hover:bg-surface-2 text-text text-sm font-bold transition border border-hairline">
+                    1
+                </button>
+            `;
             if (startPage > 2) {
-                paginationHTML += `<span class="px-3 py-2 text-sm">...</span>`;
+                paginationHTML += `<span class="px-2 text-text-secondary text-sm">...</span>`;
             }
         }
 
@@ -638,38 +883,40 @@
         for (let i = startPage; i <= endPage; i++) {
             const isActive = i === currentPage;
             paginationHTML += `
-            <button onclick="loadMedia(${i}, '${currentSearch}')" 
-                    class="px-3 py-2 border rounded-md transition-colors text-sm ${isActive ? 'bg-blue-600 text-white border-blue-600' : 'hover:bg-gray-50'
-                }">
-                ${i}
-            </button>
-        `;
+                <button onclick='loadMedia(${i}, ${JSON.stringify(currentSearch)})'
+                        class="px-4 py-2 rounded-2xl text-sm font-bold transition border
+                               ${isActive
+                                   ? 'bg-primary text-white border-primary shadow-lg shadow-primary/20'
+                                   : 'glass-panel hover:bg-surface-2 text-text border-hairline'}">
+                    ${i}
+                </button>
+            `;
         }
 
         // Last page
         if (endPage < totalPages) {
             if (endPage < totalPages - 1) {
-                paginationHTML += `<span class="px-3 py-2 text-sm">...</span>`;
+                paginationHTML += `<span class="px-2 text-text-secondary text-sm">...</span>`;
             }
             paginationHTML += `
-            <button onclick="loadMedia(${totalPages}, '${currentSearch}')" 
-                    class="px-3 py-2 border rounded-md hover:bg-gray-50 transition-colors text-sm">
-                ${totalPages}
-            </button>
-        `;
+                <button onclick='loadMedia(${totalPages}, ${JSON.stringify(currentSearch)})'
+                        class="px-4 py-2 rounded-2xl glass-panel hover:bg-surface-2 text-text text-sm font-bold transition border border-hairline">
+                    ${totalPages}
+                </button>
+            `;
         }
 
         // Next button
         if (currentPage < totalPages) {
             paginationHTML += `
-            <button onclick="loadMedia(${currentPage + 1}, '${currentSearch}')" 
-                    class="px-3 py-2 border rounded-md hover:bg-gray-50 transition-colors text-sm">
-                Sonraki
-            </button>
-        `;
+                <button onclick='loadMedia(${currentPage + 1}, ${JSON.stringify(currentSearch)})'
+                        class="px-4 py-2 rounded-2xl glass-panel hover:bg-surface-2 text-text text-sm font-bold transition border border-hairline">
+                    Sonraki
+                </button>
+            `;
         }
 
-        pagination.innerHTML = paginationHTML;
+        paginationInner.innerHTML = paginationHTML;
     }
 
     // Update media info display
@@ -685,6 +932,8 @@
 
         if (data.databases_checked && data.databases_checked.length > 0) {
             dbInfo.textContent = `Database${data.databases_checked.length > 1 ? 's' : ''}: ${data.databases_checked.join(', ')}`;
+        } else {
+            dbInfo.textContent = '';
         }
 
         mediaInfo.classList.remove('hidden');
@@ -709,11 +958,15 @@
     }
 
     // Delete media with confirmation
-    async function deleteMedia(tmdbId, dbIndex, title) {
+    async function deleteMedia(buttonElement) {
+        const tmdbId = buttonElement.getAttribute('data-tmdb-id');
+        const dbIndex = buttonElement.getAttribute('data-db-index');
+        const title = buttonElement.getAttribute('data-title');
+
         if (!confirm(`"${title}" silinsin mi?\n\nBu işlem geri alınamaz.`)) return;
 
         try {
-            const response = await fetch(`/api/media/delete?tmdb_id=${tmdbId}&db_index=${dbIndex}&media_type=${mediaType}`, {
+            const response = await fetch(`/api/media/delete?tmdb_id=${encodeURIComponent(tmdbId)}&db_index=${encodeURIComponent(dbIndex)}&media_type=${encodeURIComponent(mediaType)}`, {
                 method: 'DELETE',
                 credentials: 'same-origin',
                 headers: {
@@ -723,25 +976,16 @@
             });
 
             if (response.ok) {
-                // Show success message briefly
-                const successMsg = document.createElement('div');
-                successMsg.className = 'fixed top-4 right-4 bg-green-500 text-white px-4 py-2 rounded-md shadow-lg z-50';
-                successMsg.textContent = `"${title}" başarıyla silindi`;
-                document.body.appendChild(successMsg);
-
-                setTimeout(() => {
-                    document.body.removeChild(successMsg);
-                }, 3000);
-
+                showToast(`"${title}" başarıyla silindi`, 'success', 'Silindi');
                 // Reload current page
                 loadMedia(currentPage, currentSearch);
             } else {
-                const error = await response.json();
-                alert(`"${title}" silinirken hata: ${formatApiError(error.detail)}`);
+                const error = await response.json().catch(() => ({}));
+                showToast(formatApiError(error.detail) || `"${title}" silinirken hata oluştu`, 'error', 'Silme Başarısız');
             }
         } catch (error) {
             console.error('Error deleting media:', error);
-            alert(`"${title}" silinirken hata: ${error.message}`);
+            showToast(`"${title}" silinirken hata: ${error.message}`, 'error', 'Ağ Hatası');
         }
     }
 
@@ -782,33 +1026,22 @@
         overflow: hidden;
     }
 
-    .aspect-w-2 {
-        position: relative;
-        padding-bottom: 150%;
-        /* 2:3 aspect ratio */
+    .aspect-\[2\/3\] {
+        aspect-ratio: 2 / 3;
     }
 
-    .aspect-w-2>img {
-        position: absolute;
-        height: 100%;
-        width: 100%;
-        top: 0;
-        right: 0;
-        bottom: 0;
-        left: 0;
+    /* Better mobile scrolling for pagination */
+    #pagination .overflow-x-auto {
+        scrollbar-width: thin;
     }
 
-    @media (max-width: 640px) {
-        .grid {
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: 0.75rem;
-        }
+    #pagination .overflow-x-auto::-webkit-scrollbar {
+        height: 6px;
     }
 
-    @media (min-width: 1536px) {
-        .grid {
-            grid-template-columns: repeat(8, minmax(0, 1fr));
-        }
+    #pagination .overflow-x-auto::-webkit-scrollbar-thumb {
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.2);
     }
 
     /* Loading animation */

@@ -31,6 +31,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 
 from Backend import db
+from Backend.helper.database import is_media_visible_to_member, is_proxy_scope_member
 from Backend.config import Telegram
 from Backend.fastapi.themes import get_theme, get_all_themes
 from Backend.fastapi.security.brute_force import (
@@ -506,6 +507,9 @@ async def member_media_api(
         if platform_imdb_ids is not None:
             all_coll = [i for i in all_coll if i.get("imdb_id") in platform_imdb_ids]
 
+        all_coll = await _enrich_visibility(all_coll)
+        all_coll = _filter_visible_for_member(all_coll, member["user_id"])
+
         total = len(all_coll)
         start_idx = (page - 1) * page_size
         return {
@@ -556,7 +560,9 @@ async def member_media_api(
                 "total_count":  total,
                 "current_page": page,
                 "total_pages":  max(1, (total + page_size - 1) // page_size),
-                ("movies" if media_type == "movie" else "tv_shows"): _strip_admin_fields(items),
+                ("movies" if media_type == "movie" else "tv_shows"): _strip_admin_fields(
+                    _filter_visible_for_member(items, member["user_id"])
+                ),
             }
         else:
             extra_filter: dict = {}
@@ -579,16 +585,57 @@ async def member_media_api(
             if media_type == "movie":
                 raw = await db.sort_movies(sort_params, page, page_size, lang=lang,
                                            extra_filter=extra_filter)
-                raw["movies"] = _strip_admin_fields(raw.get("movies", []))
+                raw["movies"] = _strip_admin_fields(
+                    _filter_visible_for_member(raw.get("movies", []), member["user_id"])
+                )
             else:
                 raw = await db.sort_tv_shows(sort_params, page, page_size, lang=lang,
                                              extra_filter=extra_filter)
-                raw["tv_shows"] = _strip_admin_fields(raw.get("tv_shows", []))
+                raw["tv_shows"] = _strip_admin_fields(
+                    _filter_visible_for_member(raw.get("tv_shows", []), member["user_id"])
+                )
             return raw
     except Exception as e:
         _logger.error("Internal error", exc_info=True)
 
         raise HTTPException(status_code=500, detail="Sunucu hatası")
+
+
+async def _enrich_visibility(items: list) -> list:
+    """
+    'visibility' alanını taşımayan harici kaynaklı liste öğelerini (platform
+    koleksiyon önbelleği gibi) gerçek DB dokümanındaki görünürlük ayarıyla
+    zenginleştirir; böylece bu öğeler de _filter_visible_for_member ile
+    doğru şekilde süzülebilir. Öğe zaten 'visibility' taşıyorsa dokunulmaz.
+    """
+    missing_ids = [
+        it.get("imdb_id") for it in items
+        if it.get("imdb_id") and "visibility" not in it
+    ]
+    if not missing_ids:
+        return items
+    vis_map = await db.get_visibility_map(missing_ids)
+    if not vis_map:
+        return items
+    for it in items:
+        imdb_id = it.get("imdb_id")
+        if imdb_id and "visibility" not in it and imdb_id in vis_map:
+            it["visibility"] = vis_map[imdb_id]
+    return items
+
+
+def _filter_visible_for_member(items: list, user_id) -> list:
+    """
+    Görünürlüğü 'selected' olarak ayarlanmış (yalnızca belirli üyelere açık)
+    içerikleri, listede olmayan üyeler için eler. 'visibility' alanı olmayan
+    veya mode='subscribers' olan içerikler herkese (abone üyelere) açık kalır.
+
+    Not: platform_catalog gibi ön-belleklenmiş (cache) listeler 'visibility'
+    alanını taşımayabilir; bu durumda öge güvenli varsayılan olarak görünür
+    kabul edilir. Katalog önbelleği kullanan akışlar için tam garanti,
+    içerik detay/stream uç noktalarındaki ayrı kontrol ile sağlanır.
+    """
+    return [it for it in items if is_media_visible_to_member(it, user_id)]
 
 
 def _strip_admin_fields(items: list) -> list:
@@ -735,6 +782,9 @@ async def member_tv_detail_api(
     if not doc:
         raise HTTPException(status_code=404)
 
+    if not is_media_visible_to_member(doc, member["user_id"]):
+        raise HTTPException(status_code=403, detail="Bu içeriğe erişim izniniz yok")
+
     # Sadece season/episode yapısını döndür (file_id'ler dahil — stream için)
     seasons = []
     for s in doc.get("seasons", []):
@@ -790,6 +840,9 @@ async def member_movie_detail_api(
     if not doc:
         raise HTTPException(status_code=404)
 
+    if not is_media_visible_to_member(doc, member["user_id"]):
+        raise HTTPException(status_code=403, detail="Bu içeriğe erişim izniniz yok")
+
     return {
         "tmdb_id":    doc.get("tmdb_id"),
         "title":      doc.get("title"),
@@ -840,10 +893,13 @@ async def member_stream_url_api(
 
     # ── Yardımcı: proxy URL üret ────────────────────────────────────────────
     def _apply_proxy(direct_url: str) -> str | None:
-        """PROXY aktifse ve HTTP_PROXY_URL doluysa proxy URL döner, aksi halde None."""
-        if Telegram.PROXY and Telegram.HTTP_PROXY_URL:
-            return f"{Telegram.HTTP_PROXY_URL}{direct_url}"
-        return None
+        """PROXY aktifse, HTTP_PROXY_URL doluysa VE bu üye proxy kapsamındaysa
+        (Ayarlar → Proxy Kimlere Uygulansın?) proxy URL döner, aksi halde None."""
+        if not (Telegram.PROXY and Telegram.HTTP_PROXY_URL):
+            return None
+        if not is_proxy_scope_member(member["user_id"]):
+            return None
+        return f"{Telegram.HTTP_PROXY_URL}{direct_url}"
 
     # Harici URL'ler — proxy moduna göre dön
     if file_id.startswith(("http://", "https://")):
