@@ -887,16 +887,32 @@ def format_stream_details(filename: str, quality: str, size: str, file_id: str, 
 
 
 def get_resolution_priority(stream_name: str) -> int:
-    resolution_map = {
-        "2160p": 2160, "4k": 2160, "uhd": 2160,
-        "1080p": 1080, "fhd": 1080,
-        "720p": 720, "hd": 720,
-        "480p": 480, "sd": 480,
-        "360p": 360,
+    """
+    Stream adındaki çözünürlüğü sayısal önceliğe çevirir.
+    "NNNNp" biçimindeki her değeri (810p, 1080p, 1081p, 2160p, ...) doğrudan
+    kendi sayısal değeriyle parse eder; böylece sabit bir listede yer almayan
+    çözünürlükler de (örn. 810p, 1081p) doğru sırada, sayı büyüklüğüne göre
+    yer alır. 4k/uhd/fhd/hd/sd gibi sayısal olmayan takma adlar için sabit
+    değerler kullanılır.
+    """
+    import re as _re_res
+
+    name = (stream_name or "").lower()
+
+    match = _re_res.search(r'(\d{3,4})p\b', name)
+    if match:
+        return int(match.group(1))
+
+    alias_map = {
+        "4k": 2160, "uhd": 2160,
+        "fhd": 1080,
+        "hd": 720,
+        "sd": 480,
     }
-    for res_key, res_value in resolution_map.items():
-        if res_key in stream_name.lower():
-            return res_value
+    for alias, value in alias_map.items():
+        if alias in name:
+            return value
+
     return 1
 
 
@@ -1133,10 +1149,11 @@ async def get_manifest(token: str, lang: str = "en", token_data: dict = Depends(
             # zaten id ön ekine göre çalıştığından ekstra bir filtreye
             # gerek kalmıyor.
             if _member_restrictions.get("include_live_collection"):
+                _live_default_name = await _db_cat.get_live_default_catalog_name()
                 catalogs.append({
                     "type": "channel",
                     "id": f"live_{lang}",
-                    "name": lbl["live"],
+                    "name": f"📡 {_live_default_name}" if _live_default_name else lbl["live"],
                     "extra": [
                         {"name": "genre", "isRequired": False, "options": get_live_genres_for_lang(lang)},
                         {"name": "skip"},
@@ -1199,6 +1216,28 @@ async def get_manifest(token: str, lang: str = "en", token_data: dict = Depends(
                     "name": cc_name,
                     "extra": [{"name": "skip"}],
                     "extraSupported": ["skip"],
+                })
+
+            # --- Canlı Yayın: varsayılan kataloğun yeniden adlandırılmış adı ---
+            _live_default_name = await _db_cat.get_live_default_catalog_name()
+            if _live_default_name:
+                for _c in all_catalogs:
+                    if _c["id"] == f"live_{lang}":
+                        _c["name"] = f"📡 {_live_default_name}"
+                        break
+
+            # --- Admin: ek (isimlendirilmiş) canlı yayın katalogları ---
+            live_catalogs = await _db_cat.get_live_catalogs()
+            for lcat in live_catalogs:
+                all_catalogs.append({
+                    "type": "channel",
+                    "id": f"live_{lcat['_id']}_{lang}",
+                    "name": f"📡 {lcat.get('name', 'Katalog')}",
+                    "extra": [
+                        {"name": "genre", "isRequired": False, "options": get_live_genres_for_lang(lang)},
+                        {"name": "skip"},
+                    ],
+                    "extraSupported": ["genre", "skip"],
                 })
 
             # --- Admin: Bu üyeye özel katalog erişim kısıtlaması (uye_detay.html) ---
@@ -2056,7 +2095,23 @@ async def get_catalog(token: str, media_type: str, id: str, extra: Optional[str]
             # ── Canlı Yayın kataloğu ──────────────────────────────────────
             if id.startswith("live_") and media_type == "channel":
                 from Backend import db as _db
+
+                # Katalog id formatı: "live_{lang}" (varsayılan/yerleşik katalog)
+                # veya "live_{catalog_id}_{lang}" (admin'in eklediği ek katalog).
+                _remainder = id[len("live_"):]
+                _lang_suffix = f"_{lang}"
+                if _remainder == lang:
+                    _live_catalog_key = "default"
+                elif _remainder.endswith(_lang_suffix):
+                    _live_catalog_key = _remainder[: -len(_lang_suffix)]
+                else:
+                    _live_catalog_key = "default"
+
                 channels = await _db.get_live_channels(scheduled_only=True)
+                channels = [
+                    ch for ch in channels
+                    if _live_catalog_key in (ch.get("catalog_ids") or ["default"])
+                ]
 
                 # Üyenin kayıtlı kanal sırasını uygula
                 channel_order = await _db.get_channel_order(token)
@@ -2067,6 +2122,10 @@ async def get_catalog(token: str, media_type: str, id: str, extra: Optional[str]
 
                 # ── Aktif Yayınları kanallarla birleştir ve order değerine göre sırala ──
                 active_broadcasts = await _db.get_active_broadcasts()
+                active_broadcasts = [
+                    bc for bc in active_broadcasts
+                    if _live_catalog_key in (bc.get("catalog_ids") or ["default"])
+                ]
 
                 combined = []
                 for ch in channels:
@@ -3210,6 +3269,29 @@ async def admin_list_catalogs(_: bool = Depends(require_auth)):
         for c in custom_raw
     ]
 
+    # --- Canlı Yayın: varsayılan katalog adı yeniden adlandırılmışsa uygula ---
+    _live_default_name = await _db.get_live_default_catalog_name()
+    if _live_default_name:
+        for _it in all_items:
+            if _it["id"] == "live":
+                _it["label"] = f"📡 {_live_default_name}"
+                break
+
+    # --- Canlı Yayın: admin'in oluşturduğu ek kataloglar da sıralamaya dahil ---
+    live_catalogs_raw = await _db.get_live_catalogs()
+    all_items += [
+        {
+            "id": f"live_{lc['_id']}",
+            "label": f"📡 {lc.get('name', 'Katalog')}",
+            "type": "channel",
+            "type_label": "Canlı Yayın Kataloğu",
+            "kind": "live",
+            "enabled": True,
+            "toggleable": False,
+        }
+        for lc in live_catalogs_raw
+    ]
+
     if saved_order:
         order_map = {bid: idx for idx, bid in enumerate(saved_order)}
         default_start = len(saved_order)
@@ -3244,10 +3326,12 @@ async def admin_save_catalog_order(payload: dict, _: bool = Depends(require_auth
     if not isinstance(order, list) or not all(isinstance(x, str) for x in order):
         raise HTTPException(status_code=400, detail="Geçersiz sıra listesi")
 
-    # Geçerli id'ler: hazır kataloglar + var olan özel kataloglar
+    # Geçerli id'ler: hazır kataloglar + var olan özel kataloglar + canlı yayın katalogları
     valid_ids = set(ALL_BUILTIN_CATALOGS.keys())
     custom_raw = await _db.get_custom_catalogs(active_only=False)
     valid_ids |= {f"custom_{c['_id']}" for c in custom_raw}
+    live_catalogs_raw = await _db.get_live_catalogs()
+    valid_ids |= {f"live_{lc['_id']}" for lc in live_catalogs_raw}
 
     order = [cat_id for cat_id in order if cat_id in valid_ids]
 

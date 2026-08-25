@@ -82,6 +82,9 @@ class Segment:
 class BroadcastSession:
     """Tek bir yayına ait canlı durum."""
 
+    #----- Anlık hız hesaplamasında dikkate alınan pencere süresi (saniye).
+    SPEED_WINDOW_SECONDS = 12
+
     def __init__(self, broadcast_id: str, stream_url: str, buffer_seconds: int = 30, name: str = ""):
         self.broadcast_id   = broadcast_id
         self.stream_url     = stream_url
@@ -104,8 +107,45 @@ class BroadcastSession:
         self.total_bytes_served   = 0
         self.segment_size_kb      = 0
         self.buffered_segments    = 0
+        # Yayın başladığı andaki zaman damgası (bilgi amaçlı saklanır).
+        self.start_ts: float      = 0.0
+        # Anlık hız (avg_mbps) hesaplaması için kayan pencere örnekleri:
+        # (zaman_damgası, byte_sayısı) — her izleyicinin her segment isteği
+        # burada birikir. Yayın başından beri kümülatif ortalama yerine SON
+        # birkaç saniyedeki gerçek trafiği ölçer; böylece yeni bir izleyici
+        # katıldığında (veya ayrıldığında) hız anında güncellenir — yoksa
+        # payda (geçen toplam süre) çok büyük olduğundan tek bir izleyicinin
+        # eklediği byte fark yaratmıyordu.
+        self.recent_samples: deque = deque()
+
+    def record_bytes(self, byte_count: int) -> None:
+        """Servis edilen her segment isteğinde çağrılır; hız penceresine örnek ekler."""
+        now_ts = time.time()
+        self.recent_samples.append((now_ts, byte_count))
+        cutoff = now_ts - self.SPEED_WINDOW_SECONDS
+        while self.recent_samples and self.recent_samples[0][0] < cutoff:
+            self.recent_samples.popleft()
 
     def status_dict(self) -> dict:
+        # avg_mbps: SON SPEED_WINDOW_SECONDS saniye içinde bu yayının TÜM
+        # izleyicilerine servis edilen byte toplamının, o pencerede geçen
+        # gerçek süreye bölünmesiyle elde edilen MB/s değeridir. Birden çok
+        # izleyici aynı anda segment indirdikçe bu değer toplanarak büyür —
+        # Telegram tabanlı akışlardaki "avg_mbps" ile aynı birimi kullanır
+        # (bkz. stream_routes.py / custom_dl.py), böylece dashboard'daki
+        # "Toplam Trafik" toplamına doğrudan katılabilir.
+        now_ts = time.time()
+        cutoff = now_ts - self.SPEED_WINDOW_SECONDS
+        while self.recent_samples and self.recent_samples[0][0] < cutoff:
+            self.recent_samples.popleft()
+
+        avg_mbps = 0.0
+        if self.active and self.recent_samples:
+            window_bytes = sum(b for _, b in self.recent_samples)
+            oldest_ts = self.recent_samples[0][0]
+            span = max(now_ts - oldest_ts, 1.0)  # çok kısa pencerede aşırı yüksek değer görülmesin
+            avg_mbps = round((window_bytes / (1024 * 1024)) / span, 3)
+
         return {
             "active":             self.active,
             "buffer_seconds":     self.buffer_seconds,
@@ -113,6 +153,7 @@ class BroadcastSession:
             "buffered_segments":  self.buffered_segments,
             "viewer_count":       self.viewer_count,
             "total_bytes_served": self.total_bytes_served,
+            "avg_mbps":           avg_mbps,
         }
 
 
@@ -815,6 +856,7 @@ async def yayin_active_status(_: bool = Depends(require_auth)):
                 "buffered_segments":  0,
                 "viewer_count":       0,
                 "total_bytes_served": 0,
+                "avg_mbps":           0.0,
             }
 
         # O anda (idle-timeout içinde) segment isteği göndermiş, yani gerçekten
@@ -884,6 +926,7 @@ async def _start_session(broadcast_id: str, bc: dict):
         name           = bc.get("name", "Canlı Yayın"),
     )
     session.active = True
+    session.start_ts = time.time()
     task = asyncio.create_task(_hls_fetcher(session))
     session.fetcher_task = task
     _sessions[broadcast_id] = session
@@ -955,6 +998,7 @@ async def yayin_status(broadcast_id: str, _: bool = Depends(require_auth)):
         "buffered_segments":  0,
         "viewer_count":       0,
         "total_bytes_served": 0,
+        "avg_mbps":           0.0,
     }
 
 
@@ -1140,6 +1184,7 @@ async def yayin_member_segment(broadcast_id: str, seg_seq: int, token: str = Non
     # İstatistik güncelle: gerçek eşzamanlı izleyici sayısı — bu broadcast için
     # az önce (idle timeout içinde) segment isteği göndermiş benzersiz token sayısı.
     session.total_bytes_served += byte_count
+    session.record_bytes(byte_count)
     session.viewer_count = sum(
         1 for v in _viewer_activity.values()
         if v.get("broadcast_id") == broadcast_id and (now_ts - v.get("last_ts", 0)) <= _VIEWER_IDLE_TIMEOUT

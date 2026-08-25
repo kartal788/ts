@@ -1668,6 +1668,49 @@ async def live_delete(channel_id: str, _: bool = Depends(require_auth)):
         raise HTTPException(status_code=404, detail="Kanal bulunamadı")
     return {"ok": True}
 
+# --- Canlı Yayın Katalog Yönetimi (birden fazla katalog) ---
+@app.get("/api/live-catalogs")
+async def live_catalogs_list(_: bool = Depends(require_auth)):
+    from Backend import db as _db
+    catalogs = await _db.get_live_catalogs()
+    default_name = await _db.get_live_default_catalog_name()
+    return {"catalogs": catalogs, "default_name": default_name}
+
+@app.post("/api/live-catalogs")
+async def live_catalogs_add(payload: dict, _: bool = Depends(require_auth)):
+    from Backend import db as _db
+    from fastapi import HTTPException
+    name = (payload.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Katalog adı zorunludur")
+    cat = await _db.add_live_catalog(name)
+    return cat
+
+@app.put("/api/live-catalogs/default")
+async def live_catalogs_rename_default(payload: dict, _: bool = Depends(require_auth)):
+    from Backend import db as _db
+    name = (payload.get("name") or "").strip()
+    await _db.set_live_default_catalog_name(name)
+    return {"ok": True, "name": name}
+
+@app.put("/api/live-catalogs/{catalog_id}")
+async def live_catalogs_update(catalog_id: str, payload: dict, _: bool = Depends(require_auth)):
+    from Backend import db as _db
+    from fastapi import HTTPException
+    ok = await _db.update_live_catalog(catalog_id, payload)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Katalog bulunamadı")
+    return {"ok": True}
+
+@app.delete("/api/live-catalogs/{catalog_id}")
+async def live_catalogs_delete(catalog_id: str, _: bool = Depends(require_auth)):
+    from Backend import db as _db
+    from fastapi import HTTPException
+    ok = await _db.delete_live_catalog(catalog_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Katalog bulunamadı")
+    return {"ok": True}
+
 @app.get("/api/admin/access/tokens")
 async def get_access_tokens(_: bool = Depends(require_auth)):
     return await get_all_tokens_api()

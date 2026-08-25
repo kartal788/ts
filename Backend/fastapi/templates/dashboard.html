@@ -253,6 +253,14 @@
                                 <p class="text-[10px] uppercase font-bold tracking-widest text-text-secondary">Son</p>
                                 <p id="recent-stream-count" class="text-2xl font-extrabold mt-1 text-text">0</p>
                             </div>
+                            <div class="glass-panel p-4 rounded-2xl col-span-2">
+                                <p class="text-[10px] uppercase font-bold tracking-widest text-text-secondary">Toplam Trafik</p>
+                                {% set ns = namespace(total_speed=0) %}
+                                {% for stream in system_stats.active_streams if stream.total_bytes and stream.total_bytes > 0 %}
+                                    {% set ns.total_speed = ns.total_speed + (stream.avg_mbps or 0) %}
+                                {% endfor %}
+                                <p id="live-total-traffic" class="text-2xl font-extrabold mt-1 text-text">{{ "%.3f"|format(ns.total_speed) }} MB/s</p>
+                            </div>
                         </div>
 
                         <div>
@@ -804,8 +812,11 @@
         const name = escapeHtmlLocal(bc.name || 'Canlı Yayın');
         const viewers = Array.isArray(bc.viewers) ? bc.viewers : [];
         const viewerCount = bc.viewer_count ?? viewers.length;
+        const totalSpeed = (bc.avg_mbps || 0);
+        // "Hız": tek bir izleyiciye giden ortalama hız = toplam hız / izleyici sayısı.
+        // "Toplam Hız": bu yayını izleyen HERKESİN birleşik hızı (bc.avg_mbps zaten budur).
+        const perViewerSpeed = viewerCount > 0 ? (totalSpeed / viewerCount) : totalSpeed;
         const totalMb = ((bc.total_bytes_served || 0) / 1024 / 1024).toFixed(1);
-        const bufferedSegments = bc.buffered_segments ?? 0;
         const viewerNamesHtml = viewers.length
             ? viewers.map(v => `<span class="text-[10px] font-semibold px-2 py-1 rounded-lg bg-primary/10 text-primary">${escapeHtmlLocal(v)}</span>`).join('')
             : `<span class="text-[11px] text-text-secondary">İzleyici yok</span>`;
@@ -830,16 +841,16 @@
                         <p class="text-xs font-bold text-text">${viewerCount}</p>
                     </div>
                     <div class="text-center">
+                        <p class="text-[9px] text-text-secondary uppercase tracking-widest font-bold">Hız</p>
+                        <p class="text-xs font-bold text-text">${perViewerSpeed.toFixed(3)} MB/s</p>
+                    </div>
+                    <div class="text-center">
                         <p class="text-[9px] text-text-secondary uppercase tracking-widest font-bold">Toplam</p>
                         <p class="text-xs font-bold text-text">${totalMb} MB</p>
                     </div>
                     <div class="text-center">
-                        <p class="text-[9px] text-text-secondary uppercase tracking-widest font-bold">Buffer</p>
-                        <p class="text-xs font-bold text-text">${bufferedSegments} segment</p>
-                    </div>
-                    <div class="text-center">
-                        <p class="text-[9px] text-text-secondary uppercase tracking-widest font-bold">Durum</p>
-                        <p class="text-xs font-bold text-text">active</p>
+                        <p class="text-[9px] text-text-secondary uppercase tracking-widest font-bold">Toplam Hız</p>
+                        <p class="text-xs font-bold text-text">${totalSpeed.toFixed(3)} MB/s</p>
                     </div>
                 </div>
 
@@ -865,6 +876,7 @@
         const liveNowCount = document.getElementById('live-now-count');
         const recentCount = document.getElementById('recent-stream-count');
         const sysLiveStreams = document.getElementById('sys-live-streams');
+        const totalTraffic = document.getElementById('live-total-traffic');
 
         try {
             // Telegram tabanlı indirme/izleme oturumları ve yayin.html'den
@@ -897,6 +909,15 @@
             if (liveNowCount) liveNowCount.textContent = String(totalActive);
             if (recentCount) recentCount.textContent = String(recentStreams.length);
             if (sysLiveStreams) sysLiveStreams.textContent = totalActive + ' Aktif';
+
+            // Toplam Trafik: içeriği izleyen tüm aktif oturumların (Telegram
+            // tabanlı izleme + HLS canlı yayın izleyicileri) saniyede
+            // kullandığı hızların (avg_mbps) toplamı.
+            if (totalTraffic) {
+                const streamSpeed    = activeStreams.reduce((sum, s) => sum + (s.avg_mbps || 0), 0);
+                const broadcastSpeed = activeBroadcasts.reduce((sum, b) => sum + (b.avg_mbps || 0), 0);
+                totalTraffic.textContent = (streamSpeed + broadcastSpeed).toFixed(3) + ' MB/s';
+            }
 
             if (container) {
                 const cardsHtml = activeBroadcasts.map(renderBroadcastCard).join('')

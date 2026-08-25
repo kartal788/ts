@@ -2690,6 +2690,10 @@ class Database:
         data["updated_at"] = datetime.utcnow()
         data.setdefault("order", 0)
         data.setdefault("links", [])
+        # catalog_ids: kanalın ekleneceği canlı yayın katalogları (bkz. "Katalog
+        # Yönetimi" bölümü). Boş/eksikse varsayılan "Canlı Yayın" kataloğuna düşer.
+        if not data.get("catalog_ids"):
+            data["catalog_ids"] = ["default"]
         result = await self.dbs["tracking"]["live"].insert_one(data)
         data["_id"] = str(result.inserted_id)
         return convert_objectid_to_str(data)
@@ -2698,6 +2702,8 @@ class Database:
         """Mevcut bir kanalı günceller."""
         from bson import ObjectId as _OID
         data["updated_at"] = datetime.utcnow()
+        if "catalog_ids" in data and not data["catalog_ids"]:
+            data["catalog_ids"] = ["default"]
         result = await self.dbs["tracking"]["live"].update_one(
             {"_id": _OID(channel_id)}, {"$set": data}
         )
@@ -2708,6 +2714,99 @@ class Database:
         from bson import ObjectId as _OID
         result = await self.dbs["tracking"]["live"].delete_one({"_id": _OID(channel_id)})
         return result.deleted_count > 0
+
+    # ─── Canlı Yayın – Ek Katalog Yönetimi ─────────────────────────────────────
+    # Varsayılan olarak tüm kanal/yayınlar tek bir "Canlı Yayın" kataloğunda
+    # (Stremio'da "live_{lang}") toplanır. Bu bölüm, admin'in bunun yanına
+    # istediği sayıda ek/isimli katalog oluşturup her kanal/yayını istediği
+    # katalog(lar)a atayabilmesini sağlar. "default" özel anahtarı, her zaman
+    # var olan yerleşik "Canlı Yayın" kataloğunu temsil eder (silinemez, ama
+    # adı değiştirilebilir — bkz. get/set_live_default_catalog_name).
+
+    async def get_live_catalogs(self) -> list:
+        """Admin'in oluşturduğu ek canlı yayın kataloglarını sıraya göre döndürür."""
+        cursor = self.dbs["tracking"]["live_catalogs"].find({}).sort("order", 1)
+        docs = await cursor.to_list(None)
+        return [convert_objectid_to_str(d) for d in docs]
+
+    async def get_live_catalog(self, catalog_id: str) -> Optional[dict]:
+        """Tek bir ek canlı yayın kataloğunu id'ye göre getirir."""
+        from bson import ObjectId as _OID
+        try:
+            oid = _OID(catalog_id)
+        except Exception:
+            return None
+        doc = await self.dbs["tracking"]["live_catalogs"].find_one({"_id": oid})
+        return convert_objectid_to_str(doc) if doc else None
+
+    async def add_live_catalog(self, name: str) -> dict:
+        """Yeni, isimlendirilmiş bir canlı yayın kataloğu oluşturur."""
+        count = await self.dbs["tracking"]["live_catalogs"].count_documents({})
+        data = {
+            "name": name,
+            "order": count,
+            "created_at": datetime.utcnow(),
+            "updated_at": datetime.utcnow(),
+        }
+        result = await self.dbs["tracking"]["live_catalogs"].insert_one(data)
+        data["_id"] = str(result.inserted_id)
+        return convert_objectid_to_str(data)
+
+    async def update_live_catalog(self, catalog_id: str, data: dict) -> bool:
+        """Bir canlı yayın kataloğunun adını ve/veya sırasını günceller."""
+        from bson import ObjectId as _OID
+        try:
+            oid = _OID(catalog_id)
+        except Exception:
+            return False
+        data["updated_at"] = datetime.utcnow()
+        result = await self.dbs["tracking"]["live_catalogs"].update_one(
+            {"_id": oid}, {"$set": data}
+        )
+        return result.matched_count > 0
+
+    async def delete_live_catalog(self, catalog_id: str) -> bool:
+        """Bir canlı yayın kataloğunu siler. Bu kataloğa atanmış kanal ve
+        yayınlardan referansı temizler; başka kataloğu kalmayanlar otomatik
+        olarak varsayılan 'Canlı Yayın' kataloğuna geri düşer."""
+        from bson import ObjectId as _OID
+        try:
+            oid = _OID(catalog_id)
+        except Exception:
+            return False
+        result = await self.dbs["tracking"]["live_catalogs"].delete_one({"_id": oid})
+        if result.deleted_count:
+            await self.dbs["tracking"]["live"].update_many(
+                {"catalog_ids": catalog_id}, {"$pull": {"catalog_ids": catalog_id}}
+            )
+            await self.dbs["tracking"]["broadcasts"].update_many(
+                {"catalog_ids": catalog_id}, {"$pull": {"catalog_ids": catalog_id}}
+            )
+            await self.dbs["tracking"]["live"].update_many(
+                {"catalog_ids": {"$size": 0}}, {"$set": {"catalog_ids": ["default"]}}
+            )
+            await self.dbs["tracking"]["broadcasts"].update_many(
+                {"catalog_ids": {"$size": 0}}, {"$set": {"catalog_ids": ["default"]}}
+            )
+        return bool(result.deleted_count)
+
+    async def get_live_default_catalog_name(self) -> str:
+        """Varsayılan 'Canlı Yayın' kataloğu yeniden adlandırılmışsa o adı, aksi
+        halde boş string döndürür (boşsa çağıran taraf yerleşik etiketi kullanır)."""
+        doc = await self.dbs["tracking"]["catalog_settings"].find_one({"_id": "global"})
+        if doc and doc.get("live_default_name"):
+            return doc["live_default_name"]
+        return ""
+
+    async def set_live_default_catalog_name(self, name: str) -> bool:
+        """Varsayılan 'Canlı Yayın' kataloğunun görünen adını değiştirir.
+        Boş string gönderilirse yerleşik varsayılan isme geri döner."""
+        result = await self.dbs["tracking"]["catalog_settings"].update_one(
+            {"_id": "global"},
+            {"$set": {"live_default_name": name}},
+            upsert=True,
+        )
+        return bool(result.acknowledged)
 
     # ─── Yayın (Broadcast) CRUD ───────────────────────────────────────────────────
 
@@ -2730,6 +2829,8 @@ class Database:
         data.setdefault("order", 0)
         data.setdefault("active", False)
         data.setdefault("buffer_seconds", 15)
+        if not data.get("catalog_ids"):
+            data["catalog_ids"] = ["default"]
         result = await self.dbs["tracking"]["broadcasts"].insert_one(data)
         data["_id"] = str(result.inserted_id)
         return convert_objectid_to_str(data)
@@ -2738,6 +2839,8 @@ class Database:
         """Mevcut yayını günceller."""
         from bson import ObjectId as _OID
         data["updated_at"] = datetime.utcnow()
+        if "catalog_ids" in data and not data["catalog_ids"]:
+            data["catalog_ids"] = ["default"]
         result = await self.dbs["tracking"]["broadcasts"].update_one(
             {"_id": _OID(broadcast_id)}, {"$set": data}
         )

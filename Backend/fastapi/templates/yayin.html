@@ -223,6 +223,18 @@
                 </div>
             </div>
 
+            <!-- Catalogs -->
+            <div>
+                <div class="flex items-center justify-between mb-1">
+                    <label class="block text-sm font-semibold">Kataloglar</label>
+                    <button onclick="openCatalogManager()" type="button" class="text-xs text-primary hover:underline">
+                        Katalogları Yönet
+                    </button>
+                </div>
+                <div id="bc-catalogs-list" class="flex flex-wrap gap-2 p-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent min-h-[42px]"></div>
+                <p class="text-xs theme-text-secondary mt-1">Bu yayının ekleneceği katalog(lar)ı seçin. Hiçbiri seçilmezse varsayılan katalog kullanılır.</p>
+            </div>
+
             <!-- Buffer / Delay -->
             <div>
                 <label class="block text-sm font-semibold mb-1">Önbellek Gecikmesi (saniye)</label>
@@ -313,6 +325,45 @@
         </div>
         <div id="status-modal-body" class="space-y-3 text-sm theme-text-secondary">
             <!-- dynamically filled -->
+        </div>
+    </div>
+</div>
+
+<!-- ═══════════════════════════ KATALOG YÖNETİMİ MODAL ═══════════════════════════ -->
+<div id="catalog-manager-modal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4">
+    <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" onclick="closeCatalogManager()"></div>
+    <div class="relative theme-card rounded-2xl shadow-2xl w-full max-w-md z-10 p-6 space-y-5">
+        <div class="flex items-center justify-between">
+            <h3 class="text-lg font-bold">Katalogları Yönet</h3>
+            <button onclick="closeCatalogManager()" class="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                </svg>
+            </button>
+        </div>
+
+        <div>
+            <label class="block text-xs font-semibold mb-1">Varsayılan Katalog Adı</label>
+            <div class="flex gap-2">
+                <input id="default-catalog-name" type="text" placeholder="Canlı Yayın"
+                    class="flex-1 px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent focus:outline-none focus:ring-2 focus:ring-primary">
+                <button onclick="saveDefaultCatalogName()" class="px-3 py-2 bg-primary text-white rounded-lg text-xs font-semibold hover:opacity-90 transition">Kaydet</button>
+            </div>
+            <p class="text-xs theme-text-secondary mt-1">Stremio'da görünen ana canlı yayın kataloğunun adı.</p>
+        </div>
+
+        <div>
+            <label class="block text-xs font-semibold mb-1">Yeni Katalog Oluştur</label>
+            <div class="flex gap-2">
+                <input id="new-catalog-name" type="text" placeholder="örn. Spor Kanalları"
+                    class="flex-1 px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent focus:outline-none focus:ring-2 focus:ring-primary">
+                <button onclick="createLiveCatalog()" class="px-3 py-2 bg-primary text-white rounded-lg text-xs font-semibold hover:opacity-90 transition">Ekle</button>
+            </div>
+        </div>
+
+        <div>
+            <label class="block text-xs font-semibold mb-2">Ek Kataloglar</label>
+            <div id="catalog-manager-list" class="space-y-2 max-h-64 overflow-y-auto"></div>
         </div>
     </div>
 </div>
@@ -423,6 +474,145 @@ const API = {
 let editingId = null;
 let deleteTargetId = null;
 
+function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;'); }
+
+/* ── Canlı Yayın Katalogları (birden fazla katalog desteği) ── */
+let liveCatalogs = [];
+let defaultCatalogName = 'Canlı Yayın';
+
+async function loadLiveCatalogs() {
+    try {
+        const data = await fetch('/api/live-catalogs').then(r => r.json());
+        liveCatalogs = data.catalogs || [];
+        defaultCatalogName = data.default_name || 'Canlı Yayın';
+    } catch (e) {
+        liveCatalogs = [];
+    }
+    renderCatalogCheckboxes(['default']);
+}
+
+function renderCatalogCheckboxes(selected) {
+    selected = selected && selected.length ? selected : ['default'];
+    const el = document.getElementById('bc-catalogs-list');
+    if (!el) return;
+    const all = [{ _id: 'default', name: defaultCatalogName || 'Canlı Yayın' }, ...liveCatalogs];
+    el.innerHTML = all.map(c => `
+        <label class="bc-catalog-label inline-flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-full border cursor-pointer transition
+            ${selected.includes(c._id) ? 'bg-primary/10 border-primary text-primary' : 'border-gray-300 dark:border-gray-600 theme-text-secondary'}">
+            <input type="checkbox" value="${c._id}" class="bc-catalog-checkbox hidden" ${selected.includes(c._id) ? 'checked' : ''}
+                onchange="toggleCatalogLabel(this)">
+            ${escHtml(c.name)}
+        </label>`).join('');
+}
+
+function toggleCatalogLabel(input) {
+    const label = input.closest('label');
+    label.classList.toggle('bg-primary/10', input.checked);
+    label.classList.toggle('border-primary', input.checked);
+    label.classList.toggle('text-primary', input.checked);
+    label.classList.toggle('border-gray-300', !input.checked);
+    label.classList.toggle('dark:border-gray-600', !input.checked);
+    label.classList.toggle('theme-text-secondary', !input.checked);
+}
+
+function getSelectedCatalogs() {
+    const boxes = document.querySelectorAll('.bc-catalog-checkbox');
+    const sel = Array.from(boxes).filter(b => b.checked).map(b => b.value);
+    return sel.length ? sel : ['default'];
+}
+
+function openCatalogManager() {
+    document.getElementById('default-catalog-name').value = defaultCatalogName === 'Canlı Yayın' ? '' : defaultCatalogName;
+    document.getElementById('default-catalog-name').placeholder = 'Canlı Yayın';
+    renderCatalogManagerList();
+    document.getElementById('catalog-manager-modal').classList.remove('hidden');
+}
+function closeCatalogManager() {
+    document.getElementById('catalog-manager-modal').classList.add('hidden');
+}
+
+function renderCatalogManagerList() {
+    const el = document.getElementById('catalog-manager-list');
+    if (!liveCatalogs.length) {
+        el.innerHTML = '<p class="text-xs theme-text-secondary">Henüz ek katalog yok.</p>';
+        return;
+    }
+    el.innerHTML = liveCatalogs.map(c => `
+        <div class="flex items-center gap-2">
+            <input type="text" value="${escHtml(c.name)}" data-id="${c._id}"
+                class="catalog-rename-input flex-1 px-2 py-1.5 text-xs rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent focus:outline-none focus:ring-2 focus:ring-primary">
+            <button onclick="renameLiveCatalog('${c._id}')" class="px-2 py-1.5 text-xs bg-blue-600 text-white rounded-lg hover:opacity-90 transition">Kaydet</button>
+            <button onclick="deleteLiveCatalog('${c._id}', '${c.name.replace(/'/g, "\\'")}')" class="px-2 py-1.5 text-xs bg-red-600 text-white rounded-lg hover:opacity-90 transition">Sil</button>
+        </div>`).join('');
+}
+
+async function saveDefaultCatalogName() {
+    const name = document.getElementById('default-catalog-name').value.trim();
+    try {
+        const res = await fetch('/api/live-catalogs/default', {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name })
+        });
+        if (!res.ok) throw new Error('İstek başarısız');
+        defaultCatalogName = name || 'Canlı Yayın';
+        showToast('Varsayılan katalog adı güncellendi ✓');
+        renderCatalogCheckboxes(getSelectedCatalogs());
+    } catch (e) {
+        showToast('Hata: ' + e.message, false);
+    }
+}
+
+async function createLiveCatalog() {
+    const nameEl = document.getElementById('new-catalog-name');
+    const name = nameEl.value.trim();
+    if (!name) { showToast('Katalog adı giriniz', false); return; }
+    try {
+        const res = await fetch('/api/live-catalogs', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name })
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        nameEl.value = '';
+        await loadLiveCatalogs();
+        renderCatalogCheckboxes(getSelectedCatalogs());
+        renderCatalogManagerList();
+        showToast('Katalog oluşturuldu ✓');
+    } catch (e) {
+        showToast('Hata: ' + e.message, false);
+    }
+}
+
+async function renameLiveCatalog(id) {
+    const input = document.querySelector(`.catalog-rename-input[data-id="${id}"]`);
+    const name = input.value.trim();
+    if (!name) { showToast('Katalog adı boş olamaz', false); return; }
+    try {
+        const res = await fetch(`/api/live-catalogs/${id}`, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name })
+        });
+        if (!res.ok) throw new Error('İstek başarısız');
+        await loadLiveCatalogs();
+        renderCatalogCheckboxes(getSelectedCatalogs());
+        renderCatalogManagerList();
+        showToast('Katalog güncellendi ✓');
+    } catch (e) {
+        showToast('Hata: ' + e.message, false);
+    }
+}
+
+async function deleteLiveCatalog(id, name) {
+    if (!confirm(`"${name}" kataloğunu silmek istediğinize emin misiniz? Bu kataloğa atanmış yayınlar varsayılan kataloğa geri döner.`)) return;
+    try {
+        const res = await fetch(`/api/live-catalogs/${id}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error('İstek başarısız');
+        await loadLiveCatalogs();
+        renderCatalogCheckboxes(getSelectedCatalogs());
+        renderCatalogManagerList();
+        showToast('Katalog silindi ✓');
+    } catch (e) {
+        showToast('Hata: ' + e.message, false);
+    }
+}
+
 /* ── Toast ── */
 function showToast(msg, ok=true) {
     const t = document.getElementById('toast');
@@ -466,6 +656,7 @@ function openEditModal(bc) {
     document.getElementById('bc-poster').value = bc.poster || '';
     document.getElementById('bc-desc').value   = bc.description || '';
     setGenreSelection('bc', bc.genres || []);
+    renderCatalogCheckboxes(bc.catalog_ids && bc.catalog_ids.length ? bc.catalog_ids : ['default']);
     document.getElementById('bc-buffer').value = bc.buffer_seconds ?? 60;
     document.getElementById('bc-order').value  = bc.order ?? 0;
     // Zamanlanmış çiftleri yükle
@@ -489,6 +680,7 @@ function closeModal() {
 function clearForm() {
     ['bc-name','bc-url','bc-logo','bc-poster','bc-desc'].forEach(id => document.getElementById(id).value = '');
     setGenreSelection('bc', []);
+    renderCatalogCheckboxes(['default']);
     document.getElementById('bc-buffer').value = 60;
     document.getElementById('bc-order').value  = 0;
     document.getElementById('schedule-rows').innerHTML = '';
@@ -512,6 +704,7 @@ async function saveBroadcast() {
         poster:         document.getElementById('bc-poster').value.trim(),
         description:    document.getElementById('bc-desc').value.trim(),
         genres:         document.getElementById('bc-genres').value.split(',').map(s=>s.trim()).filter(Boolean),
+        catalog_ids:    getSelectedCatalogs(),
         buffer_seconds: parseInt(document.getElementById('bc-buffer').value) || 60,
         order:          parseInt(document.getElementById('bc-order').value) || 0,
         schedules:      _collectSchedules(),
@@ -727,6 +920,7 @@ async function loadBroadcasts() {
 
 document.addEventListener('DOMContentLoaded', () => {
     loadBroadcasts();
+    loadLiveCatalogs();
     initGenreSelector('bc', VOD_GENRES);
 });
 

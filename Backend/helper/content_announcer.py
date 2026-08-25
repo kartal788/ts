@@ -58,6 +58,31 @@ from Backend.pyrofork.bot import StreamBot
 #----- tekrar duyurulur.
 ANNOUNCE_COOLDOWN_HOURS = 18
 
+#----- TMDB görsel URL'lerindeki boyut segmentini (w92, w154, w185, w300,
+#----- w342, w500, w780 vb.) yakalamak için kullanılır.
+_TMDB_IMAGE_URL_RE = re.compile(
+    r"^(https?://image\.tmdb\.org/t/p/)(w\d+|original)(/.+)$"
+)
+
+
+def _tmdb_original_size(url: str) -> str:
+    """
+    poster_tr veritabanında küçük boyutlu (w500) olarak saklanır (bkz.
+    metadata.py -> get_lang_images). Duyuru gönderilirken bu görsel TMDB'den
+    geliyorsa, indirilip Telegram'a yüklenecek dosyanın kalitesi düşük
+    kalmasın diye w500 yerine "original" (tam boyut) URL'i kullanılır.
+    TMDB'den gelmeyen (örn. imdb/metahub) linkler dokunulmadan döner.
+    """
+    if not url:
+        return url
+    match = _TMDB_IMAGE_URL_RE.match(url)
+    if not match:
+        return url
+    prefix, size, suffix = match.groups()
+    if size == "original":
+        return url
+    return f"{prefix}original{suffix}"
+
 #----- Toplu ekleme (ör. art arda 100 film) sırasında duyurular art arda,
 #----- kuyruğa alınarak TEK TEK gönderilir; aralarında bu kadar saniye
 #----- beklenir. Telegram'ın kanal/grup flood ve spam korumasına takılmamak
@@ -407,7 +432,7 @@ async def _announce(info: dict) -> None:
         #----- yoksa backdrop denenir. İlk dolu alan değil, ilk GERÇEKTEN
         #----- GÖNDERİLEBİLEN görsel kullanılır (dolu ama bozuk/kayıp link olabilir).
         posters = [
-            info.get("poster_tr"),
+            _tmdb_original_size(info.get("poster_tr")),
             info.get("poster"),
             info.get("backdrop_tr"),
             info.get("backdrop"),
@@ -423,7 +448,7 @@ async def _announce(info: dict) -> None:
             info.get("backdrop_tr"),
             info.get("backdrop"),
             info.get("backdrop_de"),
-            info.get("poster_tr"),
+            _tmdb_original_size(info.get("poster_tr")),
             info.get("poster"),
             info.get("poster_de"),
         ]

@@ -26,7 +26,7 @@
         <div class="flex items-center justify-between mb-4 gap-3 flex-wrap">
             <div>
                 <h2 class="text-xl font-semibold text-text">Katalog Sıralaması</h2>
-                <p class="text-sm theme-text-secondary mt-1">Üyelerin Stremio eklentisinde göreceği varsayılan katalog sırasını buradan sürükleyip bırakarak belirleyin. Bir üye kendi Stremio ayarlar sayfasından kişisel bir sıra belirlerse, o kişi için burada belirlediğiniz varsayılan sıranın yerine kendi sırası kullanılır.</p>
+                <p class="text-sm theme-text-secondary mt-1">Üyelerin Stremio eklentisinde göreceği varsayılan katalog sırasını buradan belirleyin. Sıra numarası kutusuna istediğiniz numarayı yazıp Enter'a basın, ▲/▼ oklarıyla bir yer taşıyın ya da satırı sürükleyin. Bir üye kendi Stremio ayarlar sayfasından kişisel bir sıra belirlerse, o kişi için burada belirlediğiniz varsayılan sıranın yerine kendi sırası kullanılır.</p>
             </div>
             <div class="flex flex-col items-end gap-1 shrink-0">
                 <button onclick="saveCatalogOrder()"
@@ -187,17 +187,80 @@
             wrap.innerHTML = '<div class="theme-card border rounded-xl p-6 text-center theme-text-secondary text-sm">Sıralanacak katalog bulunamadı.</div>';
             return;
         }
-        wrap.innerHTML = list.map(it => `
+        wrap.innerHTML = list.map((it, idx) => `
             <div class="order-item theme-card border rounded-lg px-3 py-2.5 flex items-center gap-3 ${it.enabled ? '' : 'opacity-50'}"
                 draggable="true" data-id="${escapeAttr(it.id)}">
-                <span class="drag-handle theme-text-secondary cursor-grab select-none" title="Sürükle">⠿</span>
+                <input type="number" class="order-num w-14 shrink-0 px-1.5 py-1 text-sm text-center font-semibold rounded-md border theme-card focus:outline-none focus:ring-2 focus:ring-primary"
+                    value="${idx + 1}" min="1" max="${list.length}" title="Sıra numarası — değiştirip Enter'a basın">
+                <div class="flex flex-col shrink-0 -my-1">
+                    <button type="button" class="order-up theme-text-secondary hover:text-primary leading-none px-1" title="Yukarı taşı">
+                        <i class="fas fa-caret-up"></i>
+                    </button>
+                    <button type="button" class="order-down theme-text-secondary hover:text-primary leading-none px-1" title="Aşağı taşı">
+                        <i class="fas fa-caret-down"></i>
+                    </button>
+                </div>
+                <span class="drag-handle theme-text-secondary cursor-grab select-none hidden sm:inline" title="Sürükle">⠿</span>
                 <span class="text-sm font-medium text-text flex-1 truncate">${escapeHtml(it.label)}</span>
                 ${it.kind === 'custom' ? '<span class="text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary shrink-0">Özel</span>' : ''}
+                ${it.kind === 'live' ? '<span class="text-xs px-2 py-0.5 rounded-full bg-red-500/10 text-red-500 shrink-0">Canlı Yayın</span>' : ''}
                 <span class="text-xs px-2 py-0.5 rounded-full bg-white/5 theme-text-secondary shrink-0">${escapeHtml(it.type_label)}</span>
                 ${it.enabled ? '' : '<span class="text-xs px-2 py-0.5 rounded-full bg-gray-500/10 theme-text-secondary shrink-0">Kapalı</span>'}
             </div>
         `).join('');
         _initOrderDrag(wrap);
+        _initOrderControls(wrap);
+    }
+
+    // Tüm .order-num inputlarını, DOM'daki mevcut sıraya göre 1'den yeniden numaralandırır.
+    function _renumberOrderList(wrap) {
+        wrap.querySelectorAll('.order-item').forEach((item, idx) => {
+            const input = item.querySelector('.order-num');
+            if (input) input.value = idx + 1;
+        });
+    }
+
+    // Bir order-item'ı verilen 1-tabanlı pozisyona taşır (sayı kutusundan girilen değer).
+    function _moveToPosition(wrap, item, pos) {
+        const items = [...wrap.querySelectorAll('.order-item')];
+        const total = items.length;
+        pos = Math.max(1, Math.min(total, Math.round(pos) || 1));
+        const targetIdx = pos - 1;
+        item.remove();
+        const remaining = [...wrap.querySelectorAll('.order-item')];
+        if (targetIdx >= remaining.length) {
+            wrap.appendChild(item);
+        } else {
+            wrap.insertBefore(item, remaining[targetIdx]);
+        }
+        _renumberOrderList(wrap);
+    }
+
+    // Sayı kutusu + yukarı/aşağı oklarıyla sıralama (sürükle-bırağa alternatif, daha kolay).
+    function _initOrderControls(wrap) {
+        wrap.querySelectorAll('.order-item').forEach(item => {
+            const numInput = item.querySelector('.order-num');
+            numInput.addEventListener('change', () => _moveToPosition(wrap, item, parseInt(numInput.value, 10)));
+            numInput.addEventListener('keydown', e => { if (e.key === 'Enter') numInput.blur(); });
+            numInput.addEventListener('click', e => e.stopPropagation());
+
+            item.querySelector('.order-up').addEventListener('click', () => {
+                const items = [...wrap.querySelectorAll('.order-item')];
+                const idx = items.indexOf(item);
+                if (idx > 0) {
+                    wrap.insertBefore(item, items[idx - 1]);
+                    _renumberOrderList(wrap);
+                }
+            });
+            item.querySelector('.order-down').addEventListener('click', () => {
+                const items = [...wrap.querySelectorAll('.order-item')];
+                const idx = items.indexOf(item);
+                if (idx < items.length - 1) {
+                    wrap.insertBefore(items[idx + 1], item);
+                    _renumberOrderList(wrap);
+                }
+            });
+        });
     }
 
     function _initOrderDrag(list) {

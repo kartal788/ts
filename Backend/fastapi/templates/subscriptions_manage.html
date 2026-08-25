@@ -1143,8 +1143,19 @@
         document.getElementById('days-input-group').style.display = showDays ? 'block' : 'none';
         document.getElementById('btn-user-save').className = btnClasses;
         document.getElementById('btn-user-save').innerText = (action === 'delete') ? 'Sil' : 'Onayla';
-        if (!showDays) { document.getElementById('manage-days').value = 0; document.getElementById('manage-days').removeAttribute('required'); }
-        else document.getElementById('manage-days').setAttribute('required', 'required');
+        if (!showDays) {
+            const daysInput = document.getElementById('manage-days');
+            daysInput.value = 0;
+            daysInput.removeAttribute('required');
+            // "min" kısıtı required olmasa bile geçerlidir; alan gizliyken (display:none)
+            // tarayıcı bu geçersiz değeri sessizce engelleyip formu hiç göndermiyordu.
+            // disabled yaparak alanı constraint validation ve gönderimden tamamen hariç tutuyoruz.
+            daysInput.disabled = true;
+        } else {
+            const daysInput = document.getElementById('manage-days');
+            daysInput.disabled = false;
+            daysInput.setAttribute('required', 'required');
+        }
 
         const modal = document.getElementById('user-modal');
         modal.classList.remove('hidden');
