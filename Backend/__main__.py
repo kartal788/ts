@@ -112,6 +112,14 @@ async def start_services():
         from Backend.pyrofork.plugins.ekle import cleanup_gdrive_orphans
         loop.create_task(cleanup_gdrive_orphans())
 
+        # Başlangıç: Google Çeviri'nin bazen "çeviri" yerine döndürdüğü kendi
+        # hata sayfasının (Error 500 ... That's an error ...) veritabanına
+        # yazılmış eski kayıtlarını TMDB'den gelen gerçek veriyle otomatik
+        # düzelt (Google çeviri KULLANILMAZ). İşlem idempotenttir, her
+        # başlangıçta güvenle yeniden çalışır.
+        from Backend.scripts.fix_translate_error_text import run_fix_translate_error_text
+        loop.create_task(run_fix_translate_error_text(apply=True))
+
         # Start Subscription Background Task
         from Backend.config import Telegram
 

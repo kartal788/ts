@@ -49,6 +49,7 @@ from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from Backend import db
 from Backend.helper.settings_manager import SettingsManager
+from Backend.helper.metadata import _translate_with_retry, TRANSLATE_CACHE
 from Backend.logger import LOGGER
 from Backend.pyrofork.bot import StreamBot
 
@@ -67,6 +68,17 @@ ANNOUNCE_QUEUE_DELAY_SECONDS = 3
 #----- denenir (mesaj asla sessizce terk edilmez). En fazla bu kadar deneme
 #----- yapılır; hepsi başarısız olursa hata loglanır ve o duyuru atlanır.
 ANNOUNCE_MAX_FLOODWAIT_RETRIES = 5
+
+#----- metadata() içinde description_tr çevirisi başarısız olup (Google hata
+#----- sayfası) orijinal (İngilizce) metne düşerse, duyuru bu haliyle
+#----- gönderilirdi. Bunu önlemek için, duyuru gönderilmeden HEMEN ÖNCE
+#----- description_tr == description (kaynakla birebir aynı) durumu tespit
+#----- edilir ve en fazla ANNOUNCE_TRANSLATE_MAX_ATTEMPTS kez, aralarında
+#----- ANNOUNCE_TRANSLATE_RETRY_DELAY_SECONDS saniye beklenerek yeniden
+#----- çeviri denenir. Tüm denemeler de başarısız olursa duyuru yine de
+#----- (orijinal metinle) gönderilir — sonsuza kadar beklemez.
+ANNOUNCE_TRANSLATE_RETRY_DELAY_SECONDS = 20
+ANNOUNCE_TRANSLATE_MAX_ATTEMPTS = 3
 
 # t.me/c/<internal_id>/<topic_id>[/<mesaj_id>]  (özel kanal/grup)
 _TME_C_RE = re.compile(
@@ -187,6 +199,52 @@ def _detect_cam_quality_and_audio(info: dict) -> Tuple[bool, Optional[str]]:
         audio = None
 
     return True, audio
+
+
+#----- description_tr, kaynak description ile birebir aynıysa (metadata()
+#----- sırasında Google Translate'in geçici hata sayfasına takılıp orijinale
+#----- düştüğü anlamına gelir) duyuru gönderilmeden önce bunu en fazla
+#----- ANNOUNCE_TRANSLATE_MAX_ATTEMPTS kez daha, aralarında
+#----- ANNOUNCE_TRANSLATE_RETRY_DELAY_SECONDS saniye bekleyerek yeniden
+#----- dener.
+#-----
+#----- ÖNEMLİ: translate_text_safe() DEĞİL, doğrudan _translate_with_retry()
+#----- çağrılır. Çünkü translate_text_safe, bu metnin az önce (metadata()
+#----- sırasında) başarısız olduğunu TRANSLATE_RECENT_FAIL'e 120 saniyeliğine
+#----- kaydetmiştir; bu pencere içinde tekrar çağrılırsa Google'a hiç
+#----- gitmeden doğrudan orijinal metni geri döner — yani "yeniden deneme"
+#----- aslında hiç denemeden başarısız sayılırdı. _translate_with_retry bu
+#----- kısayolu atlayıp gerçekten Google'a sorar.
+#-----
+#----- Başarılı olursa hem info["description_tr"] güncellenir hem de sonuç
+#----- TRANSLATE_CACHE'e yazılır (_translate_with_retry içinde), böylece bu
+#----- metin için ileride translate_text_safe çağrılırsa da cache'ten doğru
+#----- sonuç döner. Tüm denemeler başarısız olursa orijinal metinle duyuru
+#----- yine de gönderilir.
+async def _ensure_description_translated(info: dict) -> None:
+    source = (info.get("description") or "").strip()
+    current = (info.get("description_tr") or "").strip()
+    if len(source) < 3 or not current or current != source:
+        return  # boş / çok kısa / zaten (kaynaktan farklı) bir çeviri var
+
+    for attempt in range(1, ANNOUNCE_TRANSLATE_MAX_ATTEMPTS + 1):
+        await asyncio.sleep(ANNOUNCE_TRANSLATE_RETRY_DELAY_SECONDS)
+        result = await asyncio.to_thread(
+            _translate_with_retry, source, "tr", TRANSLATE_CACHE, "tr",
+        )
+        if result and result.strip() != source:
+            info["description_tr"] = result
+            LOGGER.info(
+                f"Duyuru öncesi description_tr çevirisi düzeltildi (deneme {attempt}/"
+                f"{ANNOUNCE_TRANSLATE_MAX_ATTEMPTS})."
+            )
+            return
+
+    LOGGER.warning(
+        f"Duyuru öncesi description_tr çevirisi {ANNOUNCE_TRANSLATE_MAX_ATTEMPTS} "
+        f"denemede de başarısız oldu (Google hata sayfası/erişim sorunu), "
+        f"orijinal metinle duyurulacak."
+    )
 
 
 #----- Duyuru metnini Türkçe olarak oluşturur
@@ -317,12 +375,29 @@ async def _announce(info: dict) -> None:
     if not settings.announce_new_content:
         return
 
+    #----- Görünürlük "Sadece seçtiğim üye(ler)" (visibility.mode == "selected")
+    #----- olarak ayarlanmış içerikler herkese açık değildir; bu yüzden genel
+    #----- Telegram kanalına/konusuna duyuru gönderilmez. Sadece "subscribers"
+    #----- (tüm aktif aboneler) veya görünürlük belirtilmemiş içerikler duyurulur.
+    visibility = info.get("visibility") or {}
+    if isinstance(visibility, dict) and visibility.get("mode") == "selected":
+        return
+
     chat, thread_id = _parse_target(getattr(settings, "announcement_channel", ""))
     if chat is None:
         return
 
     if not await _claim(info.get("media_type"), info.get("tmdb_id")):
         return
+
+    #----- Gönderimden hemen önce: description_tr hâlâ orijinal (çevrilmemiş)
+    #----- ise en fazla ANNOUNCE_TRANSLATE_MAX_ATTEMPTS kez daha dener
+    #----- (aralarında ANNOUNCE_TRANSLATE_RETRY_DELAY_SECONDS bekleyerek).
+    #----- Bu, kuyruktaki tek işçiyi (worker) bu süre boyunca meşgul eder;
+    #----- yani bu içerikten sonraki duyurular da bu kadar gecikir — bu,
+    #----- Telegram'a yarım çevrilmiş bir duyuru göndermemek için bilinçli
+    #----- bir tercihtir.
+    await _ensure_description_translated(info)
 
     caption = _build_caption(info)
     is_cam, _cam_audio = _detect_cam_quality_and_audio(info)
@@ -411,14 +486,35 @@ _announce_queue: Optional["asyncio.Queue[dict]"] = None
 _announce_worker_task = None
 
 
+#----- Duyuru kuyruğu tek işçili (worker) çalışır; bu değişkenler dışarıya
+#----- "şu an bekleyen veya işlenmekte olan bir duyuru var mı?" bilgisini
+#----- vermek için kullanılır. Amaç: canlı duyuru gönderimi ile arka planda
+#----- çalışabilecek başka Google Translate tüketicilerinin aynı anda istek
+#----- göndermesini önlemek — aynı paylaşımlı throttle/rate-limit'e tabi
+#----- olduklarından, aynı anda yüklenirlerse birbirlerini (ve normal içerik
+#----- ekleme çevirilerini) yavaşlatabilirler.
+_announce_busy_count = 0
+
+
+def has_pending_announcements() -> bool:
+    """Kuyrukta bekleyen VEYA şu an gönderilmekte/çevrilmekte olan bir duyuru
+    varsa True döner."""
+    if _announce_queue is not None and not _announce_queue.empty():
+        return True
+    return _announce_busy_count > 0
+
+
 async def _announce_worker() -> None:
+    global _announce_busy_count
     while True:
         info = await _announce_queue.get()
+        _announce_busy_count += 1
         try:
             await _announce(info)
         except Exception as e:
             LOGGER.error(f"Duyuru kuyruğu işlenirken beklenmeyen hata: {e}")
         finally:
+            _announce_busy_count -= 1
             _announce_queue.task_done()
         #----- Bir sonraki duyuruya geçmeden önce sabit bir bekleme uygulanır.
         await asyncio.sleep(ANNOUNCE_QUEUE_DELAY_SECONDS)

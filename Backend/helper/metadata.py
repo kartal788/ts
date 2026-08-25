@@ -1,5 +1,7 @@
 import asyncio
 import traceback
+import time
+import threading
 import httpx
 import PTN
 import re
@@ -17,6 +19,11 @@ from deep_translator import GoogleTranslator
 DELAY = 0
 tmdb_tr = aioTMDb(key=Telegram.TMDB_API, language="tr-TR", region="TR")
 tmdb_de = aioTMDb(key=Telegram.TMDB_API, language="de-DE", region="DE")
+# İngilizce (orijinal dil) TMDB istemcisi — "description"/"genres" gibi
+# orijinal dilde kalması gereken alanlar için (bkz. media_edit.html "Yeniden
+# Sorgula" akışı). tmdb_tr/tmdb_de zaten TR/DE dilinde döndüğünden bu iki
+# istemci orijinal/İngilizce veri için kullanılamaz.
+tmdb_en = aioTMDb(key=Telegram.TMDB_API, language="en-US")
 tmdb = tmdb_tr  # geriye dönük uyumluluk
 
 # ── LRU Cache ─────────────────────────────────────────────────────────────────
@@ -510,19 +517,119 @@ async def _tmdb_tv_details(tv_id):
         return None
 
 
-async def _tmdb_episode_details(tv_id, season, episode):
-    key = (tv_id, season, episode)
+async def _tmdb_episode_details(tv_id, season, episode, client=None):
+    """client verilmezse tmdb_tr (varsayılan `tmdb`) kullanılır. Almanca bölüm
+    başlığı/özeti için tmdb_de ile ayrıca çağrılabilir — her dil kendi cache
+    anahtarı altında (tv_id, season, episode, lang) tutulur."""
+    client = client or tmdb
+    lang_tag = "de" if client is tmdb_de else "tr"
+    key = (tv_id, season, episode, lang_tag)
     if key in EPISODE_CACHE:
         return EPISODE_CACHE[key]
     try:
         async with API_SEMAPHORE:
-            # details() parametresiz; dil tmdb (tmdb_tr) init'inden geliyor
-            details = await tmdb.episode(tv_id, season, episode).details()
+            # details() parametresiz; dil client init'inden geliyor (tr-TR / de-DE)
+            details = await client.episode(tv_id, season, episode).details()
         EPISODE_CACHE[key] = details
         return details
     except Exception:
         EPISODE_CACHE[key] = None
         return None
+
+#----- deep_translator, Google Translate'in web arayüzünü kazıyarak (scraping)
+#----- çalışır. Google bazen (rate limit / geçici sunucu sorunu vb. nedenle)
+#----- gerçek çeviri yerine HTTP 200 ile birlikte kendi jenerik hata sayfasını
+#----- ("Error 500 (Server Error)!!1 500. That's an error. ...") döner; bu
+#----- durumda kütüphane bir exception FIRLATMAZ, sayfadan kazıdığı bu hata
+#----- metnini "çeviri" diye geri verir ve bu metin veritabanına yazılır.
+#----- Bu fonksiyon, çeviri sonucunun bu bilinen Google hata sayfası imzasını
+#----- taşıyıp taşımadığını tespit eder.
+_TRANSLATE_ERROR_SIGNATURES = (
+    "that's an error",
+    "that's all we know",
+    "error 500 (server error)",
+)
+
+
+def _is_translate_error_page(text: str) -> bool:
+    if not text:
+        return False
+    lowered = text.lower()
+    return any(sig in lowered for sig in _TRANSLATE_ERROR_SIGNATURES)
+
+
+#----- Google Translate scraping (deep_translator) resmi bir API olmadığı için
+#----- rastgele/geçici olarak (özellikle art arda çok sayıda istek gittiğinde)
+#----- kendi hata sayfasını dönebiliyor. Tek denemede pes edip orijinal metne
+#----- düşmek yerine, kısa bir bekleme ile birkaç kez daha denemek çoğu geçici
+#----- hatayı kendiliğinden çözüyor. Deneme sayısını abartmıyoruz ki zaten
+#----- baskı altındaki Google'a daha da fazla istek göndermeyelim.
+_TRANSLATE_MAX_ATTEMPTS = 3
+_TRANSLATE_RETRY_DELAY_SECONDS = 20
+
+#----- GÖZLEM: Google'ın kötüye kullanım tespiti, aynı oturum/IP'den art arda
+#----- çok sayıda istek geldikçe KADEMELİ OLARAK SERTLEŞİYOR gibi görünüyor —
+#----- bot yeni açıldığında ilk birkaç dakika neredeyse hiç hata yokken, aynı
+#----- oturumda 15-20 dakika sonra hemen her çeviri başarısız olmaya başlıyor.
+#----- Bunu yavaşlatmak için TÜM Google Translate istekleri (canlı içerik
+#----- ekleme + retry denemeleri
+#----- dahil), süreç genelinde ortak bir "gate" ile aralıklandırılır: art
+#----- arda iki istek arasında en az bu kadar süre geçmesi zorunlu kılınır.
+_TRANSLATE_RATE_LOCK = threading.Lock()
+_TRANSLATE_LAST_CALL_TS = 0.0
+_TRANSLATE_MIN_INTERVAL_SECONDS = 1.0
+
+
+def _throttle_google_translate_call() -> None:
+    global _TRANSLATE_LAST_CALL_TS
+    with _TRANSLATE_RATE_LOCK:
+        now = time.monotonic()
+        wait = _TRANSLATE_LAST_CALL_TS + _TRANSLATE_MIN_INTERVAL_SECONDS - now
+        if wait > 0:
+            time.sleep(wait)
+        _TRANSLATE_LAST_CALL_TS = time.monotonic()
+
+
+#----- GÖZLEM: aynı bölüm/film birden fazla kalite dosyası ayrı ayrı
+#----- yüklendiğinde (örn. 720p sonra 1080p) her biri kendi metadata
+#----- fetch+çeviri döngüsünü tetikliyor. Çeviri başarısızlıkları KALICI
+#----- olarak cache'lenmiyor (kasıtlı — bir sonraki denemede tekrar
+#----- denenebilsin diye), bu yüzden aynı metin (örn. "Episode 4") birkaç
+#----- saniye/dakika arayla iki kez baştan sona 3 kez daha denenip Google'a
+#----- gereksiz ekstra yük bindiriyordu. Bu kısa ömürlü "az önce başarısız
+#----- oldu" önbelleği, aynı metnin bu pencere içinde tekrar denenmesini
+#----- (ve tekrar bir WARNING loglanmasını) atlayıp doğrudan orijinal metne
+#----- düşer; pencere kapandıktan sonra normal şekilde yeniden denenir.
+_RECENT_FAILURE_TTL_SECONDS = 120
+TRANSLATE_RECENT_FAIL:    _LRUCache = _LRUCache(maxsize=1000)
+TRANSLATE_DE_RECENT_FAIL: _LRUCache = _LRUCache(maxsize=1000)
+
+
+def _translate_with_retry(text: str, target: str, cache: "_LRUCache", log_lang_label: str) -> str:
+    last_result = text
+    for attempt in range(1, _TRANSLATE_MAX_ATTEMPTS + 1):
+        _throttle_google_translate_call()
+        try:
+            translated = GoogleTranslator(source="auto", target=target).translate(text)
+        except Exception:
+            translated = None
+
+        if translated and not _is_translate_error_page(translated):
+            cache[text] = translated
+            return translated
+
+        last_result = text
+        if attempt < _TRANSLATE_MAX_ATTEMPTS:
+            time.sleep(_TRANSLATE_RETRY_DELAY_SECONDS)
+
+    #----- Tüm denemeler başarısız oldu: orijinal metne düş, SONUCU CACHE'LEME
+    #----- ki bir sonraki gerçek çağrıda yeniden denenebilsin.
+    LOGGER.warning(
+        f"Çeviri ({log_lang_label}) {_TRANSLATE_MAX_ATTEMPTS} denemede de başarısız oldu "
+        f"(Google hata sayfası/erişim sorunu), orijinal metin kullanılıyor: {text[:60]!r}"
+    )
+    return last_result
+
 
 def translate_text_safe(text: str) -> str:
     if not text:
@@ -537,13 +644,14 @@ def translate_text_safe(text: str) -> str:
     if text in TRANSLATE_CACHE:
         return TRANSLATE_CACHE[text]
 
-    try:
-        translated = GoogleTranslator(source="auto", target="tr").translate(text)
-    except Exception:
-        translated = text
+    fail_ts = TRANSLATE_RECENT_FAIL.get(text)
+    if fail_ts is not None and (time.monotonic() - fail_ts) < _RECENT_FAILURE_TTL_SECONDS:
+        return text
 
-    TRANSLATE_CACHE[text] = translated
-    return translated
+    result = _translate_with_retry(text, "tr", TRANSLATE_CACHE, "tr")
+    if result == text:
+        TRANSLATE_RECENT_FAIL[text] = time.monotonic()
+    return result
 
 def translate_text_safe_de(text: str) -> str:
     """Verilen metni Almancaya çevirir. Hata durumunda orijinal metni döner."""
@@ -558,13 +666,14 @@ def translate_text_safe_de(text: str) -> str:
     if text in TRANSLATE_DE_CACHE:
         return TRANSLATE_DE_CACHE[text]
 
-    try:
-        translated = GoogleTranslator(source="auto", target="de").translate(text)
-    except Exception:
-        translated = text
+    fail_ts = TRANSLATE_DE_RECENT_FAIL.get(text)
+    if fail_ts is not None and (time.monotonic() - fail_ts) < _RECENT_FAILURE_TTL_SECONDS:
+        return text
 
-    TRANSLATE_DE_CACHE[text] = translated
-    return translated
+    result = _translate_with_retry(text, "de", TRANSLATE_DE_CACHE, "de")
+    if result == text:
+        TRANSLATE_DE_RECENT_FAIL[text] = time.monotonic()
+    return result
 
 def tur_genre_normalize(genres):
     """Türkçe genre normalize (geriye dönük uyumluluk için korunuyor)."""
@@ -1147,8 +1256,9 @@ async def _fetch_tv_metadata_impl(title, season, episode, encoded_string, year=N
             LOGGER.warning(f"TMDb TV details failed for id={tmdb_id}")
             return None
 
-        # Fetch episode
-        ep = await _tmdb_episode_details(tmdb_id, season, episode)
+        # Fetch episode (TR ve DE ayrı ayrı — her ikisi de doğrudan TMDB'den)
+        ep = await _tmdb_episode_details(tmdb_id, season, episode, tmdb_tr)
+        ep_de = await _tmdb_episode_details(tmdb_id, season, episode, tmdb_de)
 
         # Cast list
         credits = getattr(tv, "credits", None) or {}
@@ -1166,6 +1276,18 @@ async def _fetch_tv_metadata_impl(title, season, episode, encoded_string, year=N
         runtime_val = ep_runtime or series_runtime
         runtime = f"{runtime_val} min" if runtime_val else ""
 
+        # Bölüm başlığı/özeti: önce doğrudan TMDB (tr-TR / de-DE), boşsa Google çeviri
+        ep_name_fallback = getattr(ep, "name", f"S{season}E{episode}") if ep else f"S{season}E{episode}"
+        ep_overview_source = getattr(ep, "overview", "") if ep else ""
+        ep_title_tr_tmdb = (getattr(ep, "name", "") or "") if ep else ""
+        ep_title_de_tmdb = (getattr(ep_de, "name", "") or "") if ep_de else ""
+        ep_overview_tr_tmdb = (getattr(ep, "overview", "") or "") if ep else ""
+        ep_overview_de_tmdb = (getattr(ep_de, "overview", "") or "") if ep_de else ""
+        final_ep_title_tr = ep_title_tr_tmdb if ep_title_tr_tmdb else (await asyncio.to_thread(translate_text_safe, ep_name_fallback) if ep else ep_name_fallback)
+        final_ep_title_de = ep_title_de_tmdb if ep_title_de_tmdb else (await asyncio.to_thread(translate_text_safe_de, ep_name_fallback) if ep else ep_name_fallback)
+        final_ep_overview_tr = ep_overview_tr_tmdb if ep_overview_tr_tmdb else (await asyncio.to_thread(translate_text_safe, ep_overview_source) if ep_overview_source else "")
+        final_ep_overview_de = ep_overview_de_tmdb if ep_overview_de_tmdb else (await asyncio.to_thread(translate_text_safe_de, ep_overview_source) if ep_overview_source else "")
+
         _tv_imdb_id = getattr(getattr(tv, "external_ids", None), "imdb_id", None)
         return {
             "tmdb_id": tv.id,
@@ -1176,8 +1298,10 @@ async def _fetch_tv_metadata_impl(title, season, episode, encoded_string, year=N
             "year": getattr(tv.first_air_date, "year", 0) if getattr(tv, "first_air_date", None) else 0,
             "rate": getattr(tv, "vote_average", 0) or 0,
             "description": tv.overview or "",
-            "description_tr": translate_text_safe(tv.overview),
-            "description_de": getattr(tv, "overview_de", "") or translate_text_safe_de(tv.overview),
+            # tv zaten tmdb_tr (tr-TR) ile çekildiği için overview'ı doğrudan
+            # Türkçe'dir — Google çeviriye sadece TMDB boş döndüyse düşülür.
+            "description_tr": tv.overview or await asyncio.to_thread(translate_text_safe, tv.overview),
+            "description_de": getattr(tv, "overview_de", "") or await asyncio.to_thread(translate_text_safe_de, tv.overview),
             "poster": format_tmdb_image(tv.poster_path),
             "backdrop": format_tmdb_image(tv.backdrop_path, "original"),
             "logo": get_tmdb_logo(getattr(tv, "images", None)),
@@ -1201,13 +1325,13 @@ async def _fetch_tv_metadata_impl(title, season, episode, encoded_string, year=N
 
             "season_number": season,
             "episode_number": episode,
-            "episode_title": getattr(ep, "name", f"S{season}E{episode}") if ep else f"S{season}E{episode}",
-            "episode_title_tr": translate_text_safe(getattr(ep, "name", f"S{season}E{episode}")) if ep else f"S{season}E{episode}",
-            "episode_title_de": translate_text_safe_de(getattr(ep, "name", f"S{season}E{episode}")) if ep else f"S{season}E{episode}",
+            "episode_title": ep_name_fallback,
+            "episode_title_tr": final_ep_title_tr,
+            "episode_title_de": final_ep_title_de,
             "episode_backdrop": format_tmdb_image(getattr(ep, "still_path", None), "original") if ep else "",
-            "episode_overview": getattr(ep, "overview", "") if ep else "",
-            "episode_overview_tr": translate_text_safe(getattr(ep, "overview", "")) if ep else "",
-            "episode_overview_de": translate_text_safe_de(getattr(ep, "overview", "")) if ep else "",
+            "episode_overview": ep_overview_source,
+            "episode_overview_tr": final_ep_overview_tr,
+            "episode_overview_de": final_ep_overview_de,
             "episode_released": (
                 ep.air_date.strftime("%Y-%m-%dT05:00:00.000Z")
                 if getattr(ep, "air_date", None)
@@ -1229,12 +1353,21 @@ async def _fetch_tv_metadata_impl(title, season, episode, encoded_string, year=N
     # IMDb modunda da TMDb'den TR/DE baslik + gorsel cek (/turkce komutu mantigi)
     tr_title = title or imdb.get("title")
     de_title = imdb.get("title", title)
+    tr_desc_tmdb = ""  # TMDB'den (tr-TR) gelen açıklama — eşleşme doğrulanınca dolar
     de_desc = ""  # Başlangıçta boş; TMDB'den Almanca açıklama alınacak
+    tr_genres_tmdb: list = []  # TMDB'den (tr-TR) gelen tür adları — eşleşme doğrulanınca dolar
     poster_tr, backdrop_tr, logo_tr = "", "", ""
     poster_de, backdrop_de, logo_de = "", "", ""
     genres_de = []
     certification_tr = certification_de = certification_us = None
     series_status = None
+    tv_details = None
+    # TMDB, aradığı imdb_id ile eşleşmeyen (yanlış) bir kayıt döndürebilir.
+    # Bu durumda TMDB'nin TR/DE metin verisi (başlık, açıklama, tür) YANLIŞ
+    # içeriğe ait olabileceğinden kullanılmaz; sadece görsel/sertifika gibi
+    # zaten var olan davranış korunur. imdb eşleştiği DOĞRULANMADIKÇA metin
+    # alanları için TMDB'ye güvenilmez.
+    imdb_match = False
 
     raw_tmdb_id = imdb.get("moviedb_id")
     fallback_tmdb_id = int(raw_tmdb_id) if raw_tmdb_id and str(raw_tmdb_id).isdigit() else None
@@ -1250,24 +1383,32 @@ async def _fetch_tv_metadata_impl(title, season, episode, encoded_string, year=N
         try:
             tv_details = await _tmdb_tv_details(fallback_tmdb_id)
             if tv_details:
-                tr_title = tv_details.name or tr_title
-                de_title = getattr(tv_details, "name_de", "") or de_title
-                # Almanca açıklamayı TMDB'den al (İngilizce IMDb plot değil)
-                de_desc = getattr(tv_details, "overview_de", "") or ""
                 poster_tr = getattr(tv_details, "poster_tr", "") or ""
                 backdrop_tr = getattr(tv_details, "backdrop_tr", "") or ""
                 logo_tr = getattr(tv_details, "logo_tr", "") or ""
                 poster_de = getattr(tv_details, "poster_de", "") or ""
                 backdrop_de = getattr(tv_details, "backdrop_de", "") or ""
                 logo_de = getattr(tv_details, "logo_de", "") or ""
-                genres_de = getattr(tv_details, "genres_de", []) or []
                 series_status = getattr(tv_details, "status", None)
-                # TMDB'den gelen imdb_id ile DB'ye yazılacak imdb_id aynıysa sertifikaları al
+                # TMDB'den gelen imdb_id ile DB'ye yazılacak imdb_id aynıysa
+                # (ya da TMDB imdb_id döndürmüyorsa) eşleşme doğrulanmış sayılır;
+                # sertifikalar VE TR/DE metin alanları (başlık, açıklama, tür)
+                # bu durumda TMDB'den kullanılır — aksi halde Google çeviriye
+                # düşülür.
                 tmdb_ext_imdb = getattr(getattr(tv_details, "external_ids", None), "imdb_id", None)
                 if not tmdb_ext_imdb or tmdb_ext_imdb == imdb_id:
+                    imdb_match = True
                     certification_tr = getattr(tv_details, "certification_tr", None)
                     certification_de = getattr(tv_details, "certification_de", None)
                     certification_us = getattr(tv_details, "certification_us", None)
+                    tr_title = tv_details.name or tr_title
+                    de_title = getattr(tv_details, "name_de", "") or de_title
+                    # TR açıklama: tmdb_tr (tr-TR) çağrısından gelen overview
+                    tr_desc_tmdb = tv_details.overview or ""
+                    # DE açıklama: TMDB'den (İngilizce IMDb plot değil)
+                    de_desc = getattr(tv_details, "overview_de", "") or ""
+                    tr_genres_tmdb = [g.name for g in (getattr(tv_details, "genres", None) or [])]
+                    genres_de = getattr(tv_details, "genres_de", []) or []
         except Exception as e:
             LOGGER.warning(f"IMDb TV mode: TMDb TR/DE enrichment failed [{imdb_id}] -> {e}")
 
@@ -1276,8 +1417,31 @@ async def _fetch_tv_metadata_impl(title, season, episode, encoded_string, year=N
     final_backdrop = imdb_images["backdrop"]
     final_logo = imdb_images["logo"]
 
+    # TR açıklama: imdb eşleşmesi doğrulanıp TMDB'den geldiyse onu kullan,
+    # yoksa Google çeviriye düş.
+    final_desc_tr = tr_desc_tmdb if tr_desc_tmdb else await asyncio.to_thread(translate_text_safe, imdb.get("plot", ""))
     # Almanca açıklama: TMDB'den Almanca geldiyse kullan, yoksa İngilizce plot'u çevir
-    final_desc_de = de_desc if de_desc else translate_text_safe_de(imdb.get("plot", ""))
+    final_desc_de = de_desc if de_desc else await asyncio.to_thread(translate_text_safe_de, imdb.get("plot", ""))
+
+    # ----- Bölüm (episode) alanları: önce TMDB'den denenir (imdb eşleşmesi
+    # doğrulanmışsa), TMDB'de bulunamazsa/boşsa Google çeviriye düşülür.
+    tmdb_ep_tr = tmdb_ep_de = None
+    if imdb_match and fallback_tmdb_id:
+        tmdb_ep_tr = await _tmdb_episode_details(fallback_tmdb_id, season, episode, tmdb_tr)
+        tmdb_ep_de = await _tmdb_episode_details(fallback_tmdb_id, season, episode, tmdb_de)
+
+    ep_title_tr_tmdb = (getattr(tmdb_ep_tr, "name", "") or "") if tmdb_ep_tr else ""
+    ep_title_de_tmdb = (getattr(tmdb_ep_de, "name", "") or "") if tmdb_ep_de else ""
+    ep_overview_tr_tmdb = (getattr(tmdb_ep_tr, "overview", "") or "") if tmdb_ep_tr else ""
+    ep_overview_de_tmdb = (getattr(tmdb_ep_de, "overview", "") or "") if tmdb_ep_de else ""
+
+    ep_title_source = ep.get("title", f"S{season}E{episode}")
+    ep_overview_source = ep.get("plot", "")
+
+    final_ep_title_tr = ep_title_tr_tmdb if ep_title_tr_tmdb else await asyncio.to_thread(translate_text_safe, ep_title_source)
+    final_ep_title_de = ep_title_de_tmdb if ep_title_de_tmdb else await asyncio.to_thread(translate_text_safe_de, ep_title_source)
+    final_ep_overview_tr = ep_overview_tr_tmdb if ep_overview_tr_tmdb else await asyncio.to_thread(translate_text_safe, ep_overview_source)
+    final_ep_overview_de = ep_overview_de_tmdb if ep_overview_de_tmdb else await asyncio.to_thread(translate_text_safe_de, ep_overview_source)
 
     return {
         "tmdb_id": raw_tmdb_id or imdb_id.replace("tt", ""),
@@ -1288,7 +1452,7 @@ async def _fetch_tv_metadata_impl(title, season, episode, encoded_string, year=N
         "year": imdb.get("releaseDetailed", {}).get("year", 0),
         "rate": imdb.get("rating", {}).get("star", 0),
         "description": imdb.get("plot", ""),
-        "description_tr": translate_text_safe(imdb.get("plot", "")),
+        "description_tr": final_desc_tr,
         "description_de": final_desc_de,
         "poster": final_poster,
         "backdrop": final_backdrop,
@@ -1302,7 +1466,7 @@ async def _fetch_tv_metadata_impl(title, season, episode, encoded_string, year=N
         "cast": imdb.get("cast", []),
         "runtime": str(imdb.get("runtime") or ""),
         "genres": imdb.get("genre", []),
-        "genres_tr": tur_genre_normalize(imdb.get("genre", [])),
+        "genres_tr": tur_genre_normalize(tr_genres_tmdb) if tr_genres_tmdb else tur_genre_normalize(imdb.get("genre", [])),
         "genres_de": de_genre_normalize(genres_de) if genres_de else de_genre_normalize(imdb.get("genre", [])),
         "certification_tr": certification_tr,
         "certification_de": certification_de,
@@ -1314,12 +1478,12 @@ async def _fetch_tv_metadata_impl(title, season, episode, encoded_string, year=N
         "season_number": season,
         "episode_number": episode,
         "episode_title": ep.get("title", f"S{season}E{episode}"),
-        "episode_title_tr": translate_text_safe(ep.get("title", f"S{season}E{episode}")),
-        "episode_title_de": translate_text_safe_de(ep.get("title", f"S{season}E{episode}")),
+        "episode_title_tr": final_ep_title_tr,
+        "episode_title_de": final_ep_title_de,
         "episode_backdrop": ep.get("image", ""),
         "episode_overview": ep.get("plot", ""),
-        "episode_overview_tr": translate_text_safe(ep.get("plot", "")),
-        "episode_overview_de": translate_text_safe_de(ep.get("plot", "")),
+        "episode_overview_tr": final_ep_overview_tr,
+        "episode_overview_de": final_ep_overview_de,
         "episode_released": str(ep.get("released", "")),
 
         "quality": quality,
@@ -1485,8 +1649,10 @@ async def _fetch_movie_metadata_impl(title, encoded_string, year=None, quality=N
             "year": getattr(movie.release_date, "year", 0) if getattr(movie, "release_date", None) else 0,
             "rate": getattr(movie, "vote_average", 0) or 0,
             "description": movie.overview or "",
-            "description_tr": translate_text_safe(movie.overview),
-            "description_de": getattr(movie, "overview_de", "") or translate_text_safe_de(movie.overview),
+            # movie zaten tmdb_tr (tr-TR) ile çekildiği için overview'ı doğrudan
+            # Türkçe'dir — Google çeviriye sadece TMDB boş döndüyse düşülür.
+            "description_tr": movie.overview or await asyncio.to_thread(translate_text_safe, movie.overview),
+            "description_de": getattr(movie, "overview_de", "") or await asyncio.to_thread(translate_text_safe_de, movie.overview),
             "poster": format_tmdb_image(movie.poster_path),
             "backdrop": format_tmdb_image(movie.backdrop_path, "original"),
             "logo": get_tmdb_logo(getattr(movie, "images", None)),
@@ -1521,12 +1687,15 @@ async def _fetch_movie_metadata_impl(title, encoded_string, year=None, quality=N
     # IMDb modunda da TMDb'den TR/DE baslik + gorsel cek (/turkce komutu mantigi)
     tr_title = imdb.get("title") or title
     de_title = imdb.get("title") or title
+    tr_desc_tmdb = ""  # TMDB'den (tr-TR) gelen açıklama — eşleşme doğrulanınca dolar
     de_desc = ""  # Başlangıçta boş; TMDB'den Almanca açıklama alınacak
+    tr_genres_tmdb: list = []  # TMDB'den (tr-TR) gelen tür adları — eşleşme doğrulanınca dolar
     poster_tr, backdrop_tr, logo_tr = "", "", ""
     poster_de, backdrop_de, logo_de = "", "", ""
     genres_de = []
     certification_tr = certification_de = certification_us = None
     _fallback_collection_id = None  # TMDB enrichment yoksa da tanımlı olsun
+    movie_details = None
 
     raw_tmdb_id = imdb.get("moviedb_id")
     fallback_tmdb_id = int(raw_tmdb_id) if raw_tmdb_id and str(raw_tmdb_id).isdigit() else None
@@ -1541,23 +1710,30 @@ async def _fetch_movie_metadata_impl(title, encoded_string, year=None, quality=N
         try:
             movie_details = await _tmdb_movie_details(fallback_tmdb_id)
             if movie_details:
-                tr_title = movie_details.title or tr_title
-                de_title = getattr(movie_details, "title_de", "") or de_title
-                # Almanca açıklamayı TMDB'den al (İngilizce IMDb plot değil)
-                de_desc = getattr(movie_details, "overview_de", "") or ""
                 poster_tr = getattr(movie_details, "poster_tr", "") or ""
                 backdrop_tr = getattr(movie_details, "backdrop_tr", "") or ""
                 logo_tr = getattr(movie_details, "logo_tr", "") or ""
                 poster_de = getattr(movie_details, "poster_de", "") or ""
                 backdrop_de = getattr(movie_details, "backdrop_de", "") or ""
                 logo_de = getattr(movie_details, "logo_de", "") or ""
-                genres_de = getattr(movie_details, "genres_de", []) or []
-                # TMDB'den gelen imdb_id ile DB'ye yazılacak imdb_id aynıysa sertifikaları al
+                # TMDB'den gelen imdb_id ile DB'ye yazılacak imdb_id aynıysa
+                # (ya da TMDB imdb_id döndürmüyorsa) eşleşme doğrulanmış sayılır;
+                # sertifikalar VE TR/DE metin alanları (başlık, açıklama, tür)
+                # bu durumda TMDB'den kullanılır — aksi halde Google çeviriye
+                # düşülür.
                 tmdb_ext_imdb = getattr(getattr(movie_details, "external_ids", None), "imdb_id", None)
                 if not tmdb_ext_imdb or tmdb_ext_imdb == imdb_id:
                     certification_tr = getattr(movie_details, "certification_tr", None)
                     certification_de = getattr(movie_details, "certification_de", None)
                     certification_us = getattr(movie_details, "certification_us", None)
+                    tr_title = movie_details.title or tr_title
+                    de_title = getattr(movie_details, "title_de", "") or de_title
+                    # TR açıklama: tmdb_tr (tr-TR) çağrısından gelen overview
+                    tr_desc_tmdb = movie_details.overview or ""
+                    # DE açıklama: TMDB'den (İngilizce IMDb plot değil)
+                    de_desc = getattr(movie_details, "overview_de", "") or ""
+                    tr_genres_tmdb = [g.name for g in (getattr(movie_details, "genres", None) or [])]
+                    genres_de = getattr(movie_details, "genres_de", []) or []
             _fallback_collection_id = getattr(
                 getattr(movie_details, "belongs_to_collection", None), "id", None
             )
@@ -1570,8 +1746,11 @@ async def _fetch_movie_metadata_impl(title, encoded_string, year=None, quality=N
     final_backdrop = imdb_images["backdrop"]
     final_logo = imdb_images["logo"]
 
+    # TR açıklama: imdb eşleşmesi doğrulanıp TMDB'den geldiyse onu kullan,
+    # yoksa Google çeviriye düş.
+    final_desc_tr = tr_desc_tmdb if tr_desc_tmdb else await asyncio.to_thread(translate_text_safe, imdb.get("plot", ""))
     # Almanca açıklama: TMDB'den Almanca geldiyse kullan, yoksa İngilizce plot'u çevir
-    final_desc_de = de_desc if de_desc else translate_text_safe_de(imdb.get("plot", ""))
+    final_desc_de = de_desc if de_desc else await asyncio.to_thread(translate_text_safe_de, imdb.get("plot", ""))
 
     return {
         "tmdb_id": raw_tmdb_id or imdb_id.replace("tt", ""),
@@ -1582,7 +1761,7 @@ async def _fetch_movie_metadata_impl(title, encoded_string, year=None, quality=N
         "year": imdb.get("releaseDetailed", {}).get("year", 0),
         "rate": imdb.get("rating", {}).get("star", 0),
         "description": imdb.get("plot", ""),
-        "description_tr": translate_text_safe(imdb.get("plot", "")),
+        "description_tr": final_desc_tr,
         "description_de": final_desc_de,
         "poster": final_poster,
         "backdrop": final_backdrop,
@@ -1598,7 +1777,7 @@ async def _fetch_movie_metadata_impl(title, encoded_string, year=None, quality=N
         "runtime": str(imdb.get("runtime") or ""),
         "media_type": "movie",
         "genres": imdb.get("genre", []),
-        "genres_tr": tur_genre_normalize(imdb.get("genre", [])),
+        "genres_tr": tur_genre_normalize(tr_genres_tmdb) if tr_genres_tmdb else tur_genre_normalize(imdb.get("genre", [])),
         "genres_de": de_genre_normalize(genres_de) if genres_de else de_genre_normalize(imdb.get("genre", [])),
         "collection_id": _fallback_collection_id,
         "certification_tr": certification_tr,

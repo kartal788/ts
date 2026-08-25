@@ -1335,6 +1335,7 @@ async def requery_media_api(request: Request, tmdb_id: int, db_index: int, media
         format_tmdb_image,
         get_tmdb_logo,
         _fetch_tmdb_images,
+        tmdb_en,
     )
     try:
         from Backend.helper.metadata import tur_genre_normalize, de_genre_normalize
@@ -1404,14 +1405,40 @@ async def requery_media_api(request: Request, tmdb_id: int, db_index: int, media
         def _img(path, size="w500"):
             return format_tmdb_image(path, size) if path else ""
 
+        # Orijinal dil (İngilizce) açıklama + türler: details (tmdb_tr) zaten
+        # Türkçe döndüğü için "description"/"genres" alanları YANLIŞLIKLA
+        # Türkçe oluyordu. Bu alanlar orijinal dilde kalmalı; bu yüzden ayrı
+        # bir en-US çağrısı ile gerçek orijinal veriyi çekiyoruz.
+        try:
+            if is_tv:
+                details_en = await tmdb_en.tv(new_tmdb_id).details()
+            else:
+                details_en = await tmdb_en.movie(new_tmdb_id).details()
+        except Exception as e:
+            _logger.warning(f"Requery: TMDB en-US detay çekilemedi [{new_tmdb_id}]: {e}")
+            details_en = None
+
+        original_overview = (getattr(details_en, "overview", "") or "") if details_en else ""
+        original_genres = (
+            [g.name for g in (getattr(details_en, "genres", None) or [])] if details_en else []
+        )
+        # en-US'te de bulunamazsa (nadir), en azından TMDB'nin tr-TR
+        # çağrısındaki veriye düşülür — boş kalmasındansa yine de bir şey
+        # göstermek daha iyi.
+        if not original_overview:
+            original_overview = getattr(details, "overview", "") or ""
+        if not original_genres:
+            original_genres = [g.name for g in (getattr(details, "genres", None) or [])]
+
         if is_tv:
-            genres_raw = [g.name for g in (getattr(details, "genres", None) or [])]
+            genres_raw = original_genres  # orijinal (İngilizce) tür adları
+            genres_tr_raw = [g.name for g in (getattr(details, "genres", None) or [])]  # TMDB tr-TR'den gerçek TR adları
             preview = {
                 "tmdb_id":        new_tmdb_id,
                 "title":          details.original_name or details.name or title,
                 "title_tr":       details.name or title,
                 "title_de":       getattr(details, "name_de", "") or details.original_name or title,
-                "description":    getattr(details, "overview", "") or "",
+                "description":    original_overview,
                 "description_tr": getattr(details, "overview_tr", "") or getattr(details, "overview", "") or "",
                 "description_de": getattr(details, "overview_de", "") or "",
                 "release_year":   getattr(getattr(details, "first_air_date", None), "year", None),
@@ -1426,7 +1453,7 @@ async def requery_media_api(request: Request, tmdb_id: int, db_index: int, media
                 "backdrop_de":    getattr(details, "backdrop_de", "") or "",
                 "logo_de":        getattr(details, "logo_de", "") or "",
                 "genres":         genres_raw,
-                "genres_tr":      tur_genre_normalize(genres_raw),
+                "genres_tr":      tur_genre_normalize(genres_tr_raw) if genres_tr_raw else tur_genre_normalize(genres_raw),
                 "genres_de":      de_genre_normalize(getattr(details, "genres_de", []) or []) or de_genre_normalize(genres_raw),
                 "original_language": getattr(details, "original_language", None),
                 "runtime":        str(getattr(details, "episode_run_time", [None])[0] or "") if getattr(details, "episode_run_time", None) else "",
@@ -1438,14 +1465,15 @@ async def requery_media_api(request: Request, tmdb_id: int, db_index: int, media
                 "_parsed_from":   best_filename_clean,
             }
         else:
-            genres_raw = [g.name for g in (getattr(details, "genres", None) or [])]
+            genres_raw = original_genres  # orijinal (İngilizce) tür adları
+            genres_tr_raw = [g.name for g in (getattr(details, "genres", None) or [])]  # TMDB tr-TR'den gerçek TR adları
             runtime_raw = getattr(details, "runtime", None)
             preview = {
                 "tmdb_id":        new_tmdb_id,
                 "title":          details.original_title or getattr(details, "title", None) or title,
                 "title_tr":       getattr(details, "title", None) or title,
                 "title_de":       getattr(details, "title_de", "") or details.original_title or title,
-                "description":    getattr(details, "overview", "") or "",
+                "description":    original_overview,
                 "description_tr": getattr(details, "overview_tr", "") or getattr(details, "overview", "") or "",
                 "description_de": getattr(details, "overview_de", "") or "",
                 "release_year":   getattr(getattr(details, "release_date", None), "year", None),
@@ -1460,7 +1488,7 @@ async def requery_media_api(request: Request, tmdb_id: int, db_index: int, media
                 "backdrop_de":    getattr(details, "backdrop_de", "") or "",
                 "logo_de":        getattr(details, "logo_de", "") or "",
                 "genres":         genres_raw,
-                "genres_tr":      tur_genre_normalize(genres_raw),
+                "genres_tr":      tur_genre_normalize(genres_tr_raw) if genres_tr_raw else tur_genre_normalize(genres_raw),
                 "genres_de":      de_genre_normalize(getattr(details, "genres_de", []) or []) or de_genre_normalize(genres_raw),
                 "original_language": getattr(details, "original_language", None),
                 "runtime":        str(runtime_raw) if runtime_raw else "",
