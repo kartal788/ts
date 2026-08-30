@@ -4955,16 +4955,25 @@ class Database:
         link: str,
         media_type: str,
         tmdb_id: int = 0,
+        title: str = "",
+        poster: str = "",
+        source: str = "bot",
     ) -> str:
         """
         Yeni bir içerik talebi kaydeder ve oluşturulan belge _id'sini string olarak döndürür.
+        title/poster verilirse (ör. bot /istek komutunda TMDB/IMDB'den çözüldüyse)
+        web akışıyla (submit_content_request) aynı şekilde kaydedilir; böylece
+        hatirlatmalar.html'deki "İçerik İstekleri" listesinde poster ve isim de görünür.
         """
         result = await self.dbs["tracking"]["content_requests"].insert_one({
             "user_id": user_id,
             "link": link,
             "media_type": media_type,
             "tmdb_id": tmdb_id,
+            "title": title,
+            "poster": poster,
             "status": "pending",
+            "source": source,
             "created_at": datetime.utcnow(),
         })
         return str(result.inserted_id)

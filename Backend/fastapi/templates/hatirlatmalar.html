@@ -1472,11 +1472,17 @@ async function loadMyRequests() {
       const date = item.created_at ? new Date(item.created_at).toLocaleDateString(CUR_LANG === 'tr' ? 'tr-TR' : 'en-US') : '';
       const srcIcon  = item.source === 'web' ? '🌐' : '🤖';
       const typeIcon = { movie: '🎬', tv: '📺', unknown: '🎥' }[item.media_type] || '🎥';
+      const posterUrl = item.poster
+        ? (item.poster.startsWith('http') ? item.poster : `https://image.tmdb.org/t/p/w300${item.poster}`)
+        : '';
 
       const row = document.createElement('div');
       row.style.cssText = 'display:flex;align-items:center;gap:.65rem;padding:.55rem .75rem;border-radius:.6rem;border:1px solid var(--c-border);background:var(--c-bg)';
       row.innerHTML = `
-        <span style="font-size:1rem;flex-shrink:0">${typeIcon}</span>
+        ${posterUrl
+          ? `<img src="${posterUrl}" alt="${item.title||''}" style="width:2.1rem;height:3rem;object-fit:cover;border-radius:.35rem;flex-shrink:0;background:var(--c-bg2)" onerror="this.style.display='none'">`
+          : `<span style="font-size:1rem;flex-shrink:0">${typeIcon}</span>`
+        }
         <div style="flex:1;min-width:0">
           <div style="font-size:.78rem;font-weight:600;color:var(--c-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
             ${item.title ? item.title : '<span style="opacity:.5">' + (item.link||'') + '</span>'}

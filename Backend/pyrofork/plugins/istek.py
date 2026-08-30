@@ -5,12 +5,40 @@ Yönetici (APPROVER_IDS / OWNER_ID) onaylar veya reddeder.
 import re
 from datetime import datetime
 
+import httpx
 from pyrogram import Client, filters, enums
 from pyrogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
 from Backend.config import Telegram
 from Backend import db
 from Backend.helper.imdb import get_detail as _imdb_get_detail
+
+
+async def _fetch_tmdb_title_poster(tmdb_id: int, media_type: str) -> tuple[str, str]:
+    """
+    Verilen tmdb_id + media_type (movie|tv) için TMDB API'den başlık ve poster
+    URL'ini çeker. hatirlatmalar.html'deki /api/uye/tmdb-meta endpoint'iyle aynı
+    mantığı kullanır; böylece bot üzerinden gelen /istek taleplerinde de
+    web'den gönderilen taleplerdeki gibi poster ve isim gösterilebilir.
+    """
+    api_key = Telegram.TMDB_API
+    if not api_key or not tmdb_id:
+        return "", ""
+    tv_or_movie = "tv" if media_type == "tv" else "movie"
+    try:
+        url = f"https://api.themoviedb.org/3/{tv_or_movie}/{tmdb_id}?api_key={api_key}&language=tr-TR"
+        async with httpx.AsyncClient(timeout=8) as client:
+            r = await client.get(url)
+        if not r.is_success:
+            return "", ""
+        meta = r.json()
+        title = meta.get("title") or meta.get("name") or ""
+        poster_path = meta.get("poster_path") or ""
+        poster = f"https://image.tmdb.org/t/p/w300{poster_path}" if poster_path else ""
+        return title, poster
+    except Exception as _e:
+        print(f"[istek] TMDB başlık/poster çekilemedi: {_e}")
+        return "", ""
 
 # IMDB & TMDB link desenleri
 _IMDB_RE  = re.compile(r"imdb\.com/title/(tt\d+)", re.IGNORECASE)
@@ -118,6 +146,8 @@ async def istek_command(client: Client, message: Message):
     # link olsun, DB'ye kaydetmeden ÖNCE tmdb_id / gerçek media_type'ı çözmeye çalış.
     reminder_set = False
     resolved_media_type = media_type  # IMDB linkinde "unknown" gelir, aşağıda güncellenir
+    resolved_title  = ""
+    resolved_poster = ""
 
     # IMDB linki ise Cinemeta üzerinden tmdb_id ve media_type'ı çöz
     if media_type == "unknown" and raw_imdb_id:
@@ -129,6 +159,8 @@ async def istek_command(client: Client, message: Message):
                     if _resolved:
                         tmdb_id = int(_resolved)
                         resolved_media_type = "tv" if _detail.get("type") in ("series", "tv") else "movie"
+                        resolved_title  = _detail.get("title", "") or ""
+                        resolved_poster = _detail.get("poster", "") or ""
                         break
         except Exception as _ie:
             print(f"[istek] IMDB->TMDB çözümleme hatası: {_ie}")
@@ -146,7 +178,13 @@ async def istek_command(client: Client, message: Message):
             except Exception as _te:
                 print(f"[istek] TMDB find API hatası: {_te}")
 
-    # İsteği veritabanına kaydet — artık çözülmüş media_type/tmdb_id ile
+    # Başlık/poster henüz çözülemediyse (TMDB linkiyle doğrudan gelindiyse veya
+    # Cinemeta üzerinden alınamadıysa) TMDB API'den çek — hatirlatmalar.html'deki
+    # "İçerik İstekleri" listesinde poster ve isim gösterebilmek için gerekli.
+    if not resolved_title and resolved_media_type in ("movie", "tv") and tmdb_id:
+        resolved_title, resolved_poster = await _fetch_tmdb_title_poster(tmdb_id, resolved_media_type)
+
+    # İsteği veritabanına kaydet — artık çözülmüş media_type/tmdb_id/title/poster ile
     # (IMDB linki başarıyla çözüldüyse "unknown" değil "movie"/"tv" olarak kaydedilir)
     await db.update_user_interaction(user_id, first_name, username)
     request_id = await db.add_content_request(
@@ -154,6 +192,9 @@ async def istek_command(client: Client, message: Message):
         link=link,
         media_type=resolved_media_type,
         tmdb_id=tmdb_id,
+        title=resolved_title,
+        poster=resolved_poster,
+        source="bot",
     )
 
     # Yöneticinin tarayıcısına Web Push bildirimi gönder (Telegram'dan bağımsız)
@@ -184,15 +225,19 @@ async def istek_command(client: Client, message: Message):
                 await col.insert_one({
                     "tmdb_id":  tmdb_id,
                     "db_index": 0,
-                    "title":    "",
-                    "poster":   "",
+                    "title":    resolved_title,
+                    "poster":   resolved_poster,
                     "status":   "",
                     "user_ids": [user_id],
                 })
             elif user_id not in (existing.get("user_ids") or []):
                 await col.update_one(
                     {"tmdb_id": tmdb_id},
-                    {"$addToSet": {"user_ids": user_id}},
+                    {"$addToSet": {"user_ids": user_id},
+                     "$set": {
+                         "title":  resolved_title or existing.get("title", ""),
+                         "poster": resolved_poster or existing.get("poster", ""),
+                     }},
                 )
             reminder_set = True
         except Exception as _re:
@@ -204,9 +249,10 @@ async def istek_command(client: Client, message: Message):
         limit_info = f"\n📊 Bu ay kalan istek hakkınız: <b>{remaining}</b>"
 
     reminder_info = "\n🔔 İçerik eklenince otomatik bildirim alacaksınız." if reminder_set else ""
+    title_info = f"\n🎬 <b>Başlık:</b> {resolved_title}" if resolved_title else ""
     await message.reply_text(
         f"✅ <b>İsteğiniz alındı!</b>\n\n"
-        f"🔗 <b>Link:</b> {link}\n"
+        f"🔗 <b>Link:</b> {link}{title_info}\n"
         f"📋 <b>Durum:</b> Yönetici incelemesi bekleniyor{limit_info}{reminder_info}",
         parse_mode=enums.ParseMode.HTML,
         disable_web_page_preview=True
@@ -223,12 +269,14 @@ async def istek_command(client: Client, message: Message):
     else:
         limit_admin_info = ""
 
+    title_admin_info = f"\n<b>📌 Başlık:</b> {resolved_title}" if resolved_title else ""
+
     admin_text = (
         f"<b>🎬 Yeni İçerik Talebi</b>\n\n"
         f"<b>👤 Kullanıcı:</b> {user_mention}\n"
         f"<b>🆔 ID:</b> <code>{user_id}</code>\n"
         f"<b>🔗 Kullanıcı Adı:</b> {username_str}\n"
-        f"<b>📂 Tür:</b> {type_label}\n"
+        f"<b>📂 Tür:</b> {type_label}{title_admin_info}\n"
         f"<b>🔗 Link:</b> {link}{limit_admin_info}\n\n"
         f"Talebi onaylayın veya reddedin."
     )

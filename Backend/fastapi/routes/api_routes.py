@@ -1435,7 +1435,7 @@ async def requery_media_api(request: Request, tmdb_id: int, db_index: int, media
             genres_tr_raw = [g.name for g in (getattr(details, "genres", None) or [])]  # TMDB tr-TR'den gerçek TR adları
             preview = {
                 "tmdb_id":        new_tmdb_id,
-                "title":          details.original_name or details.name or title,
+                "title":          (getattr(details_en, "name", "") or "") or details.original_name or details.name or title,
                 "title_tr":       details.name or title,
                 "title_de":       getattr(details, "name_de", "") or details.original_name or title,
                 "description":    original_overview,
@@ -1470,7 +1470,7 @@ async def requery_media_api(request: Request, tmdb_id: int, db_index: int, media
             runtime_raw = getattr(details, "runtime", None)
             preview = {
                 "tmdb_id":        new_tmdb_id,
-                "title":          details.original_title or getattr(details, "title", None) or title,
+                "title":          (getattr(details_en, "title", "") or "") or details.original_title or getattr(details, "title", None) or title,
                 "title_tr":       getattr(details, "title", None) or title,
                 "title_de":       getattr(details, "title_de", "") or details.original_title or title,
                 "description":    original_overview,

@@ -120,6 +120,11 @@
             <input id="adm-device-limit" type="number" min="0" step="1"
               class="mt-1 w-full text-sm px-3 py-2 rounded-xl border focus:outline-none focus:border-primary">
           </label>
+          <label class="text-xs theme-text-secondary col-span-2 sm:col-span-1">
+            Aylık İstek Limiti
+            <input id="adm-request-limit" type="number" min="0" step="1" placeholder="0 = sınırsız"
+              class="mt-1 w-full text-sm px-3 py-2 rounded-xl border focus:outline-none focus:border-primary">
+          </label>
         </div>
         <button onclick="saveLimits()" id="adm-save-limits-btn"
           class="mt-3 w-full px-4 py-2 bg-primary/10 hover:bg-primary/20 text-primary rounded-xl text-sm font-medium transition-all">
@@ -790,6 +795,7 @@
         document.getElementById("adm-monthly-limit").value = limits.monthly_limit_gb ?? "";
         document.getElementById("adm-speed-limit").value   = limits.speed_limit_mbps ?? "";
         document.getElementById("adm-device-limit").value  = limits.device_limit     ?? "";
+        document.getElementById("adm-request-limit").value = limits.monthly_request_limit ?? "";
       } else {
         document.getElementById("stat-limits").textContent = "Limitsiz";
       }
@@ -1432,6 +1438,7 @@
       monthly_limit_gb: parseFloat(document.getElementById("adm-monthly-limit").value) || 0,
       speed_limit_mbps: parseFloat(document.getElementById("adm-speed-limit").value)   || 0,
       device_limit:     parseInt(document.getElementById("adm-device-limit").value)    || 0,
+      monthly_request_limit: parseInt(document.getElementById("adm-request-limit").value) || 0,
     };
     try {
       const r = await fetch(`/api/tokens/${encodeURIComponent(MEMBER_TOKEN)}`, {

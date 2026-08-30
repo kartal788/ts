@@ -420,6 +420,16 @@ async def _tmdb_movie_details(movie_id):
             details.overview_de = ""
             details.genres_de = []
 
+        # İngilizce başlık (en-US) — orijinal dil İngilizce olmayan içeriklerde
+        # (ör. Korece bir dizi) original_title yerine gerçek İngilizce/uluslararası
+        # başlığı kullanabilmek için ayrı bir çağrı ile alınır.
+        try:
+            async with API_SEMAPHORE:
+                details_en = await tmdb_en.movie(movie_id).details()
+            details.title_en = getattr(details_en, "title", "") or ""
+        except Exception:
+            details.title_en = ""
+
         # Türkçe ve Almanca dil bazlı görseller
         tr_imgs = get_lang_images(details.images, "tr")
         de_imgs = get_lang_images(details.images, "de")
@@ -487,6 +497,16 @@ async def _tmdb_tv_details(tv_id):
             details.name_de = ""
             details.overview_de = ""
             details.genres_de = []
+
+        # İngilizce başlık (en-US) — orijinal dil İngilizce olmayan içeriklerde
+        # (ör. Korece bir dizi) original_name yerine gerçek İngilizce/uluslararası
+        # başlığı kullanabilmek için ayrı bir çağrı ile alınır.
+        try:
+            async with API_SEMAPHORE:
+                details_en = await tmdb_en.tv(tv_id).details()
+            details.name_en = getattr(details_en, "name", "") or ""
+        except Exception:
+            details.name_en = ""
 
         # Türkçe ve Almanca dil bazlı görseller
         tr_imgs = get_lang_images(details.images, "tr")
@@ -1292,7 +1312,7 @@ async def _fetch_tv_metadata_impl(title, season, episode, encoded_string, year=N
         return {
             "tmdb_id": tv.id,
             "imdb_id": _tv_imdb_id,
-            "title": tv.original_name or tv.name or title,
+            "title": getattr(tv, "name_en", "") or tv.original_name or tv.name or title,
             "title_tr": tv.name or title,
             "title_de": getattr(tv, "name_de", "") or tv.original_name or title,
             "year": getattr(tv.first_air_date, "year", 0) if getattr(tv, "first_air_date", None) else 0,
@@ -1353,6 +1373,7 @@ async def _fetch_tv_metadata_impl(title, season, episode, encoded_string, year=N
     # IMDb modunda da TMDb'den TR/DE baslik + gorsel cek (/turkce komutu mantigi)
     tr_title = title or imdb.get("title")
     de_title = imdb.get("title", title)
+    en_title = imdb.get("title") or title
     tr_desc_tmdb = ""  # TMDB'den (tr-TR) gelen açıklama — eşleşme doğrulanınca dolar
     de_desc = ""  # Başlangıçta boş; TMDB'den Almanca açıklama alınacak
     tr_genres_tmdb: list = []  # TMDB'den (tr-TR) gelen tür adları — eşleşme doğrulanınca dolar
@@ -1403,6 +1424,7 @@ async def _fetch_tv_metadata_impl(title, season, episode, encoded_string, year=N
                     certification_us = getattr(tv_details, "certification_us", None)
                     tr_title = tv_details.name or tr_title
                     de_title = getattr(tv_details, "name_de", "") or de_title
+                    en_title = getattr(tv_details, "name_en", "") or en_title
                     # TR açıklama: tmdb_tr (tr-TR) çağrısından gelen overview
                     tr_desc_tmdb = tv_details.overview or ""
                     # DE açıklama: TMDB'den (İngilizce IMDb plot değil)
@@ -1446,7 +1468,7 @@ async def _fetch_tv_metadata_impl(title, season, episode, encoded_string, year=N
     return {
         "tmdb_id": raw_tmdb_id or imdb_id.replace("tt", ""),
         "imdb_id": imdb_id,
-        "title": imdb.get("title") or title,
+        "title": en_title,
         "title_tr": tr_title,
         "title_de": de_title,
         "year": imdb.get("releaseDetailed", {}).get("year", 0),
@@ -1643,7 +1665,7 @@ async def _fetch_movie_metadata_impl(title, encoded_string, year=None, quality=N
         return {
             "tmdb_id": movie.id,
             "imdb_id": _movie_imdb_id,
-            "title": movie.original_title or movie.title or title,
+            "title": getattr(movie, "title_en", "") or movie.original_title or movie.title or title,
             "title_tr": movie.title or title,
             "title_de": getattr(movie, "title_de", "") or movie.original_title or title,
             "year": getattr(movie.release_date, "year", 0) if getattr(movie, "release_date", None) else 0,
@@ -1687,6 +1709,7 @@ async def _fetch_movie_metadata_impl(title, encoded_string, year=None, quality=N
     # IMDb modunda da TMDb'den TR/DE baslik + gorsel cek (/turkce komutu mantigi)
     tr_title = imdb.get("title") or title
     de_title = imdb.get("title") or title
+    en_title = imdb.get("title") or title
     tr_desc_tmdb = ""  # TMDB'den (tr-TR) gelen açıklama — eşleşme doğrulanınca dolar
     de_desc = ""  # Başlangıçta boş; TMDB'den Almanca açıklama alınacak
     tr_genres_tmdb: list = []  # TMDB'den (tr-TR) gelen tür adları — eşleşme doğrulanınca dolar
@@ -1728,6 +1751,7 @@ async def _fetch_movie_metadata_impl(title, encoded_string, year=None, quality=N
                     certification_us = getattr(movie_details, "certification_us", None)
                     tr_title = movie_details.title or tr_title
                     de_title = getattr(movie_details, "title_de", "") or de_title
+                    en_title = getattr(movie_details, "title_en", "") or en_title
                     # TR açıklama: tmdb_tr (tr-TR) çağrısından gelen overview
                     tr_desc_tmdb = movie_details.overview or ""
                     # DE açıklama: TMDB'den (İngilizce IMDb plot değil)
@@ -1755,7 +1779,7 @@ async def _fetch_movie_metadata_impl(title, encoded_string, year=None, quality=N
     return {
         "tmdb_id": raw_tmdb_id or imdb_id.replace("tt", ""),
         "imdb_id": imdb_id,
-        "title": imdb.get("title") or title,
+        "title": en_title,
         "title_tr": tr_title,
         "title_de": de_title,
         "year": imdb.get("releaseDetailed", {}).get("year", 0),

@@ -51,6 +51,7 @@ from typing import Optional
 from urllib.parse import urlparse
 
 from pyrogram import enums
+from pyrogram.types import InlineKeyboardMarkup
 
 from fastapi import Request, Query, HTTPException
 from fastapi.responses import JSONResponse
@@ -58,6 +59,8 @@ from fastapi.responses import JSONResponse
 from Backend import db
 from Backend.helper.database import is_media_visible_to_member
 from Backend.config import Telegram
+from Backend.helper.settings_manager import SettingsManager
+from Backend.helper.content_announcer import _build_open_buttons
 from Backend.helper.webpush import notify_admins as _notify_admins_push
 
 _logger = logging.getLogger(__name__)
@@ -248,7 +251,18 @@ async def _dispatch_tv(tmdb_id: int):
         + (f'<a href="{catalog_url}">🔔 Bildirimleri kapat.</a>' if catalog_url else "")
     )
 
-    await _send_to_users(user_ids, poster, text, f"TV tmdb_id={tmdb_id}")
+    #----- content_announcer.py'deki genel Telegram kanal duyurularıyla aynı
+    #----- mantıkla, ayarlardaki "Yönlendirme Alan Adı" (redirect_base_url) ve
+    #----- içeriğin imdb_id'si mevcutsa "Stremio'da Aç" / "Nuvio'da Aç"
+    #----- butonları da üye hatırlatma bildirimine eklenir.
+    settings = SettingsManager.current()
+    open_buttons = _build_open_buttons(
+        {"media_type": "tv", "imdb_id": (media_doc or {}).get("imdb_id")},
+        settings,
+    )
+    markup = InlineKeyboardMarkup([open_buttons]) if open_buttons else None
+
+    await _send_to_users(user_ids, poster, text, f"TV tmdb_id={tmdb_id}", reply_markup=markup)
 
 
 async def _dispatch_movie(tmdb_id: int):
@@ -377,7 +391,18 @@ async def _dispatch_movie(tmdb_id: int):
         + (f'<a href="{catalog_url}">🔔 Bildirimleri kapat.</a>' if catalog_url else "")
     )
 
-    await _send_to_users(user_ids, poster, text, f"Film tmdb_id={tmdb_id}")
+    #----- content_announcer.py'deki genel Telegram kanal duyurularıyla aynı
+    #----- mantıkla, ayarlardaki "Yönlendirme Alan Adı" (redirect_base_url) ve
+    #----- içeriğin imdb_id'si mevcutsa "Stremio'da Aç" / "Nuvio'da Aç"
+    #----- butonları da üye hatırlatma bildirimine eklenir.
+    settings = SettingsManager.current()
+    open_buttons = _build_open_buttons(
+        {"media_type": "movie", "imdb_id": (media_doc or {}).get("imdb_id")},
+        settings,
+    )
+    markup = InlineKeyboardMarkup([open_buttons]) if open_buttons else None
+
+    await _send_to_users(user_ids, poster, text, f"Film tmdb_id={tmdb_id}", reply_markup=markup)
 
 
 _TELEGRAM_CAPTION_LIMIT = 1024  # Telegram send_photo caption max karakter sayısı
@@ -392,8 +417,20 @@ def _truncate(text: str, limit: int) -> str:
     return text[: limit - len(suffix)] + suffix
 
 
-async def _send_to_users(user_ids: list[int], poster: str, text: str, log_label: str):
-    """Kullanıcılara Telegram mesajı/fotoğrafı gönderir."""
+async def _send_to_users(
+    user_ids: list[int],
+    poster: str,
+    text: str,
+    log_label: str,
+    reply_markup: Optional[InlineKeyboardMarkup] = None,
+):
+    """Kullanıcılara Telegram mesajı/fotoğrafı gönderir.
+
+    reply_markup verilmişse (ör. "Stremio'da Aç" / "Nuvio'da Aç" butonları),
+    metin caption sığmayıp iki parçaya bölündüğünde butonlar HER ZAMAN asıl
+    metnin gönderildiği mesaja eklenir (fotoğraf caption'sız gittiğinde bile
+    kullanıcı butonlara ulaşabilsin diye).
+    """
     try:
         from Backend.pyrofork.bot import StreamBot
     except Exception:
@@ -418,6 +455,7 @@ async def _send_to_users(user_ids: list[int], poster: str, text: str, log_label:
                         text=_truncate(text, _TELEGRAM_MESSAGE_LIMIT),
                         parse_mode=enums.ParseMode.HTML,
                         disable_web_page_preview=True,
+                        reply_markup=reply_markup,
                     )
                 else:
                     await StreamBot.send_photo(
@@ -425,6 +463,7 @@ async def _send_to_users(user_ids: list[int], poster: str, text: str, log_label:
                         photo=poster,
                         caption=text,
                         parse_mode=enums.ParseMode.HTML,
+                        reply_markup=reply_markup,
                     )
             else:
                 await StreamBot.send_message(
@@ -432,6 +471,7 @@ async def _send_to_users(user_ids: list[int], poster: str, text: str, log_label:
                     text=_truncate(text, _TELEGRAM_MESSAGE_LIMIT),
                     parse_mode=enums.ParseMode.HTML,
                     disable_web_page_preview=True,
+                    reply_markup=reply_markup,
                 )
             sent += 1
         except Exception as e:
