@@ -107,9 +107,28 @@
             </div>
 
             <div class="px-6 py-5">
-                <div class="flex flex-wrap items-center gap-3 mb-4">
+                <div class="flex flex-wrap items-center gap-3 mb-3">
                     <input id="iceriksil-keyword" type="text" placeholder="Anahtar kelime (örn. blm)"
                         class="flex-1 min-w-[200px] px-3 py-2 rounded-md bg-white/5 border border-white/10 text-sm text-text placeholder:theme-text-secondary focus:outline-none focus:ring-2 focus:ring-primary">
+                </div>
+
+                <div class="flex flex-wrap items-center gap-2 mb-4">
+                    <span class="text-xs theme-text-secondary mr-1">Kapsam:</span>
+                    <label class="iceriksil-scope-label flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-white/5 border border-white/10 text-xs cursor-pointer hover:bg-white/10 has-[:checked]:bg-primary/20 has-[:checked]:border-primary transition-colors">
+                        <input type="radio" name="iceriksil-scope" value="hepsi" checked class="accent-primary">
+                        🎬📺 Film + Dizi
+                    </label>
+                    <label class="iceriksil-scope-label flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-white/5 border border-white/10 text-xs cursor-pointer hover:bg-white/10 has-[:checked]:bg-primary/20 has-[:checked]:border-primary transition-colors">
+                        <input type="radio" name="iceriksil-scope" value="film" class="accent-primary">
+                        🎬 Sadece film
+                    </label>
+                    <label class="iceriksil-scope-label flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-white/5 border border-white/10 text-xs cursor-pointer hover:bg-white/10 has-[:checked]:bg-primary/20 has-[:checked]:border-primary transition-colors">
+                        <input type="radio" name="iceriksil-scope" value="dizi" class="accent-primary">
+                        📺 Sadece dizi
+                    </label>
+                </div>
+
+                <div class="flex flex-wrap items-center gap-3 mb-4">
                     <button onclick="iceriksilStart(true)" id="iceriksil-test-btn"
                         class="bg-white/10 hover:bg-white/20 text-text px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2">
                         <i class="fas fa-magnifying-glass"></i> Test (silme yapma)
@@ -117,6 +136,10 @@
                     <button onclick="iceriksilStart(false)" id="iceriksil-del-btn"
                         class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2">
                         <i class="fas fa-trash-alt"></i> Sil
+                    </button>
+                    <button id="iceriksil-iptal-btn" onclick="iceriksilIptal()" disabled
+                        class="bg-red-600 hover:bg-red-700 disabled:opacity-30 disabled:cursor-not-allowed text-white px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2">
+                        <i class="fas fa-stop"></i> İptal
                     </button>
                 </div>
 
@@ -254,41 +277,63 @@ async function pollAyni() {
 // ─────────────────────────────────────────────────────────────
 // İÇERİK SİL
 // ─────────────────────────────────────────────────────────────
+const ICERIKSIL_SCOPE_LABELS = { film: '🎬 sadece film', dizi: '📺 sadece dizi', hepsi: '🎬📺 film + dizi' };
+
+function iceriksilGetScope() {
+    const el = document.querySelector('input[name="iceriksil-scope"]:checked');
+    return el ? el.value : 'hepsi';
+}
+
+function iceriksilSetScopeDisabled(disabled) {
+    document.querySelectorAll('input[name="iceriksil-scope"]').forEach(el => el.disabled = disabled);
+}
+
 async function iceriksilStart(test) {
     const keyword = document.getElementById('iceriksil-keyword').value.trim();
     if (!keyword) { alert('Anahtar kelime girin.'); return; }
-    if (!test && !confirm(`"${keyword}" ile eşleşen videolar KALICI olarak silinecek. Emin misiniz?`)) return;
+    const scope = iceriksilGetScope();
+    const scopeLabel = ICERIKSIL_SCOPE_LABELS[scope] || scope;
+    if (!test && !confirm(`"${keyword}" ile eşleşen videolar (${scopeLabel} kapsamında) KALICI olarak silinecek. Emin misiniz?`)) return;
 
     document.getElementById('iceriksil-test-btn').disabled = true;
     document.getElementById('iceriksil-del-btn').disabled = true;
+    document.getElementById('iceriksil-iptal-btn').disabled = false;
+    iceriksilSetScopeDisabled(true);
     document.getElementById('iceriksil-result').classList.add('hidden');
     try {
         const res = await fetch('/api/araclar/iceriksil/start', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ keyword, test })
+            body: JSON.stringify({ keyword, test, scope })
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
             alert(err.detail || 'Başlatılamadı.');
+            iceriksilSetScopeDisabled(false);
         }
     } catch (e) { console.error(e); }
-    document.getElementById('iceriksil-test-btn').disabled = false;
-    document.getElementById('iceriksil-del-btn').disabled = false;
     pollIceriksil();
 }
 
-function renderIceriksilResult(result) {
+async function iceriksilIptal() {
+    document.getElementById('iceriksil-iptal-btn').disabled = true;
+    try {
+        await fetch('/api/araclar/iceriksil/iptal', { method: 'POST' });
+    } catch (e) { console.error(e); }
+    pollIceriksil();
+}
+
+function renderIceriksilResult(films, series, truncated, total) {
     const box = document.getElementById('iceriksil-result');
-    if (!result || result.total === 0) {
+    if (!total) {
         box.textContent = 'Eşleşen video bulunamadı.';
         box.classList.remove('hidden');
         return;
     }
     let lines = [];
-    result.films.forEach((f, i) => lines.push(`${i + 1}) [${f.title}] ${f.video}`));
-    result.series.forEach((s, i) => lines.push(`${i + 1}) [${s.title}] S${String(s.season).padStart(2, '0')}E${String(s.episode).padStart(2, '0')} — ${s.video}`));
-    if (result.truncated) lines.push(`… ve daha fazlası (toplam ${result.total})`);
+    films.forEach((f, i) => lines.push(`${i + 1}) [${f.title}] ${f.video}`));
+    series.forEach((s, i) => lines.push(`${i + 1}) [${s.title}] S${String(s.season).padStart(2, '0')}E${String(s.episode).padStart(2, '0')} — ${s.video}`));
+    if (truncated) lines.push(`… ve daha fazlası (toplam ${total})`);
     box.textContent = lines.join('\n');
     box.classList.remove('hidden');
 }
@@ -302,19 +347,25 @@ async function pollIceriksil() {
         setBadge('iceriksil-badge', s.running, s.running ? 'Çalışıyor' : 'Boşta');
         document.getElementById('iceriksil-test-btn').disabled = s.running;
         document.getElementById('iceriksil-del-btn').disabled = s.running;
+        document.getElementById('iceriksil-iptal-btn').disabled = !s.running;
+        iceriksilSetScopeDisabled(s.running);
 
         if (s.running || s.processed > 0) {
             document.getElementById('iceriksil-progress').classList.remove('hidden');
             document.getElementById('iceriksil-idle-msg').classList.add('hidden');
+            const scopeLabel = ICERIKSIL_SCOPE_LABELS[s.scope] || s.scope || '';
             document.getElementById('iceriksil-phase').textContent =
-                s.error ? ('❌ Hata: ' + s.error) : (s.running ? `⏳ ${s.phase} — anahtar: "${s.keyword}" (${s.mode})` : `✅ ${s.phase} — anahtar: "${s.keyword}"`);
+                s.error ? ('❌ Hata: ' + s.error)
+                    : (s.running ? `⏳ ${s.phase} — kapsam: ${scopeLabel}, anahtar: "${s.keyword}" (${s.mode})`
+                        : (s.cancelled ? `🛑 İptal edildi — kapsam: ${scopeLabel}, anahtar: "${s.keyword}"` : `✅ ${s.phase} — kapsam: ${scopeLabel}, anahtar: "${s.keyword}"`));
             document.getElementById('iceriksil-bar').style.width = s.percent + '%';
             document.getElementById('iceriksil-pct').textContent = s.percent.toFixed(1) + '%';
             document.getElementById('iceriksil-processed').textContent = s.processed.toLocaleString();
             document.getElementById('iceriksil-total').textContent = s.total.toLocaleString();
             document.getElementById('iceriksil-hits').textContent = s.hits.toLocaleString();
 
-            if (!s.running && s.result) renderIceriksilResult(s.result);
+            // Eşleşen videoların adlarını bulundukça (işlem devam ederken de) göster.
+            if (s.hits > 0) renderIceriksilResult(s.films || [], s.series || [], s.truncated, s.hits);
         } else {
             document.getElementById('iceriksil-progress').classList.add('hidden');
             document.getElementById('iceriksil-idle-msg').classList.remove('hidden');

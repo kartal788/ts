@@ -336,7 +336,7 @@
         currentSearch = search;
 
         try {
-            const url = `/api/media/list?media_type=${mediaType}&page=${page}&page_size=24&search=${encodeURIComponent(search)}`;
+            const url = `/api/media/list?media_type=${mediaType}&page=${page}&page_size=25&search=${encodeURIComponent(search)}`;
             console.log('Fetching:', url);
 
             const response = await fetch(url, {
@@ -925,8 +925,8 @@
         const resultsInfo = document.getElementById('results-info');
         const dbInfo = document.getElementById('db-info');
 
-        const startItem = ((data.current_page - 1) * 24) + 1;
-        const endItem = Math.min(data.current_page * 24, data.total_count);
+        const startItem = ((data.current_page - 1) * 25) + 1;
+        const endItem = Math.min(data.current_page * 25, data.total_count);
 
         resultsInfo.textContent = `${data.total_count} ${mediaType} içinden ${startItem}-${endItem} gösteriliyor`;
 

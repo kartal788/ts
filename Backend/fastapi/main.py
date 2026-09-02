@@ -23,7 +23,7 @@ from Backend.fastapi.routes.template_routes import (
 )
 from Backend.fastapi.routes.arac_routes import (
     ayni_status_api, ayni_start_api,
-    iceriksil_status_api, iceriksil_start_api,
+    iceriksil_status_api, iceriksil_start_api, iceriksil_iptal_api,
     tara_status_api, tara_start_api, tara_iptal_api,
 )
 from Backend.fastapi.routes.link_ekle_routes import (
@@ -990,6 +990,10 @@ async def araclar_iceriksil_status(_: bool = Depends(require_auth)):
 async def araclar_iceriksil_start(payload: dict, _: bool = Depends(require_auth)):
     return await iceriksil_start_api(payload)
 
+@app.post("/api/araclar/iceriksil/iptal")
+async def araclar_iceriksil_iptal(_: bool = Depends(require_auth)):
+    return await iceriksil_iptal_api()
+
 @app.get("/api/araclar/tara/status")
 async def araclar_tara_status(_: bool = Depends(require_auth)):
     return await tara_status_api()
@@ -1110,7 +1114,7 @@ async def edit_media(request: Request, tmdb_id: int, db_index: int, media_type: 
 async def list_media(
     media_type: str = Query("movie", regex="^(movie|tv)$"),
     page: int = Query(1, ge=1),
-    page_size: int = Query(24, ge=1, le=100),
+    page_size: int = Query(25, ge=1, le=100),
     search: str = Query("", max_length=100),
     _: bool = Depends(require_auth)
 ):

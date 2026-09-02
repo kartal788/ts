@@ -47,7 +47,7 @@ async def get_system_stats_api():
 async def list_media_api(
     media_type: str = Query("movie", regex="^(movie|tv)$"),
     page: int = Query(1, ge=1),
-    page_size: int = Query(24, ge=1, le=100),
+    page_size: int = Query(25, ge=1, le=100),
     search: str = Query("", max_length=100)
 ):
     try:

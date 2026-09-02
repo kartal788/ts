@@ -181,122 +181,141 @@ async def ayni_start_api() -> dict:
 # ═════════════════════════════════════════════════════════════
 
 ICERIKSIL_STATE = {
-    "running": False, "processed": 0, "total": 0, "phase": "",
-    "hits": 0, "keyword": "", "mode": "", "started_at": 0.0,
+    "running": False, "cancelled": False, "processed": 0, "total": 0, "phase": "",
+    "hits": 0, "keyword": "", "mode": "", "scope": "", "started_at": 0.0,
     "finished_at": 0.0, "error": None, "result": None,
+    "films": [], "series": [], "truncated": False,
 }
 
+# Canlı listede (ve son sonuçta) en fazla bu kadar eşleşme adı gösterilir;
+# aşımı olsa da silme/işaretleme işlemi TÜM eşleşmeler için normal şekilde yapılır.
+ICERIKSIL_MAX_DISPLAY = 200
 
-async def _run_iceriksil(keyword: str, test: bool):
+
+async def _run_iceriksil(keyword: str, test: bool, scope: str = "hepsi"):
     loop = asyncio.get_event_loop()
     s = ICERIKSIL_STATE
     kw = keyword.lower()
-    s.update(running=True, processed=0, total=0, phase="Başlatılıyor…", hits=0,
-              keyword=keyword, mode="test" if test else "silme",
-              started_at=time.time(), finished_at=0.0, error=None, result=None)
+    do_movies = scope in ("film", "hepsi")
+    do_tv = scope in ("dizi", "hepsi")
+    s.update(running=True, cancelled=False, processed=0, total=0, phase="Başlatılıyor…", hits=0,
+              keyword=keyword, mode="test" if test else "silme", scope=scope,
+              started_at=time.time(), finished_at=0.0, error=None, result=None,
+              films=[], series=[], truncated=False)
+
+    def _add_hit(entry: dict, is_series: bool):
+        """Eşleşen videoyu, sınırı aşmadıkça canlı listeye ekler (silme/işaretleme bundan etkilenmez)."""
+        if len(s["films"]) + len(s["series"]) < ICERIKSIL_MAX_DISPLAY:
+            (s["series"] if is_series else s["films"]).append(entry)
+        else:
+            s["truncated"] = True
+
     try:
         db = await loop.run_in_executor(None, _get_sync_db)
         movie_col, tv_col = db["movie"], db["tv"]
 
-        total_movies = await loop.run_in_executor(None, movie_col.count_documents, {})
-        total_tv = await loop.run_in_executor(None, tv_col.count_documents, {})
+        total_movies = await loop.run_in_executor(None, movie_col.count_documents, {}) if do_movies else 0
+        total_tv = await loop.run_in_executor(None, tv_col.count_documents, {}) if do_tv else 0
         s["total"] = total_movies + total_tv
 
-        films, series = [], []
-
         # ── Filmler ──────────────────────────────────────────
-        s["phase"] = "🎬 Filmler"
+        if do_movies:
+            s["phase"] = "🎬 Filmler"
 
-        def _movie_cursor():
-            return movie_col.find({}, {"telegram": 1, "title": 1, "name": 1}).batch_size(200)
+            def _movie_cursor():
+                return movie_col.find({}, {"telegram": 1, "title": 1, "name": 1}).batch_size(200)
 
-        cursor = await loop.run_in_executor(None, _movie_cursor)
-        while True:
-            movie = await loop.run_in_executor(None, lambda c=cursor: next(c, None))
-            if movie is None:
-                break
-            s["processed"] += 1
+            cursor = await loop.run_in_executor(None, _movie_cursor)
+            while True:
+                if s["cancelled"]:
+                    break
+                movie = await loop.run_in_executor(None, lambda c=cursor: next(c, None))
+                if movie is None:
+                    break
+                s["processed"] += 1
 
-            telegram = movie.get("telegram", [])
-            matched = [t for t in telegram if kw in (t.get("name") or "").lower()]
-            if matched:
-                title = movie.get("title") or movie.get("name") or str(movie["_id"])
-                for t in matched:
-                    films.append({"title": title, "video": t.get("name", "?")})
-                if not test:
-                    remaining = [t for t in telegram if t not in matched]
-                    mid = movie["_id"]
-                    if remaining:
-                        await loop.run_in_executor(
-                            None, lambda: movie_col.update_one({"_id": mid}, {"$set": {"telegram": remaining}})
-                        )
-                    else:
-                        await loop.run_in_executor(None, lambda: movie_col.delete_one({"_id": mid}))
-            s["hits"] = len(films) + len(series)
-
-        # ── Diziler ──────────────────────────────────────────
-        s["phase"] = "📺 Diziler"
-
-        def _tv_cursor():
-            return tv_col.find({}, {"seasons": 1, "title": 1, "name": 1}).batch_size(200)
-
-        cursor = await loop.run_in_executor(None, _tv_cursor)
-        while True:
-            tv = await loop.run_in_executor(None, lambda c=cursor: next(c, None))
-            if tv is None:
-                break
-            s["processed"] += 1
-
-            tv_title = tv.get("title") or tv.get("name") or str(tv["_id"])
-            seasons = tv.get("seasons", [])
-            tv_changed = False
-            new_seasons = []
-
-            for season in seasons:
-                season_no = season.get("season_number")
-                new_episodes = []
-                for episode in season.get("episodes", []):
-                    telegram = episode.get("telegram", [])
-                    matched = [t for t in telegram if kw in (t.get("name") or "").lower()]
-                    if not matched:
-                        new_episodes.append(episode)
-                        continue
+                telegram = movie.get("telegram", [])
+                matched = [t for t in telegram if kw in (t.get("name") or "").lower()]
+                if matched:
+                    title = movie.get("title") or movie.get("name") or str(movie["_id"])
                     for t in matched:
-                        series.append({
-                            "title": tv_title, "season": season_no,
-                            "episode": episode.get("episode_number"),
-                            "video": t.get("name", "?"),
-                        })
+                        _add_hit({"title": title, "video": t.get("name", "?")}, is_series=False)
+                    s["hits"] += len(matched)
                     if not test:
                         remaining = [t for t in telegram if t not in matched]
-                        tv_changed = True
+                        mid = movie["_id"]
                         if remaining:
-                            episode["telegram"] = remaining
+                            await loop.run_in_executor(
+                                None, lambda: movie_col.update_one({"_id": mid}, {"$set": {"telegram": remaining}})
+                            )
+                        else:
+                            await loop.run_in_executor(None, lambda: movie_col.delete_one({"_id": mid}))
+
+        # ── Diziler ──────────────────────────────────────────
+        if do_tv and not s["cancelled"]:
+            s["phase"] = "📺 Diziler"
+
+            def _tv_cursor():
+                return tv_col.find({}, {"seasons": 1, "title": 1, "name": 1}).batch_size(200)
+
+            cursor = await loop.run_in_executor(None, _tv_cursor)
+            while True:
+                if s["cancelled"]:
+                    break
+                tv = await loop.run_in_executor(None, lambda c=cursor: next(c, None))
+                if tv is None:
+                    break
+                s["processed"] += 1
+
+                tv_title = tv.get("title") or tv.get("name") or str(tv["_id"])
+                seasons = tv.get("seasons", [])
+                tv_changed = False
+                new_seasons = []
+
+                for season in seasons:
+                    season_no = season.get("season_number")
+                    new_episodes = []
+                    for episode in season.get("episodes", []):
+                        telegram = episode.get("telegram", [])
+                        matched = [t for t in telegram if kw in (t.get("name") or "").lower()]
+                        if not matched:
                             new_episodes.append(episode)
+                            continue
+                        for t in matched:
+                            _add_hit({
+                                "title": tv_title, "season": season_no,
+                                "episode": episode.get("episode_number"),
+                                "video": t.get("name", "?"),
+                            }, is_series=True)
+                        s["hits"] += len(matched)
+                        if not test:
+                            remaining = [t for t in telegram if t not in matched]
+                            tv_changed = True
+                            if remaining:
+                                episode["telegram"] = remaining
+                                new_episodes.append(episode)
+                        else:
+                            new_episodes.append(episode)
+
+                    if new_episodes:
+                        season["episodes"] = new_episodes
+                        new_seasons.append(season)
+                    elif not test:
+                        tv_changed = True
+
+                if not test and tv_changed:
+                    tvid = tv["_id"]
+                    if new_seasons:
+                        await loop.run_in_executor(
+                            None, lambda: tv_col.update_one({"_id": tvid}, {"$set": {"seasons": new_seasons}})
+                        )
                     else:
-                        new_episodes.append(episode)
+                        await loop.run_in_executor(None, lambda: tv_col.delete_one({"_id": tvid}))
 
-                if new_episodes:
-                    season["episodes"] = new_episodes
-                    new_seasons.append(season)
-                elif not test:
-                    tv_changed = True
-
-            if not test and tv_changed:
-                tvid = tv["_id"]
-                if new_seasons:
-                    await loop.run_in_executor(
-                        None, lambda: tv_col.update_one({"_id": tvid}, {"$set": {"seasons": new_seasons}})
-                    )
-                else:
-                    await loop.run_in_executor(None, lambda: tv_col.delete_one({"_id": tvid}))
-            s["hits"] = len(films) + len(series)
-
-        s["phase"] = "Tamamlandı"
-        total_hits = len(films) + len(series)
+        s["phase"] = "İptal edildi" if s["cancelled"] else "Tamamlandı"
         s["result"] = {
-            "films": films[:200], "series": series[:200],
-            "total": total_hits, "truncated": total_hits > 200,
+            "films": s["films"], "series": s["series"],
+            "total": s["hits"], "truncated": s["truncated"],
         }
     except Exception as e:
         LOGGER.error(f"[araclar/iceriksil] Hata: {e}")
@@ -316,13 +335,23 @@ async def iceriksil_status_api() -> dict:
 async def iceriksil_start_api(payload: dict) -> dict:
     keyword = (payload.get("keyword") or "").strip()
     test = bool(payload.get("test", False))
+    scope = (payload.get("scope") or "hepsi").strip().lower()
     if not keyword:
         raise HTTPException(status_code=400, detail="Anahtar kelime boş olamaz.")
     if len(keyword) > 100:
         raise HTTPException(status_code=400, detail="Anahtar kelime çok uzun.")
+    if scope not in ("film", "dizi", "hepsi"):
+        raise HTTPException(status_code=400, detail="Geçersiz kapsam.")
     if ICERIKSIL_STATE["running"]:
         raise HTTPException(status_code=409, detail="Bu işlem zaten çalışıyor.")
-    asyncio.create_task(_run_iceriksil(keyword, test))
+    asyncio.create_task(_run_iceriksil(keyword, test, scope))
+    return {"success": True}
+
+
+async def iceriksil_iptal_api() -> dict:
+    if not ICERIKSIL_STATE["running"]:
+        raise HTTPException(status_code=409, detail="Çalışan bir işlem yok.")
+    ICERIKSIL_STATE["cancelled"] = True
     return {"success": True}
 
 

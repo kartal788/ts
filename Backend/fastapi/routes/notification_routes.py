@@ -47,6 +47,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import html as _html
+import re
 from typing import Optional
 from urllib.parse import urlparse
 
@@ -118,6 +119,34 @@ def _validate_poster_url(poster: str) -> str:
         _logger.warning("Poster URL reddedildi (host=%s): %s", host, poster[:200])
         return ""
     return poster
+
+
+# ── Bildirimde daha kaliteli poster: yalnızca kullanıcıya giden görsel ──────
+#
+# Veritabanındaki "poster" alanı DEĞİŞTİRİLMEZ (küçük boyut olarak kalır);
+# yalnızca Telegram'a gönderilirken URL'deki boyut segmenti "original" ile
+# değiştirilir. Böylece kullanıcıya daha kaliteli/büyük bir resim gider.
+#
+#   https://images.metahub.space/poster/small/tt10986410/img
+#     -> https://images.metahub.space/poster/original/tt10986410/img
+#   https://image.tmdb.org/t/p/w500/xxxx.jpg
+#     -> https://image.tmdb.org/t/p/original/xxxx.jpg
+
+_METAHUB_SIZE_RE = re.compile(r"(images\.metahub\.space/poster/)[^/]+(/)")
+_TMDB_SIZE_RE = re.compile(r"(image\.tmdb\.org/t/p/)w\d+(/)")
+
+
+def _upgrade_poster_quality(poster: str) -> str:
+    """Bildirimde gönderilecek poster URL'sini en yüksek kaliteye yükseltir.
+
+    Sadece bilinen boyut segmentlerini ("small", "w500", "w300" vb.)
+    "original" ile değiştirir; eşleşme yoksa poster olduğu gibi döner.
+    """
+    if not poster:
+        return poster
+    upgraded = _METAHUB_SIZE_RE.sub(r"\1original\2", poster)
+    upgraded = _TMDB_SIZE_RE.sub(r"\1original\2", upgraded)
+    return upgraded
 
 
 def _reminders_col():
@@ -436,6 +465,10 @@ async def _send_to_users(
     except Exception:
         _logger.warning("StreamBot import edilemedi, bildirimler gönderilemedi.")
         return
+
+    # Veritabanındaki poster küçük boyutta kalır; kullanıcıya giden bildirimde
+    # yalnızca daha kaliteli (original) versiyonu kullanılır.
+    poster = _upgrade_poster_quality(poster)
 
     sent = 0
     for user_id in user_ids:
