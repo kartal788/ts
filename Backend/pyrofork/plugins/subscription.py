@@ -408,7 +408,7 @@ def _fmt_requests(val: int) -> str:
     return str(val)
 
 
-@Client.on_message(filters.command("uyelik"))
+@Client.on_message(filters.command("uyelik") & filters.private)
 async def check_status(client: Client, message: Message):
     if not Telegram.SUBSCRIPTION:
         return

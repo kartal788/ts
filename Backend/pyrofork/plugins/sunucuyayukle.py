@@ -1118,7 +1118,7 @@ async def _extract_archive(session_dir: Path, files: list,
 # ─── /sunucuyayukle komutu ────────────────────────────────────────────────────
 
 @Client.on_message(
-    filters.command(["sunucuyayukle", "s"]) & (filters.private | filters.channel) & CustomFilters.owner
+    filters.command(["sunucuyayukle", "s"]) & filters.private & CustomFilters.owner
 )
 async def cmd_sunucuyayukle(client: Client, message: Message):
     args = message.command
@@ -1358,7 +1358,7 @@ async def cmd_sunucuyayukle(client: Client, message: Message):
 # ─── /iptal komutu ────────────────────────────────────────────────────────────
 
 @Client.on_message(
-    filters.command(["iptal"]) & (filters.private | filters.channel) & CustomFilters.owner
+    filters.command(["iptal"]) & filters.private & CustomFilters.owner
 )
 async def cmd_iptal(client: Client, message: Message):
     chat_id = message.chat.id
@@ -1423,7 +1423,7 @@ async def cmd_iptal(client: Client, message: Message):
 # ─── /c_XXXXXXXXXX komutu (belirli session'ı iptal et) ───────────────────────
 
 @Client.on_message(
-    filters.regex(r"^/c_[a-zA-Z0-9_]+") & (filters.private | filters.channel) & CustomFilters.owner
+    filters.regex(r"^/c_[a-zA-Z0-9_]+") & filters.private & CustomFilters.owner
 )
 async def cmd_cancel_session(client: Client, message: Message):
     chat_id  = message.chat.id
@@ -1506,7 +1506,7 @@ async def cmd_cancel_session(client: Client, message: Message):
 # ─── Dosya toplayıcı ──────────────────────────────────────────────────────────
 
 @Client.on_message(
-    (filters.private | filters.channel) & (filters.document | filters.video | filters.photo | filters.audio) & CustomFilters.owner,
+    filters.private & (filters.document | filters.video | filters.photo | filters.audio) & CustomFilters.owner,
     group=5,
 )
 async def zip_file_collector(client: Client, message: Message):
@@ -2369,7 +2369,7 @@ async def _delete_dir_and_db(target: Path) -> tuple:
 
 
 @Client.on_message(
-    filters.command("sunucudansil") & (filters.private | filters.channel) & CustomFilters.owner
+    filters.command("sunucudansil") & filters.private & CustomFilters.owner
 )
 async def cmd_sunucudansil(client: Client, message: Message):
     _clear_registry()

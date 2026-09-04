@@ -3,13 +3,14 @@ from pyrogram.types import Message
 from Backend.config import Telegram
 from Backend.helper.custom_filter import CustomFilters
 
-@Client.on_message(filters.command("help"))
+@Client.on_message(filters.command("help") & filters.private)
 async def help_command(client: Client, message: Message):
     if Telegram.SUBSCRIPTION:
         text = (
             "<b>Bot Commands:</b>\n\n"
             "/start - Main menu / Purchase membership\n"
             "/status - Check your subscription expiry date\n"
+            "/ara - Search content by IMDB/TMDB link or by name\n"
             "/help - Show this message"
         )
     else:

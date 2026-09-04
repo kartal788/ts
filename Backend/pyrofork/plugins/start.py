@@ -8,7 +8,7 @@ from datetime import datetime
 
 print("DEBUG: start.py PLUGIN LOADED SUCCESSFULLY!")
 
-@Client.on_message(filters.command('start'), group=10)
+@Client.on_message(filters.command('start') & filters.private, group=10)
 async def send_start_message(client: Client, message: Message):
     try:
         user_id = (message.from_user.id if message.from_user else None) or (message.sender_chat.id if message.sender_chat else None) or message.chat.id

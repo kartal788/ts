@@ -517,7 +517,7 @@ def _build_rclone_browse_keyboard(items: list[dict], remote: str, cur_path: str,
 # ─── /ekle komutu ─────────────────────────────────────────────────────────────
 
 @Client.on_message(
-    filters.command("ekle") & (filters.private | filters.channel) & CustomFilters.owner
+    filters.command("ekle") & filters.private & CustomFilters.owner
 )
 async def cmd_ekle(client: Client, message: Message):
     await message.reply_text(

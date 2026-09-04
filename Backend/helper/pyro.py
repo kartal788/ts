@@ -186,6 +186,7 @@ async def restart_notification():
 commands = [
     BotCommand("start", "▶️ Eklenti linki."),
     BotCommand("uyelik", "📊 Üyelik durumu."),
+    BotCommand("ara", "🔍 İçerik ara."),
     BotCommand("istek", "🎬 Dizi / Film iste."),
     BotCommand("gecmis", "🕒 İzleme geçmişim."),
     BotCommand("yukselt", "💎 Paketleri incele ve yükselt"),

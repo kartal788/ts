@@ -113,7 +113,7 @@ async def check_all_links(urls: list, progress_msg: Message):
 
 
 @Client.on_message(
-    filters.command("m3ukontrol") & (filters.private | filters.group) & CustomFilters.owner
+    filters.command("m3ukontrol") & filters.private & CustomFilters.owner
 )
 async def cmd_m3ukontrol(client: Client, message: Message):
     raw = message.text or message.caption or ""
