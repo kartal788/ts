@@ -223,7 +223,23 @@ def _poster_candidates(info: dict) -> list:
     ]
 
 
-def _content_info_keyboard(doc: dict, media_type: str, settings) -> Optional[InlineKeyboardMarkup]:
+def _is_group_chat(chat) -> bool:
+    """Sohbetin özel mesaj olmadığını (grup/kanal) bildirir."""
+    return bool(chat) and chat.type != enums.ChatType.PRIVATE
+
+
+def _join_button_row(settings) -> Optional[list]:
+    """content_announcer.py'deki duyuru butonuyla aynı — botun özeline
+    yönlendiren '🤖 ...'e üye ol' butonu. Grup/kanal sohbetlerinde
+    gösterilir; özel mesajda gereksizdir."""
+    bot_username = getattr(StreamBot, "username", None)
+    if not bot_username:
+        return None
+    app_name = (getattr(settings, "isim", "") or "").strip() or "Bot"
+    return [InlineKeyboardButton(f"🤖 {app_name}'e üye ol", url=f"https://t.me/{bot_username}")]
+
+
+def _content_info_keyboard(doc: dict, media_type: str, settings, is_group: bool = False) -> Optional[InlineKeyboardMarkup]:
     info = _to_announce_info(doc, media_type)
     rows = []
     open_buttons = _build_open_buttons(info, settings)
@@ -235,17 +251,21 @@ def _content_info_keyboard(doc: dict, media_type: str, settings) -> Optional[Inl
         rows.append([
             InlineKeyboardButton("🎞 Sezonlar", callback_data=f"ara_ssn|{tmdb_id}|{db_index}")
         ])
+    if is_group:
+        join_row = _join_button_row(settings)
+        if join_row:
+            rows.append(join_row)
     return InlineKeyboardMarkup(rows) if rows else None
 
 
-async def _send_content_info(client: Client, chat_id: int, doc: dict) -> Optional[Message]:
+async def _send_content_info(client: Client, chat_id: int, doc: dict, is_group: bool = False) -> Optional[Message]:
     """content_announcer.py'deki duyuru mesajıyla aynı görünümde (poster +
     başlık + puan + tür + kategori + açıklama) bir mesaj gönderir."""
     settings = SettingsManager.current()
     media_type = doc.get("media_type") or doc.get("type") or "movie"
     info = _to_announce_info(doc, media_type)
     caption = _build_caption(info)
-    markup = _content_info_keyboard(doc, media_type, settings)
+    markup = _content_info_keyboard(doc, media_type, settings, is_group=is_group)
 
     for poster in _poster_candidates(info):
         if not poster:
@@ -383,7 +403,7 @@ async def ara_command(client: Client, message: Message):
             parse_mode=enums.ParseMode.HTML, quote=True,
         )
 
-    await _send_content_info(client, message.chat.id, doc)
+    await _send_content_info(client, message.chat.id, doc, is_group=_is_group_chat(message.chat))
 
 
 # ============================================================
@@ -429,7 +449,10 @@ async def ara_select_callback(client: Client, callback_query: CallbackQuery):
         return await callback_query.answer("Bu içeriğe erişim izniniz yok.", show_alert=True)
 
     await callback_query.answer("Bilgiler gönderiliyor…")
-    await _send_content_info(client, callback_query.message.chat.id, doc)
+    await _send_content_info(
+        client, callback_query.message.chat.id, doc,
+        is_group=_is_group_chat(callback_query.message.chat),
+    )
 
 
 # ============================================================
@@ -628,7 +651,7 @@ async def ara_back_callback(client: Client, callback_query: CallbackQuery):
     settings = SettingsManager.current()
     info = _to_announce_info(doc, "tv")
     caption = _build_caption(info)
-    markup = _content_info_keyboard(doc, "tv", settings)
+    markup = _content_info_keyboard(doc, "tv", settings, is_group=_is_group_chat(callback_query.message.chat))
     poster = next((p for p in _poster_candidates(info) if p), None)
 
     try:
