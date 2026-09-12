@@ -816,7 +816,7 @@
     <div class="glass-card edit-panel p-4 sm:p-6 rounded-3xl mb-6 sm:mb-8" data-panel="details">
         <div class="flex items-center justify-between mb-4 sm:mb-6">
             <h3 class="text-lg sm:text-xl font-semibold">Detayları Düzenle</h3>
-            <button type="button" onclick="requeryMedia()"
+            <button type="button" onclick="openRequeryMethodModal()"
                 class="flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-md border border-blue-500 text-blue-500 hover:bg-blue-500 hover:text-white transition-colors duration-150">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -1959,19 +1959,66 @@
     }
 
     // Close on Escape key
-    document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeSpeedTest(); closeRequeryModal(); } });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeSpeedTest(); closeRequeryModal(); closeRequeryMethodModal(); } });
 
     // ============================================================
     //  YENİDEN SORGULA
     // ============================================================
+
+    // Sorgulama yöntemi seçim modalını aç
+    function openRequeryMethodModal() {
+        document.getElementById('requery-method-modal').classList.remove('hidden');
+        document.body.style.overflow = 'hidden';
+        // Varsayılan yöntemi seçili göster ve ilgili input alanını aç
+        selectRequeryMethod('auto');
+    }
+
+    function closeRequeryMethodModal() {
+        document.getElementById('requery-method-modal').classList.add('hidden');
+        document.body.style.overflow = '';
+    }
+
+    // Yöntem radyo butonları değiştiğinde ilgili input alanını göster/gizle
+    function selectRequeryMethod(method) {
+        const radio = document.querySelector(`input[name="requery-method"][value="${method}"]`);
+        if (radio) radio.checked = true;
+
+        document.querySelectorAll('.requery-method-field').forEach(el => {
+            el.classList.add('hidden');
+        });
+        const activeField = document.getElementById(`requery-field-${method}`);
+        if (activeField) {
+            activeField.classList.remove('hidden');
+            const input = activeField.querySelector('input');
+            if (input) setTimeout(() => input.focus(), 50);
+        }
+    }
+
+    // Seçilen yönteme göre /api/media/requery çağrısını yap
     async function requeryMedia() {
-        const btn = document.querySelector('button[onclick="requeryMedia()"]');
-        const origHtml = btn.innerHTML;
-        btn.disabled = true;
-        btn.innerHTML = `<svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path></svg> Sorgulanıyor...`;
+        const selectedRadio = document.querySelector('input[name="requery-method"]:checked');
+        const mode = selectedRadio ? selectedRadio.value : 'auto';
+
+        let queryValue = '';
+        if (mode === 'link') {
+            queryValue = document.getElementById('requery-input-link').value.trim();
+            if (!queryValue) { showErrorMessage('Lütfen bir link girin.'); return; }
+        }
+
+        const submitBtn = document.getElementById('requery-method-submit-btn');
+        const origHtml = submitBtn.innerHTML;
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = `<svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path></svg> Sorgulanıyor...`;
 
         try {
-            const resp = await fetch(`/api/media/requery?tmdb_id=${tmdbId}&db_index=${dbIndex}&media_type=${mediaType}`, {
+            const params = new URLSearchParams({
+                tmdb_id: tmdbId,
+                db_index: dbIndex,
+                media_type: mediaType,
+                mode: mode,
+                query: queryValue
+            });
+            const resp = await fetch(`/api/media/requery?${params.toString()}`, {
                 method: 'POST'
             });
             if (!resp.ok) {
@@ -1980,12 +2027,13 @@
                 return;
             }
             const data = await resp.json();
+            closeRequeryMethodModal();
             showRequeryModal(data.preview);
         } catch (e) {
             showErrorMessage('Yeniden sorgulama başarısız. Lütfen tekrar deneyin.');
         } finally {
-            btn.disabled = false;
-            btn.innerHTML = origHtml;
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = origHtml;
         }
     }
 
@@ -2047,6 +2095,13 @@
             tvRow.style.display = '';
             document.getElementById('rq-seasons').textContent  = preview.total_seasons || '-';
             document.getElementById('rq-episodes').textContent = preview.total_episodes || '-';
+            const refreshedEl = document.getElementById('rq-episodes-refreshed');
+            if (refreshedEl) {
+                const count = preview._episodes_refreshed || 0;
+                refreshedEl.textContent = count > 0
+                    ? `Kayıtlı ${count} bölümün başlık/açıklama/görseli de TMDB'den yenilenecek.`
+                    : 'Kayıtta güncellenecek bölüm bulunamadı.';
+            }
         } else {
             tvRow.style.display = 'none';
         }
@@ -2078,7 +2133,7 @@
             'genres','genres_tr','genres_de',
             'original_language','runtime',
             'certification_tr','certification_de','certification_us',
-            'collection_id','total_seasons','total_episodes','cast'
+            'collection_id','total_seasons','total_episodes','cast','seasons'
         ];
         for (const f of fields) {
             if (preview[f] !== undefined && preview[f] !== null && preview[f] !== '') {
@@ -2115,6 +2170,57 @@
         }
     }
 </script>
+
+<!-- Yeniden Sorgulama Yöntemi Seçim Modalı -->
+<div id="requery-method-modal" class="hidden fixed inset-0 z-50 flex items-start justify-center p-4 sm:p-8 bg-black/60 overflow-y-auto">
+    <div class="glass-card w-full max-w-lg rounded-3xl my-4 p-5 sm:p-6">
+        <div class="flex items-center justify-between mb-4">
+            <h3 class="text-lg font-semibold">Yeniden Sorgulama Yöntemi</h3>
+            <button type="button" onclick="closeRequeryMethodModal()" class="theme-text-secondary hover:opacity-70">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+            </button>
+        </div>
+        <p class="text-sm theme-text-secondary mb-4">
+            Bu içeriği TMDB'den nasıl yeniden sorgulamak istediğinizi seçin.
+        </p>
+
+        <div class="space-y-2 mb-4">
+            <label class="flex items-center gap-2 p-2 rounded-md border border-gray-300 dark:border-gray-600 cursor-pointer hover:bg-black/5">
+                <input type="radio" name="requery-method" value="auto" checked onchange="selectRequeryMethod('auto')">
+                <span class="text-sm font-medium">Kayıtlı dosya adından otomatik</span>
+            </label>
+            <label class="flex items-center gap-2 p-2 rounded-md border border-gray-300 dark:border-gray-600 cursor-pointer hover:bg-black/5">
+                <input type="radio" name="requery-method" value="link" onchange="selectRequeryMethod('link')">
+                <span class="text-sm font-medium">TMDB / IMDB linki ile sorgula</span>
+            </label>
+        </div>
+
+        <div id="requery-field-auto" class="requery-method-field mb-4">
+            <p class="text-xs theme-text-secondary">
+                Kayıttaki mevcut dosya adlarından en bilgi dolu olanı otomatik seçilip PTN ile ayrıştırılır.
+            </p>
+        </div>
+
+        <div id="requery-field-link" class="requery-method-field hidden mb-4">
+            <label class="block text-sm font-medium mb-2">TMDB / IMDB Linki</label>
+            <input type="text" id="requery-input-link" placeholder="Örn: https://www.themoviedb.org/movie/550"
+                class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary">
+        </div>
+
+        <div class="flex justify-end gap-2">
+            <button type="button" onclick="closeRequeryMethodModal()"
+                class="px-4 py-2 text-sm font-medium rounded-md border border-gray-300 dark:border-gray-600 hover:bg-black/5">
+                İptal
+            </button>
+            <button type="button" id="requery-method-submit-btn" onclick="requeryMedia()"
+                class="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-md bg-blue-500 text-white hover:bg-blue-600">
+                Sorgula
+            </button>
+        </div>
+    </div>
+</div>
 
 <!-- Yeniden Sorgula Önizleme Modalı -->
 <div id="requery-modal" class="hidden fixed inset-0 z-50 flex items-start justify-center p-4 sm:p-8 bg-black/60 overflow-y-auto">
@@ -2219,6 +2325,7 @@
                 <div id="rq-tv-row">
                     <div class="text-xs font-semibold theme-text-secondary uppercase tracking-wide mb-1">Sezon / Bölüm</div>
                     <div><span id="rq-seasons"></span> sezon / <span id="rq-episodes"></span> bölüm</div>
+                    <div id="rq-episodes-refreshed" class="text-xs theme-text-secondary mt-1"></div>
                 </div>
             </div>
 

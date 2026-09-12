@@ -1129,8 +1129,16 @@ async def update_media(request: Request, tmdb_id: int, db_index: int, media_type
     return await update_media_api(request, tmdb_id, db_index, media_type)
 
 @app.post("/api/media/requery")
-async def requery_media(request: Request, tmdb_id: int, db_index: int, media_type: str, _: bool = Depends(require_auth)):
-    return await requery_media_api(request, tmdb_id, db_index, media_type)
+async def requery_media(
+    request: Request,
+    tmdb_id: int,
+    db_index: int,
+    media_type: str,
+    mode: str = "auto",
+    query: str = "",
+    _: bool = Depends(require_auth),
+):
+    return await requery_media_api(request, tmdb_id, db_index, media_type, mode, query)
 
 @app.get("/api/media/visibility")
 async def get_media_visibility(tmdb_id: int, db_index: int, media_type: str = Query(regex="^(movie|tv)$"), _: bool = Depends(require_auth)):

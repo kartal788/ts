@@ -1320,10 +1320,23 @@ async def rename_tv_quality_api(request: Request, tmdb_id: int, db_index: int, s
         raise HTTPException(status_code=500, detail="Sunucu hatası")
 
 
-async def requery_media_api(request: Request, tmdb_id: int, db_index: int, media_type: str):
+async def requery_media_api(
+    request: Request,
+    tmdb_id: int,
+    db_index: int,
+    media_type: str,
+    mode: str = "auto",
+    query: str = "",
+):
     """
-    Mevcut kaydın dosya adlarından (telegram[].name) PTN ile metadata çıkarır,
-    TMDB'den güncel bilgileri getirir ve önizleme olarak döndürür.
+    Yeni medyayı yeniden sorgulamak için birden çok yöntem destekler:
+      - mode="auto":     Mevcut kaydın dosya adlarından (telegram[].name) PTN ile
+                          otomatik metadata çıkarır (eski/varsayılan davranış).
+      - mode="link":     TMDB veya IMDB linkinden ID'yi çıkarır (IMDB linki ise
+                          otomatik olarak TMDB ID'sine çevrilir).
+    Her durumda TMDB'den güncel bilgileri getirir ve önizleme olarak döndürür.
+    Dizilerde ayrıca "cast" ve mevcut tüm sezon/bölüm başlık, açıklama ve
+    görselleri de (dosya bilgileri korunarak) yeniden çekilip önizlemeye eklenir.
     Onaylandığında /api/media/update ile kaydedilebilir.
     """
     import re
@@ -1332,9 +1345,14 @@ async def requery_media_api(request: Request, tmdb_id: int, db_index: int, media
         safe_tmdb_search,
         _tmdb_movie_details,
         _tmdb_tv_details,
+        _tmdb_episode_details,
         format_tmdb_image,
         get_tmdb_logo,
         _fetch_tmdb_images,
+        _resolve_tmdb_id_from_imdb,
+        extract_default_id,
+        tmdb,
+        tmdb_de,
         tmdb_en,
     )
     try:
@@ -1343,52 +1361,95 @@ async def requery_media_api(request: Request, tmdb_id: int, db_index: int, media
         def tur_genre_normalize(g): return g
         def de_genre_normalize(g): return g
 
+    def _clean_filename(name: str) -> str:
+        cleaned = re.sub(r'https?://\S+', '', name).strip()
+        cleaned = re.sub(r'\bm(1080p|720p|2160p|480p)\b', r'\1', cleaned, flags=re.IGNORECASE)
+        return cleaned
+
     try:
         doc = await db.get_document(media_type, tmdb_id, db_index)
         if not doc:
             raise HTTPException(status_code=404, detail="Kayıt bulunamadı")
 
-        # Dosya adlarını topla
-        filenames: list[str] = []
-        if media_type == "movie":
-            for q in doc.get("telegram", []):
-                n = q.get("name", "")
-                if n:
-                    filenames.append(n)
-        else:  # tv
-            for season in doc.get("seasons", []):
-                for ep in season.get("episodes", []):
-                    for q in ep.get("telegram", []):
-                        n = q.get("name", "")
-                        if n:
-                            filenames.append(n)
+        mode = (mode or "auto").strip().lower()
+        query = (query or "").strip()
 
-        if not filenames:
-            raise HTTPException(status_code=400, detail="Kayıtta dosya adı bulunamadı")
-
-        # En iyi dosya adını seç (en uzun / en bilgi dolu)
-        best_filename = max(filenames, key=lambda f: len(PTN.parse(f)))
-        best_filename_clean = re.sub(r'https?://\S+', '', best_filename).strip()
-        best_filename_clean = re.sub(r'\bm(1080p|720p|2160p|480p)\b', r'\1', best_filename_clean, flags=re.IGNORECASE)
-
-        parsed = PTN.parse(best_filename_clean)
-        title = parsed.get("title") or doc.get("title", "")
-        year  = parsed.get("year")
-        season_num  = parsed.get("season")
-        episode_num = parsed.get("episode")
-
-        if not title:
-            raise HTTPException(status_code=400, detail="Dosya adından başlık çıkarılamadı")
-
-        # TMDB arama
-        is_tv = media_type == "tv" or bool(season_num and episode_num)
+        is_tv = media_type == "tv"
         tmdb_type = "tv" if is_tv else "movie"
+        new_tmdb_id: int | None = None
+        best_filename_clean: str = ""
+        title: str = doc.get("title", "")
 
-        result = await safe_tmdb_search(title, tmdb_type, year)
-        if not result:
-            raise HTTPException(status_code=404, detail=f"TMDB'de '{title}' bulunamadı")
+        if mode == "auto":
+            # Kayıttaki dosya adlarını topla ve en bilgi dolu olanı seç
+            filenames: list[str] = []
+            if media_type == "movie":
+                for q in doc.get("telegram", []):
+                    n = q.get("name", "")
+                    if n:
+                        filenames.append(n)
+            else:  # tv
+                for season in doc.get("seasons", []):
+                    for ep in season.get("episodes", []):
+                        for q in ep.get("telegram", []):
+                            n = q.get("name", "")
+                            if n:
+                                filenames.append(n)
 
-        new_tmdb_id = result.id
+            if not filenames:
+                raise HTTPException(status_code=400, detail="Kayıtta dosya adı bulunamadı")
+
+            best_filename = max(filenames, key=lambda f: len(PTN.parse(f)))
+            best_filename_clean = _clean_filename(best_filename)
+
+            parsed = PTN.parse(best_filename_clean)
+            title = parsed.get("title") or doc.get("title", "")
+            year = parsed.get("year")
+            season_num = parsed.get("season")
+            episode_num = parsed.get("episode")
+
+            if not title:
+                raise HTTPException(status_code=400, detail="Dosya adından başlık çıkarılamadı")
+
+            is_tv = media_type == "tv" or bool(season_num and episode_num)
+            tmdb_type = "tv" if is_tv else "movie"
+
+            result = await safe_tmdb_search(title, tmdb_type, year)
+            if not result:
+                raise HTTPException(status_code=404, detail=f"TMDB'de '{title}' bulunamadı")
+            new_tmdb_id = result.id
+
+        elif mode == "link":
+            if not query:
+                raise HTTPException(status_code=400, detail="Link girilmedi")
+
+            ext_id, ext_type = extract_default_id(query)
+            if not ext_id:
+                raise HTTPException(status_code=400, detail="Linkten TMDB/IMDB ID çıkarılamadı")
+
+            if ext_type in ("movie", "tv"):
+                tmdb_type = ext_type
+                is_tv = ext_type == "tv"
+                new_tmdb_id = int(ext_id)
+            elif str(ext_id).startswith("tt"):
+                resolved = await _resolve_tmdb_id_from_imdb(ext_id, tmdb_type)
+                if not resolved:
+                    other_type = "movie" if tmdb_type == "tv" else "tv"
+                    resolved = await _resolve_tmdb_id_from_imdb(ext_id, other_type)
+                    if resolved:
+                        tmdb_type = other_type
+                        is_tv = tmdb_type == "tv"
+                if not resolved:
+                    raise HTTPException(status_code=404, detail="Linkteki IMDB ID için TMDB kaydı bulunamadı")
+                new_tmdb_id = resolved
+            else:
+                # Tip bilgisi olmayan düz sayısal ID -> mevcut media_type varsayılır
+                new_tmdb_id = int(ext_id)
+
+            best_filename_clean = f"Link: {query}"
+
+        else:
+            raise HTTPException(status_code=400, detail="Geçersiz sorgulama yöntemi")
 
         # TMDB detayları
         if is_tv:
@@ -1430,6 +1491,17 @@ async def requery_media_api(request: Request, tmdb_id: int, db_index: int, media
         if not original_genres:
             original_genres = [g.name for g in (getattr(details, "genres", None) or [])]
 
+        # Oyuncular (cast) — TMDB credits'ten; mevcut kayıttaki oyuncular
+        # yeniden sorgulamada YANLIŞLIKLA korunuyordu, artık her zaman TMDB'nin
+        # güncel listesiyle değiştiriliyor.
+        credits_obj = getattr(details, "credits", None)
+        cast_arr = getattr(credits_obj, "cast", None) or []
+        cast_names = [
+            (getattr(c, "name", None) or getattr(c, "original_name", None))
+            for c in cast_arr
+        ]
+        cast_names = [c for c in cast_names if c][:20]
+
         if is_tv:
             genres_raw = original_genres  # orijinal (İngilizce) tür adları
             genres_tr_raw = [g.name for g in (getattr(details, "genres", None) or [])]  # TMDB tr-TR'den gerçek TR adları
@@ -1463,7 +1535,83 @@ async def requery_media_api(request: Request, tmdb_id: int, db_index: int, media
                 "certification_de": getattr(details, "certification_de", None),
                 "certification_us": getattr(details, "certification_us", None),
                 "_parsed_from":   best_filename_clean,
+                "cast":           cast_names,
             }
+
+            # ------------------------------------------------------------
+            # Bölüm bilgilerini (başlık, açıklama, görsel) TMDB'den yeniden çek
+            # ------------------------------------------------------------
+            # Not: Dosya bilgileri (telegram/quality listeleri) olduğu gibi
+            # korunur; sadece TMDB'den gelen metin/görsel alanları güncellenir.
+            async def _refresh_episode(season_number, ep):
+                episode_number = ep.get("episode_number")
+                new_ep = dict(ep)
+                try:
+                    ep_en, ep_tr, ep_de = await asyncio.gather(
+                        _tmdb_episode_details(new_tmdb_id, season_number, episode_number, tmdb_en),
+                        _tmdb_episode_details(new_tmdb_id, season_number, episode_number, tmdb),
+                        _tmdb_episode_details(new_tmdb_id, season_number, episode_number, tmdb_de),
+                        return_exceptions=True,
+                    )
+                except Exception:
+                    ep_en = ep_tr = ep_de = None
+                ep_en = ep_en if not isinstance(ep_en, Exception) else None
+                ep_tr = ep_tr if not isinstance(ep_tr, Exception) else None
+                ep_de = ep_de if not isinstance(ep_de, Exception) else None
+
+                title_en = (getattr(ep_en, "name", "") or "") if ep_en else ""
+                title_tr = (getattr(ep_tr, "name", "") or "") if ep_tr else ""
+                title_de = (getattr(ep_de, "name", "") or "") if ep_de else ""
+                overview_en = (getattr(ep_en, "overview", "") or "") if ep_en else ""
+                overview_tr = (getattr(ep_tr, "overview", "") or "") if ep_tr else ""
+                overview_de = (getattr(ep_de, "overview", "") or "") if ep_de else ""
+                still_path = (
+                    (getattr(ep_tr, "still_path", None) if ep_tr else None)
+                    or (getattr(ep_en, "still_path", None) if ep_en else None)
+                    or (getattr(ep_de, "still_path", None) if ep_de else None)
+                )
+                air_date = (
+                    (getattr(ep_tr, "air_date", None) if ep_tr else None)
+                    or (getattr(ep_en, "air_date", None) if ep_en else None)
+                )
+
+                if title_en or title_tr or title_de:
+                    new_ep["title"] = title_en or ep.get("title", "")
+                    new_ep["title_tr"] = title_tr or ep.get("title_tr", "")
+                    new_ep["title_de"] = title_de or ep.get("title_de", "")
+                if overview_en or overview_tr or overview_de:
+                    new_ep["overview"] = overview_en or ep.get("overview", "")
+                    new_ep["overview_tr"] = overview_tr or ep.get("overview_tr", "")
+                    new_ep["overview_de"] = overview_de or ep.get("overview_de", "")
+                if still_path:
+                    new_ep["episode_backdrop"] = format_tmdb_image(still_path, "original")
+                if air_date:
+                    new_ep["released"] = air_date.strftime("%Y-%m-%dT05:00:00.000Z")
+
+                return new_ep
+
+            existing_seasons = doc.get("seasons", []) or []
+            refresh_tasks = []
+            task_positions = []  # (season_index, episode_index)
+            updated_seasons = [
+                {"season_number": s.get("season_number"), "episodes": list(s.get("episodes", []) or [])}
+                for s in existing_seasons
+            ]
+            for s_idx, season in enumerate(existing_seasons):
+                for e_idx, ep in enumerate(season.get("episodes", []) or []):
+                    refresh_tasks.append(_refresh_episode(season.get("season_number"), ep))
+                    task_positions.append((s_idx, e_idx))
+
+            if refresh_tasks:
+                refreshed_results = await asyncio.gather(*refresh_tasks, return_exceptions=True)
+                for (s_idx, e_idx), result in zip(task_positions, refreshed_results):
+                    if isinstance(result, Exception):
+                        continue
+                    updated_seasons[s_idx]["episodes"][e_idx] = result
+
+            preview["seasons"] = updated_seasons
+            preview["_episodes_refreshed"] = len(refresh_tasks)
+
         else:
             genres_raw = original_genres  # orijinal (İngilizce) tür adları
             genres_tr_raw = [g.name for g in (getattr(details, "genres", None) or [])]  # TMDB tr-TR'den gerçek TR adları
@@ -1497,6 +1645,7 @@ async def requery_media_api(request: Request, tmdb_id: int, db_index: int, media
                 "certification_de": getattr(details, "certification_de", None),
                 "certification_us": getattr(details, "certification_us", None),
                 "_parsed_from":   best_filename_clean,
+                "cast":           cast_names,
             }
 
         return {"preview": preview}

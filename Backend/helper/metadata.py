@@ -538,17 +538,26 @@ async def _tmdb_tv_details(tv_id):
 
 
 async def _tmdb_episode_details(tv_id, season, episode, client=None):
-    """client verilmezse tmdb_tr (varsayılan `tmdb`) kullanılır. Almanca bölüm
-    başlığı/özeti için tmdb_de ile ayrıca çağrılabilir — her dil kendi cache
-    anahtarı altında (tv_id, season, episode, lang) tutulur."""
+    """client verilmezse tmdb_tr (varsayılan `tmdb`) kullanılır. Almanca/İngilizce
+    bölüm başlığı/özeti için tmdb_de / tmdb_en ile ayrıca çağrılabilir — her dil
+    kendi cache anahtarı altında (tv_id, season, episode, lang) tutulur.
+    NOT: lang_tag mutlaka client kimliğine göre ayrıştırılmalı — aksi halde
+    (örn. tmdb_en de "tr" etiketiyle önbelleğe yazılırsa) farklı dillerdeki
+    çağrılar aynı cache anahtarını paylaşıp birbirinin verisini geri döndürebilir.
+    """
     client = client or tmdb
-    lang_tag = "de" if client is tmdb_de else "tr"
+    if client is tmdb_de:
+        lang_tag = "de"
+    elif client is tmdb_en:
+        lang_tag = "en"
+    else:
+        lang_tag = "tr"
     key = (tv_id, season, episode, lang_tag)
     if key in EPISODE_CACHE:
         return EPISODE_CACHE[key]
     try:
         async with API_SEMAPHORE:
-            # details() parametresiz; dil client init'inden geliyor (tr-TR / de-DE)
+            # details() parametresiz; dil client init'inden geliyor (tr-TR / de-DE / en-US)
             details = await client.episode(tv_id, season, episode).details()
         EPISODE_CACHE[key] = details
         return details
