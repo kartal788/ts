@@ -794,9 +794,9 @@
 
     // Create media card HTML
     function createMediaCard(item) {
-        const title = item.title || item.name || 'Unknown Title';
+        const title = item.title_tr || item.title || item.name || 'Unknown Title';
         const year = item.release_year || 'Bilinmiyor';
-        const poster = item.poster || 'https://via.placeholder.com/300x450/e5e7eb/9ca3af?text=No+Image';
+        const poster = item.poster_tr || item.poster || 'https://via.placeholder.com/300x450/e5e7eb/9ca3af?text=No+Image';
         const safeTitle = title.replace(/"/g, '&quot;');
 
         return `

@@ -23,6 +23,20 @@ from datetime import datetime, timedelta
 
 logger = logging.getLogger("daily_content_notifier")
 
+# ─── Poster kolajı ayarları ────────────────────────────────────────────────
+# Kolaja dahil edilecek maksimum poster sayısı (çok fazla içerik varsa
+# görsel aşırı büyük/karmaşık olmasın diye sınırlanır).
+# Kolajdaki satır sayısı (dikey) her zaman 2, 3 ya da 4 olacak şekilde
+# seçilir; bu üç seçenekten, indirilen geçerli poster sayısını en az kayıpla
+# tam bir ızgaraya sığdıran seçilir (ör. 19 poster → 4 satır x 4 sütun = 16
+# değil, 3 satır x 6 sütun = 18 kullanılır, yalnızca 1 poster elenir).
+# Hesaplama _compute_grid_layout() içinde yapılır.
+_COLLAGE_MAX_POSTERS = 36
+# Tek bir posterin kolajdaki hedef boyutu (px).
+_COLLAGE_THUMB_SIZE = (200, 300)
+_COLLAGE_PADDING = 8
+_COLLAGE_BG_COLOR = (18, 18, 22)
+
 # ─── Bildirim saati ayarı ─────────────────────────────────────────────────────
 # Saati değiştirmek için bu iki sabiti düzenleyin (UTC+3 / Türkiye saati).
 # Örnek: sabah 08:30 → NOTIFY_HOUR = 8, NOTIFY_MINUTE = 30
@@ -114,6 +128,8 @@ async def _get_new_content(db) -> dict:
         "title": 1,
         "title_tr": 1,
         "poster": 1,
+        "poster_tr": 1,
+        "poster_de": 1,
         "rating": 1,
         "release_year": 1,
         "genres_tr": 1,
@@ -146,7 +162,7 @@ async def _get_new_content(db) -> dict:
         # Dizi koleksiyonu
         try:
             tv_cursor = storage["tv"].find(query, {
-                "title": 1, "title_tr": 1, "poster": 1, "rating": 1,
+                "title": 1, "title_tr": 1, "poster": 1, "poster_tr": 1, "poster_de": 1, "rating": 1,
                 "release_year": 1, "genres_tr": 1, "genres": 1,
                 "updated_on": 1, "tmdb_id": 1, "imdb_id": 1, "media_type": 1,
             }).sort("updated_on", -1)
@@ -174,6 +190,240 @@ def _dedup(items: list[dict]) -> list[dict]:
         seen.add(key)
         result.append(item)
     return result
+
+
+# ─── Poster kolajı ────────────────────────────────────────────────────────────
+
+async def _download_poster(client, url: str):
+    """Bir poster URL'sini indirir, başarısız olursa None döner."""
+    if not url:
+        return None
+    try:
+        resp = await client.get(url, timeout=10.0)
+        resp.raise_for_status()
+        return resp.content
+    except Exception as e:
+        logger.debug("[content-notify] Poster indirilemedi (%s): %s", url, e)
+        return None
+
+
+async def _download_poster_with_fallback(client, item: dict):
+    """
+    Bir içerik için poster_tr → poster → poster_de sırasıyla indirmeyi dener.
+    İlk başarılı indirilen görsel kullanılır. Hiçbir alan indirilemezse
+    (veya hiçbiri tanımlı değilse) None döner ve bu içerik kolaja eklenmez.
+    """
+    for url in (item.get("poster_tr"), item.get("poster"), item.get("poster_de")):
+        if not url:
+            continue
+        data = await _download_poster(client, url)
+        if data:
+            return data
+    return None
+
+
+_COLLAGE_ALLOWED_ROWS = (2, 3, 4)
+
+
+def _compute_grid_layout(n: int) -> tuple[int, int, int]:
+    """
+    İndirilen geçerli poster sayısı (n) için ızgara düzenini belirler.
+
+    Satır sayısı (dikey) her zaman 2, 3 ya da 4'ten biri olmalıdır.
+    Bu üç seçenek arasından, n'i tam bölen (kalansız) ve en az poster
+    kaybına yol açan satır sayısı seçilir; eşitlik durumunda ızgarayı
+    en kareye yakın yapan (satır/sütun farkı en küçük olan) seçilir.
+
+    Dönüş: (rows, cols, used_n) — used_n, kolajda gerçekten kullanılacak
+    poster sayısıdır (n <= used_n değildir, used_n <= n).
+
+    Örnek: 20 poster → 4x5 (20 kullanılır, kayıp yok)
+           19 poster → 3x6 (18 kullanılır, yalnızca 1 poster elenir)
+            3 poster → 3x1 (3 kullanılır, kayıp yok)
+            1 poster → (1, 1, 1) — ızgara kurulmaz.
+    """
+    n = min(n, _COLLAGE_MAX_POSTERS)
+    if n <= 1:
+        return (1, max(n, 0), max(n, 0))
+
+    best = None  # (used_n, -|rows-cols|, rows, cols)
+    for rows in _COLLAGE_ALLOWED_ROWS:
+        if rows > n:
+            continue
+        used = (n // rows) * rows
+        if used == 0:
+            continue
+        cols = used // rows
+        score = (used, -abs(rows - cols))
+        if best is None or score > best[0]:
+            best = (score, rows, cols)
+
+    if best is None:
+        # n, 2/3/4'ten hiçbirine bölünemiyor (n < 2 durumunda buraya
+        # düşülmez, ama güvenlik amacıyla tek satır olarak döndür).
+        return (1, n, n)
+
+    _, rows, cols = best
+    used = rows * cols
+    return (rows, cols, used)
+
+
+async def _build_poster_collage(movies: list[dict], tv_shows: list[dict]):
+    """
+    Eklenen film/dizi posterlerinden bir kolaj görseli oluşturur.
+
+    Filmler önce, sonra diziler olacak şekilde (alfabetik sıralı), en fazla
+    _COLLAGE_MAX_POSTERS adet poster; satır sayısı 2, 3 ya da 4 olacak
+    şekilde ızgara halinde birleştirilir (ör. 20 → 4x5, 24 → 4x6, 30 → 3x10).
+
+    Dönüş: JPEG bytes, ya da hiç poster indirilemezse None.
+    """
+    try:
+        from PIL import Image
+    except ImportError:
+        logger.warning("[content-notify] Pillow kurulu değil, kolaj oluşturulamıyor.")
+        return None
+
+    import httpx
+
+    ordered = _sort_alphabetically(movies) + _sort_alphabetically(tv_shows)
+    # En az bir poster alanı (poster_tr / poster / poster_de) tanımlı olan içerikler.
+    candidates = [
+        it for it in ordered
+        if it.get("poster_tr") or it.get("poster") or it.get("poster_de")
+    ]
+    candidates = candidates[:_COLLAGE_MAX_POSTERS]
+
+    if not candidates:
+        return None
+
+    async with httpx.AsyncClient() as client:
+        # Her içerik için önce poster_tr, o başarısız olursa poster,
+        # o da başarısız olursa poster_de denenir. Hiçbiri indirilemezse
+        # ilgili içerik kolaja dahil edilmez.
+        results = await asyncio.gather(
+            *[_download_poster_with_fallback(client, it) for it in candidates]
+        )
+
+    images = []
+    for raw in results:
+        if not raw:
+            continue
+        try:
+            img = Image.open(io.BytesIO(raw)).convert("RGB")
+            img = img.resize(_COLLAGE_THUMB_SIZE)
+            images.append(img)
+        except Exception as e:
+            logger.debug("[content-notify] Poster açılamadı: %s", e)
+
+    if not images:
+        return None
+
+    # Satır sayısını (2, 3 ya da 4) ve buna göre kullanılacak nihai poster
+    # sayısını belirle — en az poster kaybıyla tam bir ızgaraya sığdır.
+    rows, cols, used_n = _compute_grid_layout(len(images))
+    if used_n < len(images):
+        images = images[:used_n]
+
+    thumb_w, thumb_h = _COLLAGE_THUMB_SIZE
+    pad = _COLLAGE_PADDING
+    canvas_w = cols * thumb_w + (cols + 1) * pad
+    canvas_h = rows * thumb_h + (rows + 1) * pad
+
+    canvas = Image.new("RGB", (canvas_w, canvas_h), _COLLAGE_BG_COLOR)
+
+    for idx, img in enumerate(images):
+        row, col = divmod(idx, cols)
+        x = pad + col * (thumb_w + pad)
+        y = pad + row * (thumb_h + pad)
+        canvas.paste(img, (x, y))
+
+    buf = io.BytesIO()
+    canvas.save(buf, format="JPEG", quality=88)
+    buf.seek(0)
+    return buf.getvalue()
+
+
+# ─── Poster kolajını gruba/konuya gönderme ────────────────────────────────────
+# Ayarlar sayfasındaki "Yeni İçerik Duyuruları" bölümündeki aynı hedef
+# (announce_new_content + announcement_channel) kullanılır — content_announcer.py
+# ile aynı kanal/grup/konu ayarı paylaşılır.
+
+async def _send_collage_to_group(collage_bytes: bytes, movies: list[dict], tv_shows: list[dict], date_label: str) -> None:
+    """Kolaj görselini, ayarlarda tanımlı duyuru kanalına/grubuna/konusuna gönderir."""
+    if not collage_bytes:
+        return
+
+    try:
+        from pyrogram.enums import ParseMode
+        from pyrogram.errors import FloodWait, TopicClosed
+
+        from Backend.helper.settings_manager import SettingsManager
+        from Backend.helper.content_announcer import _parse_target
+        from Backend.pyrofork.bot import StreamBot
+
+        settings = SettingsManager.current()
+        if not getattr(settings, "announce_new_content", False):
+            return
+
+        chat, thread_id = _parse_target(getattr(settings, "announcement_channel", ""))
+        if chat is None:
+            return
+
+        app_name = getattr(settings, "isim", "") or ""
+        title_suffix = f" {app_name}'e" if app_name else ""
+        caption = f"🎬 <b>{date_label}{title_suffix} Eklenenler</b>"
+
+        async def _do_send():
+            buf = io.BytesIO(collage_bytes)
+            buf.name = "eklenenler_kolaj.jpg"
+            return await StreamBot.send_photo(
+                chat_id=chat,
+                message_thread_id=thread_id,
+                photo=buf,
+                caption=caption,
+                parse_mode=ParseMode.HTML,
+            )
+
+        try:
+            await _do_send()
+        except TopicClosed:
+            # Hedef konu kapalıysa geçici olarak aç, gönder, sonra tekrar kapat
+            # (content_announcer.py ile aynı davranış).
+            if thread_id is None:
+                logger.error("[content-notify] Kolaj gönderilemedi: hedef konu kapalı (TOPIC_CLOSED).")
+                return
+            try:
+                await StreamBot.reopen_forum_topic(chat, thread_id)
+            except Exception as e:
+                logger.error("[content-notify] Kolaj gönderilemedi, konu açılamadı: %s", e)
+                return
+            try:
+                await _do_send()
+            except FloodWait as e:
+                await asyncio.sleep(max(e.value, 1))
+                try:
+                    await _do_send()
+                except Exception as e2:
+                    logger.error("[content-notify] Kolaj gruba gönderilemedi (retry): %s", e2)
+            except Exception as e:
+                logger.error("[content-notify] Konu geçici açıldı ama kolaj gönderilemedi: %s", e)
+            finally:
+                try:
+                    await StreamBot.close_forum_topic(chat, thread_id)
+                except Exception as e:
+                    logger.warning("[content-notify] Kolaj sonrası konu tekrar kapatılamadı: %s", e)
+        except FloodWait as e:
+            await asyncio.sleep(max(e.value, 1))
+            try:
+                await _do_send()
+            except Exception as e2:
+                logger.error("[content-notify] Kolaj gruba gönderilemedi (retry): %s", e2)
+        except Exception as e:
+            logger.error("[content-notify] Kolaj gruba gönderilemedi: %s", e)
+
+    except Exception as e:
+        logger.exception("[content-notify] Kolaj grup gönderimi genel hata: %s", e)
 
 
 # ─── Dizi bölüm/sezon özeti ───────────────────────────────────────────────────
@@ -232,9 +482,10 @@ def _sort_alphabetically(items: list[dict]) -> list[dict]:
         ))
 
 
-def _build_content_lines(movies: list[dict], tv_shows: list[dict], date_label: str) -> list[str]:
+def _build_content_lines(movies: list[dict], tv_shows: list[dict], service_name: str, date_label: str) -> list[str]:
     """Film ve dizi listesini düz metin satırlarına çevirir (HTML tag'siz, alfabetik sıralı)."""
-    lines: list[str] = [f"{date_label} Eklenenler", ""]
+    title_suffix = f" {service_name}'e" if service_name else ""
+    lines: list[str] = [f"{date_label}{title_suffix} Eklenenler", ""]
 
     if movies:
         sorted_movies = _sort_alphabetically(movies)
@@ -291,7 +542,8 @@ def _format_notification_html(movies: list[dict], tv_shows: list[dict], service_
         return ""
 
     lines: list[str] = []
-    lines.append(f"<b>{date_label} Eklenenler</b>\n")
+    title_suffix = f" {service_name}'e" if service_name else ""
+    lines.append(f"<b>{date_label}{title_suffix} Eklenenler</b>\n")
 
     if movies:
         lines.append(f"🎥 <b>Filmler</b> ({len(movies)})")
@@ -340,7 +592,7 @@ def _format_notification_html(movies: list[dict], tv_shows: list[dict], service_
 def _build_txt_bytes(movies: list[dict], tv_shows: list[dict], service_name: str, date_label: str) -> bytes:
     """15'ten fazla içerik için .txt dosyası içeriğini oluşturur."""
     header = []
-    content_lines = _build_content_lines(movies, tv_shows, date_label)
+    content_lines = _build_content_lines(movies, tv_shows, service_name, date_label)
     full_text = "\n".join(header + content_lines)
     return full_text.encode("utf-8")
 
@@ -393,10 +645,29 @@ async def _send_daily_content_notifications() -> None:
         # ── 2. Tarih etiketi ve mesaj mı, txt mi? ────────────────────────
         date_label  = _yesterday_label()
         use_txt     = total_content > _TXT_THRESHOLD
+
+        # ── 2b. Poster kolajı (bir kez oluşturulur, tüm kullanıcılara aynı
+        #        yüklenen dosya file_id'si üzerinden gönderilir) ─────────
+        collage_bytes  = await _build_poster_collage(movies, tv_shows)
+        app_name = Telegram.ISIM or ""
+        title_suffix = f" {app_name}'e" if app_name else ""
+        collage_caption = f"🎬 <b>{date_label}{title_suffix} Eklenenler</b>"
+        collage_file_id: str | None = None
+
+        collage_buffer = None
+        if collage_bytes:
+            collage_buffer = io.BytesIO(collage_bytes)
+            collage_buffer.name = "eklenenler_kolaj.jpg"
+
+        # Kolajı, ayarlardaki "Yeni İçerik Duyuruları" hedefine (kanal/grup/konu)
+        # de gönder — kullanıcı bildirimlerinden bağımsız, tek seferlik gönderim.
+        await _send_collage_to_group(collage_bytes, movies, tv_shows, date_label)
+
         if use_txt:
             txt_bytes   = _build_txt_bytes(movies, tv_shows, Telegram.ISIM, date_label)
+            txt_title_suffix = f" {Telegram.ISIM}'e" if Telegram.ISIM else ""
             txt_caption = (
-                f"<b>{date_label} Eklenenler</b>\n"
+                f"<b>{date_label}{txt_title_suffix} Eklenenler</b>\n"
                 f"<i>{len(movies)} film, {len(tv_shows)} dizi eklendi.</i>\n"
                 f"📄 Tam liste ekte."
             )
@@ -437,6 +708,27 @@ async def _send_daily_content_notifications() -> None:
             username = user.get("username") or None
 
             async def _send(uid_int=uid_int):
+                nonlocal collage_file_id
+
+                # Poster kolajı varsa önce onu gönder (ilk yüklemeden sonra
+                # dönen file_id sonraki kullanıcılar için yeniden kullanılır,
+                # böylece görsel her seferinde yeniden yüklenmez).
+                if collage_bytes:
+                    if collage_file_id:
+                        photo_payload = collage_file_id
+                    else:
+                        collage_buffer.seek(0)
+                        photo_payload = collage_buffer
+
+                    photo_sent = await StreamBot.send_photo(
+                        chat_id=uid_int,
+                        photo=photo_payload,
+                        caption=collage_caption,
+                        parse_mode=ParseMode.HTML,
+                    )
+                    if not collage_file_id and photo_sent and photo_sent.photo:
+                        collage_file_id = photo_sent.photo.file_id
+
                 if use_txt:
                     await StreamBot.send_document(
                         chat_id=uid_int,

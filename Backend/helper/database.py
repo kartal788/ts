@@ -2155,7 +2155,205 @@ class Database:
         else:
             collection_name = "movie"
         document = await self.dbs[db_key][collection_name].find_one({"tmdb_id": int(tmdb_id)})
-        return convert_objectid_to_str(document) if document else None
+        if document:
+            return convert_objectid_to_str(document)
+
+        # Belirtilen db_index'te bulunamadı — birleştirme (requery-merge) sonrası
+        # kayıt başka bir shard'a taşınmış olabilir. Diğer shard'ları da kontrol et.
+        total_storage_dbs = len(self.dbs) - 1
+        for db_idx in range(1, total_storage_dbs + 1):
+            other_key = f"storage_{db_idx}"
+            if other_key == db_key:
+                continue
+            storage = self.dbs.get(other_key)
+            if storage is None:
+                continue
+            document = await storage[collection_name].find_one({"tmdb_id": int(tmdb_id)})
+            if document:
+                return convert_objectid_to_str(document)
+
+        return None
+
+    @staticmethod
+    def _quality_signature(q: Dict[str, Any]):
+        return (
+            (q.get("name") or "").strip().casefold(),
+            (q.get("size") or "").strip().casefold(),
+        )
+
+    @classmethod
+    def _merge_quality_lists(cls, existing: list, incoming: list) -> list:
+        existing = list(existing or [])
+        existing_ids = {q.get("id") for q in existing if q.get("id")}
+        existing_sigs = {cls._quality_signature(q) for q in existing}
+        for q in (incoming or []):
+            if q.get("id") and q.get("id") in existing_ids:
+                continue
+            if cls._quality_signature(q) in existing_sigs:
+                continue
+            existing.append(q)
+            if q.get("id"):
+                existing_ids.add(q.get("id"))
+            existing_sigs.add(cls._quality_signature(q))
+        return existing
+
+    async def merge_media_records(
+        self,
+        collection_name: str,
+        keep_db_key: str,
+        keep_doc: Dict[str, Any],
+        remove_db_key: str,
+        remove_doc: Dict[str, Any],
+        metadata_overrides: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """
+        Aynı tmdb_id'ye ait iki dokümanı TEK kayıtta birleştirir:
+          - 'remove_doc'taki dosyalar (film: telegram[]; dizi:
+            seasons[].episodes[].telegram[]) 'keep_doc' altında toplanır;
+            aynı id'ye veya aynı isim+boyuta sahip dosyalar tekrar eklenmez.
+          - metadata_overrides verilirse (örn. taze TMDB verisi) 'keep_doc'
+            üzerine yazılır (telegram/seasons/tmdb_id/db_index hariç).
+          - 'remove_doc' veritabanından silinir.
+        Herhangi bir Telegram dosyası silinmez; sadece tek kayıt altında toplanır.
+        """
+        if collection_name == "movie":
+            keep_doc["telegram"] = self._merge_quality_lists(
+                keep_doc.get("telegram", []), remove_doc.get("telegram", [])
+            )
+        else:  # tv
+            keep_doc.setdefault("seasons", [])
+            for season in (remove_doc.get("seasons", []) or []):
+                existing_season = next(
+                    (s for s in keep_doc["seasons"] if s.get("season_number") == season.get("season_number")),
+                    None,
+                )
+                if not existing_season:
+                    keep_doc["seasons"].append(season)
+                    continue
+                existing_season.setdefault("episodes", [])
+                for episode in (season.get("episodes", []) or []):
+                    existing_episode = next(
+                        (e for e in existing_season["episodes"] if e.get("episode_number") == episode.get("episode_number")),
+                        None,
+                    )
+                    if not existing_episode:
+                        existing_season["episodes"].append(episode)
+                        continue
+                    existing_episode["telegram"] = self._merge_quality_lists(
+                        existing_episode.get("telegram", []), episode.get("telegram", [])
+                    )
+
+        if metadata_overrides:
+            safe_overrides = {
+                k: v for k, v in metadata_overrides.items()
+                if k not in ("telegram", "seasons", "tmdb_id", "db_index", "_id")
+            }
+            keep_doc.update(safe_overrides)
+
+        try:
+            await self.dbs[keep_db_key][collection_name].replace_one({"_id": keep_doc["_id"]}, keep_doc)
+            await self.dbs[remove_db_key][collection_name].delete_one({"_id": remove_doc["_id"]})
+        except Exception as e:
+            LOGGER.error(f"[merge_media_records] Birleştirme sırasında hata: {e}")
+            return False
+        return True
+
+    @staticmethod
+    def _quality_count(doc: Dict[str, Any], collection_name: str) -> int:
+        if collection_name == "movie":
+            return len(doc.get("telegram") or [])
+        total = 0
+        for season in (doc.get("seasons") or []):
+            for ep in (season.get("episodes") or []):
+                total += len(ep.get("telegram") or [])
+        return total
+
+    async def _merge_into_existing_tmdb_id(
+        self,
+        collection_name: str,
+        old_tmdb_id: int,
+        old_db_key: str,
+        new_tmdb_id: int,
+        update_data: Dict[str, Any],
+    ) -> Optional[bool]:
+        """
+        Bir kayıt kaydedilirken (özellikle "Yeniden Sorgula" sonrası), aynı
+        tmdb_id'yi paylaşan BAŞKA kayıt(lar) varsa — ister tmdb_id bu
+        kaydetmeyle değişmiş olsun (iki farklı film aynı TMDB filmine
+        çözümlenip çakışmış), ister kayıt zaten baştan mükerrer olsun (aynı
+        filmin veritabanında hâlihazırda 2 ayrı kaydı olsun, tmdb_id hiç
+        değişmemiş olsa bile) — hepsini TEK kayıt altında birleştirir:
+
+          - Tüm kayıtlardaki dosyalar (film: telegram[]; dizi:
+            seasons[].episodes[].telegram[]) tek kayıtta toplanır; aynı
+            id'ye veya aynı isim+boyuta sahip dosyalar mükerrer eklenmez.
+          - Kalan kayıt taze TMDB verisiyle (title, description, poster vb.)
+            güncellenir.
+          - Diğer kayıt(lar) silinir. Hiçbir dosya kaybolmaz, sadece tek
+            kayıt altında toplanır.
+
+        Çakışma/mükerrer kayıt hiç yoksa None döner; çağıran taraf normal
+        $set update akışına devam eder.
+        """
+        total_storage_dbs = len(self.dbs) - 1
+
+        # new_tmdb_id'ye sahip TÜM kayıtları (tüm shard'larda) topla.
+        docs_by_id: Dict[Any, tuple] = {}
+        for db_idx in range(1, total_storage_dbs + 1):
+            db_key = f"storage_{db_idx}"
+            storage = self.dbs.get(db_key)
+            if storage is None:
+                continue
+            async for doc in storage[collection_name].find({"tmdb_id": new_tmdb_id}):
+                docs_by_id[doc["_id"]] = (db_key, doc)
+
+        # Düzenlenmekte olan kaydı da dahil et (tmdb_id henüz değişmemişse
+        # zaten yukarıdaki taramada bulunmuş olabilir; değişmişse burada eklenir).
+        source_doc = await self.dbs[old_db_key][collection_name].find_one({"tmdb_id": old_tmdb_id})
+        if not source_doc:
+            return None
+        docs_by_id[source_doc["_id"]] = (old_db_key, source_doc)
+
+        if len(docs_by_id) <= 1:
+            return None  # Çakışma/mükerrer kayıt yok → normal akışa devam
+
+        LOGGER.warning(
+            f"[requery-merge] tmdb_id={new_tmdb_id} için {len(docs_by_id)} kayıt bulundu; "
+            f"tek kayıtta birleştiriliyor."
+        )
+
+        # Kalınacak (keep) kayıt: önce düzenlenmekte olan kayıt tercih edilir
+        # (taze TMDB verisiyle güncellenecek olan budur), eşitlikte en çok
+        # dosyaya/bölüme sahip olan öne alınır.
+        ordered = sorted(
+            docs_by_id.values(),
+            key=lambda kv: (kv[1]["_id"] != source_doc["_id"], -self._quality_count(kv[1], collection_name)),
+        )
+        keep_db_key, keep_doc = ordered[0]
+
+        for other_db_key, other_doc in ordered[1:]:
+            ok = await self.merge_media_records(
+                collection_name=collection_name,
+                keep_db_key=keep_db_key,
+                keep_doc=keep_doc,
+                remove_db_key=other_db_key,
+                remove_doc=other_doc,
+            )
+            if not ok:
+                LOGGER.error(f"[requery-merge] Birleştirme başarısız: _id={other_doc.get('_id')}")
+                return False
+
+        keep_doc["tmdb_id"] = new_tmdb_id
+        safe_update = {k: v for k, v in update_data.items() if k not in ("_id",)}
+        keep_doc.update({k: v for k, v in safe_update.items() if k not in ("telegram", "seasons")})
+
+        try:
+            await self.dbs[keep_db_key][collection_name].replace_one({"_id": keep_doc["_id"]}, keep_doc)
+        except Exception as e:
+            LOGGER.error(f"[requery-merge] Son güncelleme hatası: {e}")
+            return False
+
+        return True
 
     async def update_document(
         self, media_type: str, tmdb_id: int, db_index: int, update_data: Dict[str, Any]
@@ -2168,10 +2366,35 @@ class Database:
             collection_name = "movie"
         collection = self.dbs[db_key][collection_name]
 
+        # ── Mükerrer kayıt kontrolü ────────────────────────────────────────
+        # Kaydedilecek tmdb_id (değişmiş olsun ya da olmasın) başka bir
+        # kayıtla çakışıyorsa VEYA kayıt zaten mükerrerse, hepsini tek
+        # kayıtta birleştir. Böylece "Yeniden Sorgula" ile kaydetmek,
+        # aynı filme/diziye ait tüm mükerrer kayıtları otomatik birleştirir.
+        new_tmdb_id_raw = update_data.get("tmdb_id")
+        try:
+            new_tmdb_id = int(new_tmdb_id_raw) if new_tmdb_id_raw is not None else int(tmdb_id)
+        except (TypeError, ValueError):
+            new_tmdb_id = int(tmdb_id)
+
+        merged = await self._merge_into_existing_tmdb_id(
+            collection_name=collection_name,
+            old_tmdb_id=int(tmdb_id),
+            old_db_key=db_key,
+            new_tmdb_id=new_tmdb_id,
+            update_data=update_data,
+        )
+        if merged is not None:
+            return merged
+
         try:
             result = await collection.update_one({"tmdb_id": int(tmdb_id)}, {"$set": update_data})
 
-            return result.modified_count > 0
+            # NOT: modified_count yerine matched_count kontrol edilir. TMDB'den
+            # gelen veri mevcut kayıtla birebir aynıysa (örn. hiçbir şey
+            # değişmemiş bir "Yeniden Sorgula") Mongo modified_count=0 döner;
+            # bu durum "kayıt bulunamadı" değildir, sadece değişiklik yoktur.
+            return result.matched_count > 0
 
         except Exception as e:
             err_str = str(e).lower()
