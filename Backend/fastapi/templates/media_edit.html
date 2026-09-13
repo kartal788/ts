@@ -2148,7 +2148,10 @@
         btn.textContent = 'Kaydediliyor...';
 
         try {
-            const resp = await fetch(`/api/media/update?tmdb_id=${tmdbId}&db_index=${dbIndex}&media_type=${mediaType}`, {
+            // announce=true: bu içerik TMDB'den yeniden sorgulanıp kaydedildiği
+            // için, güncellenmiş bilgilerle duyuru kanalına/grubuna bildirim
+            // gönderilir (bkz. Backend/helper/content_announcer.py).
+            const resp = await fetch(`/api/media/update?tmdb_id=${tmdbId}&db_index=${dbIndex}&media_type=${mediaType}&announce=true`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(updateData)

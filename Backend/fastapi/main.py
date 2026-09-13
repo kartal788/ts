@@ -94,7 +94,7 @@ from Backend.fastapi.routes.api_routes import (
     invalidate_admin_sessions_api,
     get_settings_files_api, upload_settings_file_api, delete_settings_file_api,
     get_db_stats_api, get_logs_api, download_logs_api,
-    restart_bot_api,
+    restart_bot_api, check_update_api,
 )
 from Backend.fastapi.routes.uyeler_routes import (
     admin_uyeler_page,
@@ -1062,6 +1062,10 @@ async def admin_logs_download(_: bool = Depends(require_auth)):
 async def admin_restart(_: bool = Depends(require_auth)):
     return await restart_bot_api()
 
+@app.get("/api/admin/update-check")
+async def admin_update_check(_: bool = Depends(require_auth)):
+    return await check_update_api()
+
 @app.get("/media/manage", response_class=HTMLResponse)
 async def media_management(request: Request, media_type: str = "movie", _: bool = Depends(require_auth)):
     return await media_management_page(request, media_type, _)
@@ -1125,8 +1129,8 @@ async def delete_media(tmdb_id: int, db_index: int, media_type: str, _: bool = D
     return await delete_media_api(tmdb_id, db_index, media_type)
 
 @app.put("/api/media/update")
-async def update_media(request: Request, tmdb_id: int, db_index: int, media_type: str, _: bool = Depends(require_auth)):
-    return await update_media_api(request, tmdb_id, db_index, media_type)
+async def update_media(request: Request, tmdb_id: int, db_index: int, media_type: str, announce: bool = False, _: bool = Depends(require_auth)):
+    return await update_media_api(request, tmdb_id, db_index, media_type, announce)
 
 @app.post("/api/media/requery")
 async def requery_media(

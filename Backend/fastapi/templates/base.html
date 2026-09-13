@@ -377,6 +377,84 @@ tailwind.config = {
 
 <body class="pt-24 pb-12 antialiased">
 
+{% if current_user %}
+<!-- ── Güncelleme uyarısı ──────────────────────────────────────────────────
+     Sayfa yüklendiğinde /api/admin/update-check sorgulanır; UPSTREAM_REPO
+     üzerinde daha yeni bir sürüm varsa en üstte bir bant gösterilir.
+     "Şimdi Güncelle" butonu, ayarlar sayfasındaki "Yeniden Başlat" ile aynı
+     mekanizmayı (git güncellemesi + süreç yeniden başlatma) tetikler. ──── -->
+<div id="update-banner" class="fixed top-0 left-0 right-0 z-[200] hidden items-center justify-center gap-3 px-4 py-2.5 text-xs sm:text-sm font-semibold text-center flex-wrap"
+     style="background: linear-gradient(90deg, var(--primary), var(--accent)); color: var(--bg); box-shadow: 0 2px 12px rgba(0,0,0,0.18);">
+    <i class="fa-solid fa-rocket"></i>
+    <span id="update-banner-text">Yeni bir güncelleme mevcut.</span>
+    <button id="update-banner-btn" type="button"
+        class="px-3 py-1 rounded-full text-xs font-bold bg-black/20 hover:bg-black/30 transition-colors">
+        <i class="fa-solid fa-arrows-rotate mr-1"></i> Şimdi Güncelle
+    </button>
+</div>
+
+<script>
+(function () {
+    const banner = document.getElementById('update-banner');
+    const textEl = document.getElementById('update-banner-text');
+    const btn    = document.getElementById('update-banner-btn');
+    const navbar = document.getElementById('navbar');
+    if (!banner || !textEl || !btn) return;
+
+    function showBanner(current, latest) {
+        textEl.textContent = `Yeni bir güncelleme mevcut: v${latest} (mevcut sürüm: v${current})`;
+        banner.classList.remove('hidden');
+        banner.classList.add('flex');
+        requestAnimationFrame(() => {
+            const h = banner.offsetHeight;
+            document.body.style.paddingTop = `calc(6rem + ${h}px)`;
+            if (navbar) navbar.style.top = `calc(1rem + ${h}px)`;
+        });
+    }
+
+    async function checkForUpdate() {
+        try {
+            const res = await fetch('/api/admin/update-check', { credentials: 'same-origin' });
+            if (!res.ok) return;
+            const data = await res.json();
+            if (data && data.update_available) {
+                showBanner(data.current_version, data.latest_version);
+            }
+        } catch (e) {
+            console.warn('[update-check] Sürüm kontrolü yapılamadı:', e);
+        }
+    }
+
+    btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> Güncelleniyor…';
+        textEl.textContent = 'Güncelleme uygulanıyor, lütfen bekleyin. Sayfa hazır olduğunda otomatik yenilenecek…';
+        try {
+            await fetch('/api/admin/restart', { method: 'POST', credentials: 'same-origin' });
+        } catch (e) {
+            // Süreç yeniden başlarken bağlantının kesilmesi beklenen bir durumdur.
+        }
+        let attempts = 0;
+        const poll = setInterval(async () => {
+            attempts++;
+            try {
+                const res = await fetch(location.href, { credentials: 'same-origin', cache: 'no-store' });
+                if (res.ok) {
+                    clearInterval(poll);
+                    location.reload();
+                }
+            } catch (e) {
+                // Sunucu henüz ayakta değil, denemeye devam edilecek.
+            }
+            if (attempts > 40) clearInterval(poll); // ~2 dakika sonra dene-durur
+        }, 3000);
+    });
+
+    checkForUpdate();
+})();
+</script>
+{% endif %}
+
 <div id="overlay" class="fixed inset-0 z-40 opacity-0 pointer-events-none"></div>
 
 <nav id="navbar"

@@ -2,6 +2,7 @@ import asyncio
 import logging
 import json
 import pathlib
+from typing import Optional
 from fastapi import Request, Query, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse, JSONResponse
 from Backend import db, StartTime, __version__
@@ -92,11 +93,32 @@ async def delete_media_api(
 
         raise HTTPException(status_code=500, detail="Sunucu hatası")
 
+def _build_announce_info(doc: dict, media_type: str) -> dict:
+    """
+    DB'den okunan bir kaydı content_announcer.announce_new_content()'in
+    beklediği alan adlarıyla normalize eder.
+
+    Not: içerik ilk kez Telegram'dan eklendiğinde (Backend/helper/metadata.py
+    -> metadata()/build_manual_metadata()) kayda "rate" ve "year" alanları
+    yazılır. Panel üzerinden media_edit.html'den kaydedilirken ise form
+    "rating"/"release_year" adlarını kullanır. content_announcer bu alanları
+    "rate"/"year" adlarıyla okuduğundan, hangi ad kayıtlıysa ona göre eşlenir.
+    """
+    info = dict(doc)
+    info["media_type"] = media_type
+    if not info.get("rate") and info.get("rating"):
+        info["rate"] = info.get("rating")
+    if not info.get("year") and info.get("release_year"):
+        info["year"] = info.get("release_year")
+    return info
+
+
 async def update_media_api(
     request: Request,
     tmdb_id: int,
     db_index: int,
-    media_type: str = Query(regex="^(movie|tv)$")
+    media_type: str = Query(regex="^(movie|tv)$"),
+    announce: bool = Query(False),
 ):
     try:
         update_data = await request.json()
@@ -168,10 +190,25 @@ async def update_media_api(
         update_data = {k: v for k, v in update_data.items() if v != ""}
         result = await db.update_document(media_type, tmdb_id, db_index, update_data)
         if result:
-            import asyncio
-            from Backend.helper.platform_catalog import platform_catalog
             from Backend.helper.platform_catalog import platform_catalog as _pc
             _pc.schedule_refresh()
+
+            # ── Yeniden sorgulama sonrası duyuru ─────────────────────────
+            # media_edit.html'deki "Yeniden Sorgula" akışından (TMDB'den
+            # tazelenmiş bilgilerle) kaydedildiyse, güncellenmiş içerik
+            # content_announcer.py aracılığıyla duyuru kanalına/grubuna
+            # gönderilir. Normal (manuel alan düzenleme) kayıtlarında bu
+            # tetiklenmez — yalnızca ?announce=true ile çağrıldığında.
+            if announce:
+                try:
+                    updated_tmdb_id = update_data.get("tmdb_id", tmdb_id)
+                    fresh_doc = await db.get_document(media_type, updated_tmdb_id, db_index)
+                    if fresh_doc:
+                        from Backend.helper.content_announcer import announce_new_content
+                        announce_new_content(_build_announce_info(fresh_doc, media_type))
+                except Exception as _announce_err:
+                    _logger.warning(f"Yeniden sorgulama duyurusu tetiklenemedi: {_announce_err}")
+
             return {"message": "Media updated successfully"}
         else:
             raise HTTPException(status_code=404, detail="Media not found or no changes made")
@@ -1957,6 +1994,135 @@ async def download_logs_api():
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="Log dosyası bulunamadı.")
     return FileResponse(path, filename="log.txt", media_type="text/plain")
+
+
+# ── Güncelleme kontrolü ──────────────────────────────────────────────────────
+# UPSTREAM_REPO üzerindeki pyproject.toml'daki versiyon, yerel __version__'dan
+# yeniyse admin panelindeki tüm sayfaların üstünde güncelleme uyarısı gösterilir.
+_UPDATE_CHECK_CACHE: dict = {"checked_at": 0.0, "result": None}
+_UPDATE_CHECK_TTL = 600  # saniye — GitHub'a gereksiz istek atmamak için önbellek
+
+
+def _parse_version(v: str):
+    try:
+        return tuple(int(p) for p in v.strip().split("."))
+    except Exception:
+        return None
+
+
+async def _fetch_pyproject_via_raw(owner: str, repo: str, branch: str) -> Optional[str]:
+    """Hızlı yol: raw.githubusercontent.com üzerinden ham dosyayı çeker.
+    Bazı sunucu ağlarında github.com'a (git) izin verilse bile bu CDN
+    engellenmiş olabilir; bu durumda None döner ve git tabanlı yönteme
+    düşülür."""
+    import httpx
+    raw_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/pyproject.toml"
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            resp = await client.get(raw_url)
+        if resp.status_code == 200 and resp.text.strip():
+            return resp.text
+    except Exception as e:
+        _logger.info(f"[update-check] raw.githubusercontent.com denemesi başarısız: {e}")
+    return None
+
+
+async def _fetch_pyproject_via_git(upstream_repo: str, branch: str) -> Optional[str]:
+    """Yedek yol: update.py'nin de kullandığı git protokolüyle (github.com),
+    yalnızca versiyon dosyasını okumak için sığ (--depth 1) bir klonlama
+    yapar. raw.githubusercontent.com engellendiğinde ama git erişimi
+    çalıştığında (bkz. update.py) bu yöntem güvenilir şekilde çalışır."""
+    import asyncio as _asyncio
+    import tempfile
+    import shutil
+
+    tmp_dir = tempfile.mkdtemp(prefix="update_check_")
+    try:
+        proc = await _asyncio.create_subprocess_exec(
+            "git", "clone", "--depth", "1", "--branch", branch, "--single-branch",
+            upstream_repo, tmp_dir,
+            stdout=_asyncio.subprocess.DEVNULL,
+            stderr=_asyncio.subprocess.PIPE,
+        )
+        try:
+            _, stderr = await _asyncio.wait_for(proc.communicate(), timeout=25)
+        except _asyncio.TimeoutError:
+            proc.kill()
+            _logger.warning("[update-check] git clone zaman aşımına uğradı.")
+            return None
+
+        if proc.returncode != 0:
+            _logger.warning(
+                f"[update-check] git clone başarısız: {stderr.decode(errors='ignore')[:300]}"
+            )
+            return None
+
+        pyproject_path = pathlib.Path(tmp_dir) / "pyproject.toml"
+        if pyproject_path.exists():
+            return pyproject_path.read_text(errors="ignore")
+    except Exception as e:
+        _logger.warning(f"[update-check] git tabanlı sürüm kontrolü başarısız: {e}")
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+    return None
+
+
+async def check_update_api() -> dict:
+    """UPSTREAM_REPO'daki en güncel versiyonu kontrol eder.
+
+    Önce hızlı olan raw.githubusercontent.com denenir; bu engelliyse
+    (bazı sunucu ağlarında github.com'a izin verilip CDN'e verilmeyebiliyor)
+    update.py'nin de kullandığı git protokolüne (sığ klon) düşülür.
+    """
+    import re
+    from Backend.config import Telegram
+
+    now_ts = time()
+    cached = _UPDATE_CHECK_CACHE.get("result")
+    if cached and (now_ts - _UPDATE_CHECK_CACHE.get("checked_at", 0)) < _UPDATE_CHECK_TTL:
+        return cached
+
+    upstream_repo = (Telegram.UPSTREAM_REPO or "").strip().rstrip("/")
+    upstream_branch = (Telegram.UPSTREAM_BRANCH or "main").strip() or "main"
+
+    result = {
+        "update_available": False,
+        "current_version": __version__,
+        "latest_version": None,
+    }
+
+    if not upstream_repo:
+        _UPDATE_CHECK_CACHE.update(checked_at=now_ts, result=result)
+        return result
+
+    parts = upstream_repo.split("/")
+    if len(parts) < 2:
+        _UPDATE_CHECK_CACHE.update(checked_at=now_ts, result=result)
+        return result
+    owner, repo = parts[-2], parts[-1]
+
+    pyproject_text = await _fetch_pyproject_via_raw(owner, repo, upstream_branch)
+    if pyproject_text is None:
+        pyproject_text = await _fetch_pyproject_via_git(upstream_repo, upstream_branch)
+
+    if pyproject_text:
+        match = re.search(r'version\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)"', pyproject_text)
+        if match:
+            latest_version = match.group(1)
+            result["latest_version"] = latest_version
+            current_tuple = _parse_version(__version__)
+            latest_tuple = _parse_version(latest_version)
+            if current_tuple and latest_tuple and latest_tuple > current_tuple:
+                result["update_available"] = True
+        else:
+            _logger.warning("[update-check] pyproject.toml içinde versiyon deseni bulunamadı.")
+    else:
+        _logger.warning(
+            "[update-check] Sürüm bilgisi ne raw.githubusercontent.com ne de git ile alınabildi."
+        )
+
+    _UPDATE_CHECK_CACHE.update(checked_at=now_ts, result=result)
+    return result
 
 
 async def restart_bot_api() -> dict:
