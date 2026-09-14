@@ -47,6 +47,22 @@ _COLLAGE_MAX_H = 1080
 # Poster küçültülürken inilebilecek en küçük boyut (okunabilirlik için).
 _COLLAGE_MIN_THUMB_SIZE = (40, 60)
 
+# ─── Poster kolajı — köşe yuvarlama, gölge ve dinamik arkaplan ─────────────
+# Köşe yarıçapı, posterin küçük kenarının (min(genişlik, yükseklik)) bu
+# oranı kadar olur; çok küçük/çok büyük poster boyutlarında abartılı
+# görünmemesi için min/max ile sınırlanır.
+_COLLAGE_CORNER_RADIUS_RATIO = 0.07
+_COLLAGE_CORNER_RADIUS_MIN = 4
+_COLLAGE_CORNER_RADIUS_MAX = 18
+# Gölgenin bulanıklık (blur) yarıçapı da posterin küçük kenarına oranlanır.
+_COLLAGE_SHADOW_BLUR_RATIO = 0.05
+_COLLAGE_SHADOW_BLUR_MIN = 4
+# Gölgenin opaklığı (0-255) ve poster'a göre kayma miktarı.
+_COLLAGE_SHADOW_OPACITY = 110
+# Baskın renklerden üretilen gradyan arkaplanın, posterler öne çıksın diye
+# ne kadar karartılacağı (0 = tamamen siyah, 1 = orijinal renk).
+_COLLAGE_GRADIENT_DARKEN = 0.30
+
 # ─── Bildirim saati ayarı ─────────────────────────────────────────────────────
 # Saati değiştirmek için bu iki sabiti düzenleyin (UTC+3 / Türkiye saati).
 # Örnek: sabah 08:30 → NOTIFY_HOUR = 8, NOTIFY_MINUTE = 30
@@ -342,6 +358,93 @@ def _compute_thumb_size(rows: int, cols: int) -> tuple[int, int]:
     return thumb_w, thumb_h
 
 
+def _get_dominant_color(img) -> tuple[int, int, int]:
+    """
+    Görselin baskın/ortalama rengini hızlıca hesaplar.
+
+    Görseli 1x1 piksele küçültmek, PIL'in dahili box-filter'ı sayesinde
+    aslında bir "ortalama renk" hesabı yapar — bu, K-means gibi ağır bir
+    bağımlılık gerektirmeden posterin genel tonunu (ör. koyu/kırmızımsı,
+    açık/mavimsi) yeterince iyi yakalar.
+    """
+    try:
+        small = img.convert("RGB").resize((1, 1))
+        return small.getpixel((0, 0))
+    except Exception:
+        return _COLLAGE_BG_COLOR
+
+
+def _mix_colors(c1: tuple[int, int, int], c2: tuple[int, int, int], t: float) -> tuple[int, int, int]:
+    """İki renk arasında t (0.0-1.0) oranında ara renk hesaplar."""
+    t = max(0.0, min(1.0, t))
+    return tuple(int(c1[i] + (c2[i] - c1[i]) * t) for i in range(3))
+
+
+def _darken_color(c: tuple[int, int, int], factor: float) -> tuple[int, int, int]:
+    """Rengi siyaha doğru karartır (posterler kolajda öne çıksın, arkaplan
+    dikkat dağıtıcı olmasın diye)."""
+    return tuple(int(v * factor) for v in c)
+
+
+def _build_gradient_background(width: int, height: int, images: list):
+    """
+    Kolajdaki posterlerin baskın renklerinden, yukarıdan aşağıya yumuşak
+    geçişli koyu tonlu bir arkaplan gradyanı üretir (Spotify Wrapped /
+    Apple Music tarzı bir görünüm). Poster listesi boşsa eski sabit renge
+    (_COLLAGE_BG_COLOR) geri döner.
+    """
+    from PIL import Image
+
+    if not images:
+        return Image.new("RGB", (width, height), _COLLAGE_BG_COLOR)
+
+    # Tüm posterlerin ortalamasını almak yerine, aralarına eşit aralıklarla
+    # yayılmış birkaç örnek (en fazla 6) kullanmak hem hızlı hem de kolajın
+    # genelini temsil eden bir gradyan verir.
+    step = max(1, len(images) // 6)
+    sample = images[::step][:6] or images[:1]
+    dominant_colors = [_get_dominant_color(im) for im in sample]
+
+    top_color = _darken_color(dominant_colors[0], _COLLAGE_GRADIENT_DARKEN)
+    bottom_color = _darken_color(dominant_colors[-1], _COLLAGE_GRADIENT_DARKEN)
+
+    gradient = Image.new("RGB", (1, height))
+    for y in range(height):
+        gradient.putpixel((0, y), _mix_colors(top_color, bottom_color, y / max(height - 1, 1)))
+    return gradient.resize((width, height))
+
+
+def _apply_rounded_corners(img, radius: int):
+    """Görsele yuvarlatılmış köşe maskesi uygular, RGBA olarak döner."""
+    from PIL import Image, ImageDraw
+
+    img = img.convert("RGBA")
+    mask = Image.new("L", img.size, 0)
+    ImageDraw.Draw(mask).rounded_rectangle(
+        [(0, 0), (img.width - 1, img.height - 1)], radius=radius, fill=255
+    )
+    img.putalpha(mask)
+    return img
+
+
+def _make_poster_shadow(size: tuple[int, int], radius: int, blur: int, opacity: int):
+    """
+    Bir posterin arkasına konacak, yumuşak kenarlı, hafif bulanıklaştırılmış
+    bir gölge katmanı üretir. Dönüş: (gölge_görseli, gölgenin her yöne
+    taşan kenar payı) — bu pay, gölge kolaj tuvaline yerleştirilirken
+    posterin konumundan çıkarılmalıdır.
+    """
+    from PIL import Image, ImageDraw, ImageFilter
+
+    w, h = size
+    pad = blur * 2
+    shadow = Image.new("RGBA", (w + pad * 2, h + pad * 2), (0, 0, 0, 0))
+    ImageDraw.Draw(shadow).rounded_rectangle(
+        [(pad, pad), (pad + w - 1, pad + h - 1)], radius=radius, fill=(0, 0, 0, opacity)
+    )
+    return shadow.filter(ImageFilter.GaussianBlur(blur)), pad
+
+
 async def _build_poster_collage(movies: list[dict], tv_shows: list[dict]):
     """
     Eklenen film/dizi posterlerinden bir kolaj görseli oluşturur.
@@ -428,16 +531,34 @@ async def _build_poster_collage(movies: list[dict], tv_shows: list[dict]):
     canvas_w = cols * thumb_w + (cols + 1) * pad
     canvas_h = rows * thumb_h + (rows + 1) * pad
 
-    canvas = Image.new("RGB", (canvas_w, canvas_h), _COLLAGE_BG_COLOR)
+    # Arkaplan: sabit koyu renk yerine, posterlerin baskın renklerinden
+    # üretilen yumuşak bir gradyan (bkz. _build_gradient_background).
+    canvas = _build_gradient_background(canvas_w, canvas_h, raw_images).convert("RGBA")
+
+    # Poster boyutuna göre ölçeklenen köşe yarıçapı ve gölge bulanıklığı —
+    # çok küçük thumbnail'larda (çok sayıda poster varken) köşeler/gölgeler
+    # abartılı görünmesin diye min/max ile sınırlanır.
+    min_side = min(thumb_w, thumb_h)
+    corner_radius = max(_COLLAGE_CORNER_RADIUS_MIN,
+                         min(_COLLAGE_CORNER_RADIUS_MAX, int(min_side * _COLLAGE_CORNER_RADIUS_RATIO)))
+    shadow_blur = max(_COLLAGE_SHADOW_BLUR_MIN, int(min_side * _COLLAGE_SHADOW_BLUR_RATIO))
+    shadow_offset = max(2, shadow_blur // 2)
 
     for idx, img in enumerate(images):
         row, col = divmod(idx, cols)
         x = pad + col * (thumb_w + pad)
         y = pad + row * (thumb_h + pad)
-        canvas.paste(img, (x, y))
+
+        # Önce gölgeyi (hafifçe sağa/aşağı kaymış) yerleştir, sonra
+        # yuvarlatılmış köşeli posteri üzerine bindir.
+        shadow, shadow_pad = _make_poster_shadow((thumb_w, thumb_h), corner_radius, shadow_blur, _COLLAGE_SHADOW_OPACITY)
+        canvas.alpha_composite(shadow, (x - shadow_pad + shadow_offset, y - shadow_pad + shadow_offset))
+
+        rounded_img = _apply_rounded_corners(img, corner_radius)
+        canvas.alpha_composite(rounded_img, (x, y))
 
     buf = io.BytesIO()
-    canvas.save(buf, format="JPEG", quality=88)
+    canvas.convert("RGB").save(buf, format="JPEG", quality=88)
     buf.seek(0)
     return buf.getvalue()
 
