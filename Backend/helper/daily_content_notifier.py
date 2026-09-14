@@ -30,12 +30,22 @@ logger = logging.getLogger("daily_content_notifier")
 # seçilir; bu üç seçenekten, indirilen geçerli poster sayısını en az kayıpla
 # tam bir ızgaraya sığdıran seçilir (ör. 19 poster → 4 satır x 4 sütun = 16
 # değil, 3 satır x 6 sütun = 18 kullanılır, yalnızca 1 poster elenir).
+# 5 ve altı poster için tek satır halinde yan yana dizilir (ör. 1x5).
 # Hesaplama _compute_grid_layout() içinde yapılır.
 _COLLAGE_MAX_POSTERS = 36
-# Tek bir posterin kolajdaki hedef boyutu (px).
+# 5 ve altında poster varsa ızgara yerine tek satır (yan yana) kullanılır.
+_COLLAGE_SINGLE_ROW_THRESHOLD = 5
+# Tek bir posterin kolajdaki VARSAYILAN (en büyük) hedef boyutu (px).
+# Poster sayısı arttıkça, kolaj boyutu _COLLAGE_MAX_W x _COLLAGE_MAX_H'yi
+# geçmeyecek şekilde bu boyuttan küçültülür (bkz. _compute_thumb_size()).
 _COLLAGE_THUMB_SIZE = (200, 300)
 _COLLAGE_PADDING = 8
 _COLLAGE_BG_COLOR = (18, 18, 22)
+# Kolaj görselinin asla geçemeyeceği maksimum toplam boyut.
+_COLLAGE_MAX_W = 1920
+_COLLAGE_MAX_H = 1080
+# Poster küçültülürken inilebilecek en küçük boyut (okunabilirlik için).
+_COLLAGE_MIN_THUMB_SIZE = (40, 60)
 
 # ─── Bildirim saati ayarı ─────────────────────────────────────────────────────
 # Saati değiştirmek için bu iki sabiti düzenleyin (UTC+3 / Türkiye saati).
@@ -194,17 +204,45 @@ def _dedup(items: list[dict]) -> list[dict]:
 
 # ─── Poster kolajı ────────────────────────────────────────────────────────────
 
-async def _download_poster(client, url: str):
-    """Bir poster URL'sini indirir, başarısız olursa None döner."""
+# Bazı CDN'ler (TMDB dahil) User-Agent'siz veya yönlendirmesiz (redirect)
+# isteklerde 403/404 dönebiliyor; bu header ve follow_redirects, poster
+# indirmelerinin sessizce başarısız olmasını önlemek için eklendi.
+_POSTER_DOWNLOAD_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+    )
+}
+
+
+async def _download_poster(client, url: str, retries: int = 1):
+    """
+    Bir poster URL'sini indirir, başarısız olursa None döner.
+    Geçici hatalara (timeout, bağlantı hatası vb.) karşı `retries` kadar
+    tekrar dener. Başarısızlık nedeni her zaman WARNING seviyesinde
+    loglanır (eskiden DEBUG idi ve varsayılan log seviyesinde görünmüyordu,
+    bu da eksik posterlerin fark edilmesini zorlaştırıyordu).
+    """
     if not url:
         return None
-    try:
-        resp = await client.get(url, timeout=10.0)
-        resp.raise_for_status()
-        return resp.content
-    except Exception as e:
-        logger.debug("[content-notify] Poster indirilemedi (%s): %s", url, e)
-        return None
+    attempts = retries + 1
+    last_err = None
+    for attempt in range(1, attempts + 1):
+        try:
+            resp = await client.get(url, timeout=15.0)
+            resp.raise_for_status()
+            if not resp.content:
+                raise ValueError("boş içerik döndü")
+            return resp.content
+        except Exception as e:
+            last_err = e
+            if attempt < attempts:
+                await asyncio.sleep(0.5)
+    logger.warning(
+        "[content-notify] Poster indirilemedi (%s) — %d deneme sonrası: %s",
+        url, attempts, last_err,
+    )
+    return None
 
 
 async def _download_poster_with_fallback(client, item: dict):
@@ -239,12 +277,16 @@ def _compute_grid_layout(n: int) -> tuple[int, int, int]:
 
     Örnek: 20 poster → 4x5 (20 kullanılır, kayıp yok)
            19 poster → 3x6 (18 kullanılır, yalnızca 1 poster elenir)
-            3 poster → 3x1 (3 kullanılır, kayıp yok)
+            5 poster → 1x5 (tek satır, yan yana, kayıp yok)
             1 poster → (1, 1, 1) — ızgara kurulmaz.
     """
     n = min(n, _COLLAGE_MAX_POSTERS)
-    if n <= 1:
-        return (1, max(n, 0), max(n, 0))
+    if n <= 0:
+        return (1, 0, 0)
+
+    # 5 ve altı poster: ızgara kurmak yerine tek satır halinde yan yana diz.
+    if n <= _COLLAGE_SINGLE_ROW_THRESHOLD:
+        return (1, n, n)
 
     best = None  # (used_n, -|rows-cols|, rows, cols)
     for rows in _COLLAGE_ALLOWED_ROWS:
@@ -266,6 +308,38 @@ def _compute_grid_layout(n: int) -> tuple[int, int, int]:
     _, rows, cols = best
     used = rows * cols
     return (rows, cols, used)
+
+
+def _compute_thumb_size(rows: int, cols: int) -> tuple[int, int]:
+    """
+    Verilen satır/sütun sayısı için tek bir posterin kolajdaki boyutunu
+    belirler. Poster sayısı arttıkça (dolayısıyla rows/cols büyüdükçe)
+    poster boyutu küçültülür; böylece kolajın toplam boyutu her zaman
+    _COLLAGE_MAX_W x _COLLAGE_MAX_H sınırının içinde kalır.
+
+    Oranlar her zaman _COLLAGE_THUMB_SIZE'ın en-boy oranı (2:3) korunarak
+    küçültülür; kolaj küçük olduğunda (az poster) varsayılan boyut
+    (_COLLAGE_THUMB_SIZE) büyütülmeden aynen kullanılır.
+    """
+    default_w, default_h = _COLLAGE_THUMB_SIZE
+    pad = _COLLAGE_PADDING
+    rows = max(rows, 1)
+    cols = max(cols, 1)
+
+    avail_w = _COLLAGE_MAX_W - (cols + 1) * pad
+    avail_h = _COLLAGE_MAX_H - (rows + 1) * pad
+
+    max_w_by_cols = avail_w / cols
+    max_h_by_rows = avail_h / rows
+
+    # Varsayılan en-boy oranını koruyarak, hem genişlik hem yükseklik
+    # sınırına uyan en büyük ölçeği bul (asla varsayılandan büyütme).
+    scale = min(max_w_by_cols / default_w, max_h_by_rows / default_h, 1.0)
+    scale = max(scale, 0.01)
+
+    thumb_w = max(int(default_w * scale), _COLLAGE_MIN_THUMB_SIZE[0])
+    thumb_h = max(int(default_h * scale), _COLLAGE_MIN_THUMB_SIZE[1])
+    return thumb_w, thumb_h
 
 
 async def _build_poster_collage(movies: list[dict], tv_shows: list[dict]):
@@ -295,9 +369,19 @@ async def _build_poster_collage(movies: list[dict], tv_shows: list[dict]):
     candidates = candidates[:_COLLAGE_MAX_POSTERS]
 
     if not candidates:
+        logger.warning(
+            "[content-notify] Kolaj için hiçbir içerikte poster alanı (poster_tr/poster/poster_de) yok "
+            "— %d film, %d dizi arasında.", len(movies), len(tv_shows),
+        )
         return None
 
-    async with httpx.AsyncClient() as client:
+    if len(candidates) < len(movies) + len(tv_shows):
+        logger.warning(
+            "[content-notify] %d içerikten %d tanesinde poster alanı yok, kolaja dahil edilmeyecek.",
+            len(movies) + len(tv_shows), len(movies) + len(tv_shows) - len(candidates),
+        )
+
+    async with httpx.AsyncClient(headers=_POSTER_DOWNLOAD_HEADERS, follow_redirects=True) as client:
         # Her içerik için önce poster_tr, o başarısız olursa poster,
         # o da başarısız olursa poster_de denenir. Hiçbiri indirilemezse
         # ilgili içerik kolaja dahil edilmez.
@@ -305,27 +389,41 @@ async def _build_poster_collage(movies: list[dict], tv_shows: list[dict]):
             *[_download_poster_with_fallback(client, it) for it in candidates]
         )
 
-    images = []
-    for raw in results:
+    raw_images = []
+    for it, raw in zip(candidates, results):
         if not raw:
             continue
         try:
             img = Image.open(io.BytesIO(raw)).convert("RGB")
-            img = img.resize(_COLLAGE_THUMB_SIZE)
-            images.append(img)
+            raw_images.append(img)
         except Exception as e:
-            logger.debug("[content-notify] Poster açılamadı: %s", e)
+            logger.warning(
+                "[content-notify] Poster açılamadı (%s): %s",
+                it.get("title_tr") or it.get("title"), e,
+            )
 
-    if not images:
+    if not raw_images:
+        logger.warning("[content-notify] %d adaydan hiçbiri indirilemedi, kolaj oluşturulamadı.", len(candidates))
         return None
 
-    # Satır sayısını (2, 3 ya da 4) ve buna göre kullanılacak nihai poster
-    # sayısını belirle — en az poster kaybıyla tam bir ızgaraya sığdır.
-    rows, cols, used_n = _compute_grid_layout(len(images))
-    if used_n < len(images):
-        images = images[:used_n]
+    if len(raw_images) < len(candidates):
+        logger.warning(
+            "[content-notify] Kolaj: %d adaydan yalnızca %d poster indirilebildi.",
+            len(candidates), len(raw_images),
+        )
 
-    thumb_w, thumb_h = _COLLAGE_THUMB_SIZE
+    # Satır sayısını (2, 3 ya da 4; 5 ve altı için tek satır) ve buna göre
+    # kullanılacak nihai poster sayısını belirle — en az poster kaybıyla
+    # tam bir ızgaraya sığdır.
+    rows, cols, used_n = _compute_grid_layout(len(raw_images))
+    if used_n < len(raw_images):
+        raw_images = raw_images[:used_n]
+
+    # Poster sayısı arttıkça (rows/cols büyüdükçe) kolaj 1920x1080'i
+    # geçmeyecek şekilde tek bir posterin boyutu küçültülür.
+    thumb_w, thumb_h = _compute_thumb_size(rows, cols)
+    images = [img.resize((thumb_w, thumb_h)) for img in raw_images]
+
     pad = _COLLAGE_PADDING
     canvas_w = cols * thumb_w + (cols + 1) * pad
     canvas_h = rows * thumb_h + (rows + 1) * pad
@@ -646,21 +744,11 @@ async def _send_daily_content_notifications() -> None:
         date_label  = _yesterday_label()
         use_txt     = total_content > _TXT_THRESHOLD
 
-        # ── 2b. Poster kolajı (bir kez oluşturulur, tüm kullanıcılara aynı
-        #        yüklenen dosya file_id'si üzerinden gönderilir) ─────────
-        collage_bytes  = await _build_poster_collage(movies, tv_shows)
-        app_name = Telegram.ISIM or ""
-        title_suffix = f" {app_name}'e" if app_name else ""
-        collage_caption = f"🎬 <b>{date_label}{title_suffix} Eklenenler</b>"
-        collage_file_id: str | None = None
-
-        collage_buffer = None
-        if collage_bytes:
-            collage_buffer = io.BytesIO(collage_bytes)
-            collage_buffer.name = "eklenenler_kolaj.jpg"
-
-        # Kolajı, ayarlardaki "Yeni İçerik Duyuruları" hedefine (kanal/grup/konu)
-        # de gönder — kullanıcı bildirimlerinden bağımsız, tek seferlik gönderim.
+        # ── 2b. Poster kolajı ──────────────────────────────────────────────
+        # Kolaj yalnızca ayarlardaki "Yeni İçerik Duyuruları" hedefine
+        # (kanal/grup/konu) gönderilir; üyelere (bireysel kullanıcılara)
+        # gönderilmez — üyeler yalnızca metin/txt bildirimini alır.
+        collage_bytes = await _build_poster_collage(movies, tv_shows)
         await _send_collage_to_group(collage_bytes, movies, tv_shows, date_label)
 
         if use_txt:
@@ -708,27 +796,9 @@ async def _send_daily_content_notifications() -> None:
             username = user.get("username") or None
 
             async def _send(uid_int=uid_int):
-                nonlocal collage_file_id
-
-                # Poster kolajı varsa önce onu gönder (ilk yüklemeden sonra
-                # dönen file_id sonraki kullanıcılar için yeniden kullanılır,
-                # böylece görsel her seferinde yeniden yüklenmez).
-                if collage_bytes:
-                    if collage_file_id:
-                        photo_payload = collage_file_id
-                    else:
-                        collage_buffer.seek(0)
-                        photo_payload = collage_buffer
-
-                    photo_sent = await StreamBot.send_photo(
-                        chat_id=uid_int,
-                        photo=photo_payload,
-                        caption=collage_caption,
-                        parse_mode=ParseMode.HTML,
-                    )
-                    if not collage_file_id and photo_sent and photo_sent.photo:
-                        collage_file_id = photo_sent.photo.file_id
-
+                # Not: Poster kolajı üyelere gönderilmez — yalnızca yukarıda
+                # _send_collage_to_group() ile duyuru hedefine (kanal/grup/
+                # konu) gönderildi. Üyeler yalnızca metin/txt bildirimini alır.
                 if use_txt:
                     await StreamBot.send_document(
                         chat_id=uid_int,
