@@ -1006,7 +1006,7 @@ async def sunucu_dosya_durumu(request: Request, _: bool = Depends(require_auth))
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# GET /api/sunucu/sistem-durumu  → CPU, RAM, Disk, Bot uptime
+# GET /api/sunucu/sistem-durumu  → CPU, RAM (+ swap), Disk, Bot uptime
 # ──────────────────────────────────────────────────────────────────────────────
 async def sunucu_sistem_durumu(request: Request, _: bool = Depends(require_auth)):
     try:
@@ -1020,6 +1020,7 @@ async def sunucu_sistem_durumu(request: Request, _: bool = Depends(require_auth)
         def _collect():
             cpu   = psutil.cpu_percent(interval=0.5)
             ram   = psutil.virtual_memory()
+            swap  = psutil.swap_memory()
             disk  = psutil.disk_usage(disk_path)
             # Ağ hızı: 1 saniyelik örnekleme
             net1  = psutil.net_io_counters()
@@ -1027,10 +1028,10 @@ async def sunucu_sistem_durumu(request: Request, _: bool = Depends(require_auth)
             net2  = psutil.net_io_counters()
             dl_bps = max(net2.bytes_recv - net1.bytes_recv, 0)
             ul_bps = max(net2.bytes_sent - net1.bytes_sent, 0)
-            return cpu, ram, disk, dl_bps, ul_bps
+            return cpu, ram, swap, disk, dl_bps, ul_bps
 
         loop = asyncio.get_event_loop()
-        cpu, ram, disk, dl_bps, ul_bps = await loop.run_in_executor(None, _collect)
+        cpu, ram, swap, disk, dl_bps, ul_bps = await loop.run_in_executor(None, _collect)
 
         def _net_str(bps):
             if bps >= 1_073_741_824:
@@ -1041,12 +1042,31 @@ async def sunucu_sistem_durumu(request: Request, _: bool = Depends(require_auth)
                 return f"{bps/1024:.1f} KB/s"
             return f"{bps} B/s"
 
+        #----- Linux'ta `free -m` çıktısındaki "buff/cache" sütunu, çekirdeğin
+        #----- serbest bırakabileceği ama şu an disk arabelleği/önbellek için
+        #----- kullandığı bellektir (buffers + cached). Linux dışı platformlarda
+        #----- (macOS/Windows) psutil bu alanları döndürmez; getattr ile 0'a
+        #----- düşülür, böylece hata vermeden 0 gösterilir.
+        ram_buff_cache = getattr(ram, "buffers", 0) + getattr(ram, "cached", 0)
+        ram_shared = getattr(ram, "shared", 0)
+
         bot_uptime = get_readable_time(time.time() - StartTime)
         return {
             "cpu_percent": round(cpu, 1),
+            #----- RAM — `free -m` ile birebir aynı sütunlar: total, used,
+            #----- free, shared, buff/cache, available.
             "ram_used": _human_size(ram.used),
             "ram_total": _human_size(ram.total),
+            "ram_free": _human_size(ram.free),
+            "ram_shared": _human_size(ram_shared),
+            "ram_buff_cache": _human_size(ram_buff_cache),
+            "ram_available": _human_size(ram.available),
             "ram_percent": round(ram.percent, 1),
+            #----- Swap — RAM'den ayrı, `free -m`'nin "Swap:" satırıyla aynı.
+            "swap_used": _human_size(swap.used),
+            "swap_total": _human_size(swap.total),
+            "swap_free": _human_size(swap.free),
+            "swap_percent": round(swap.percent, 1),
             "disk_used": _human_size(disk.used),
             "disk_free": _human_size(disk.free),
             "disk_total": _human_size(disk.total),

@@ -26,15 +26,18 @@ logger = logging.getLogger("daily_content_notifier")
 # ─── Poster kolajı ayarları ────────────────────────────────────────────────
 # Kolaja dahil edilecek maksimum poster sayısı (çok fazla içerik varsa
 # görsel aşırı büyük/karmaşık olmasın diye sınırlanır).
-# Kolajdaki satır sayısı (dikey) her zaman 2, 3 ya da 4 olacak şekilde
-# seçilir; bu üç seçenekten, indirilen geçerli poster sayısını en az kayıpla
-# tam bir ızgaraya sığdıran seçilir (ör. 19 poster → 4 satır x 4 sütun = 16
-# değil, 3 satır x 6 sütun = 18 kullanılır, yalnızca 1 poster elenir).
-# 5 ve altı poster için tek satır halinde yan yana dizilir (ör. 1x5).
-# Hesaplama _compute_grid_layout() içinde yapılır.
-_COLLAGE_MAX_POSTERS = 36
-# 5 ve altında poster varsa ızgara yerine tek satır (yan yana) kullanılır.
-_COLLAGE_SINGLE_ROW_THRESHOLD = 5
+# Kolajdaki satır ve sütun sayısı her zaman 1-7 arasında (ızgara en fazla
+# 7x7 = 49 poster). İndirilen geçerli poster sayısına göre, en az kayıpla
+# (mümkünse hiç kayıpsız) tam bir ızgaraya sığdıran, kare şekle en yakın
+# düzen seçilir. Örnek eşleştirmeler:
+#   1-3 → 1xN (yan yana), 4 → 2x2, 5 → 1x5, 6 → 2x3, 7 → 1x7, 8 → 2x4,
+#   9 → 3x3, 10 → 2x5, 12 → 3x4, 14 → 2x7, 15 → 3x5, 16 → 4x4, 18 → 3x6,
+#   20 → 4x5, 21 → 3x7, 24 → 4x6, 25 → 5x5, 28 → 4x7, 30 → 5x6, 35 → 5x7,
+#   36 → 6x6, 42 → 6x7, 49 → 7x7.
+# Tabloda olmayan sayılar (ör. 11, 13, 17...) için, tam bölünen bir ızgara
+# yoksa bir alt kademeye düşülür (ör. 11 → 2x5 = 10 kullanılır, 1 poster
+# elenir). Hesaplama _compute_grid_layout() içinde yapılır.
+_COLLAGE_MAX_POSTERS = 49
 # Tek bir posterin kolajdaki VARSAYILAN (en büyük) hedef boyutu (px).
 # Poster sayısı arttıkça, kolaj boyutu _COLLAGE_MAX_W x _COLLAGE_MAX_H'yi
 # geçmeyecek şekilde bu boyuttan küçültülür (bkz. _compute_thumb_size()).
@@ -276,49 +279,60 @@ async def _download_poster_with_fallback(client, item: dict):
     return None
 
 
-_COLLAGE_ALLOWED_ROWS = (2, 3, 4)
+# Işgara boyutları: satır ve sütun sayısı her zaman 1 ile 7 arasında
+# (en büyük kolaj 7x7 = 49 poster). rows <= cols kuralı korunur (kolaj hiç
+# bir zaman "dar/uzun" değil, "geniş/kare" olur), ör. 2x7 var ama 7x2 yok.
+_COLLAGE_MAX_ROWS = 7
+_COLLAGE_MAX_COLS = 7
 
 
 def _compute_grid_layout(n: int) -> tuple[int, int, int]:
     """
     İndirilen geçerli poster sayısı (n) için ızgara düzenini belirler.
 
-    Satır sayısı (dikey) her zaman 2, 3 ya da 4'ten biri olmalıdır.
-    Bu üç seçenek arasından, n'i tam bölen (kalansız) ve en az poster
-    kaybına yol açan satır sayısı seçilir; eşitlik durumunda ızgarayı
-    en kareye yakın yapan (satır/sütun farkı en küçük olan) seçilir.
+    Satır (rows) ve sütun (cols) sayısı her zaman 1 ile 7 arasındadır
+    (rows <= cols) — yani en büyük ızgara 7x7 = 49 posterdir. Bu aralıktaki
+    tüm (rows, cols) ikilileri arasından, kullanılabilecek poster sayısını
+    (used = rows*cols <= n) EN ÇOK olacak şekilde, eşitlik durumunda ise
+    ızgarayı en kareye yakın yapan (satır/sütun farkı en küçük olan) ikili
+    seçilir.
+
+    Bu kural, aşağıdaki gibi sabit eşleştirmeleri kendiliğinden üretir:
+        1→1x1  2→1x2  3→1x3  4→2x2  5→1x5  6→2x3   7→1x7   8→2x4
+        9→3x3  10→2x5 12→3x4 14→2x7 15→3x5 16→4x4 18→3x6  20→4x5
+        21→3x7 24→4x6 25→5x5 28→4x7 30→5x6 35→5x7 36→6x6  42→6x7
+        49→7x7
+    Tabloda yer almayan sayılarda (ör. 11, 13, 17, 19, 22...) tam bölünen
+    bir ızgara yoksa, bir alt kademeye düşülür ve fazla poster(ler) kolaja
+    dahil edilmez (ör. 11 → 2x5 = 10 kullanılır, 1 poster elenir).
 
     Dönüş: (rows, cols, used_n) — used_n, kolajda gerçekten kullanılacak
-    poster sayısıdır (n <= used_n değildir, used_n <= n).
+    poster sayısıdır (used_n <= n).
 
     Örnek: 20 poster → 4x5 (20 kullanılır, kayıp yok)
            19 poster → 3x6 (18 kullanılır, yalnızca 1 poster elenir)
             5 poster → 1x5 (tek satır, yan yana, kayıp yok)
-            1 poster → (1, 1, 1) — ızgara kurulmaz.
+            1 poster → (1, 1, 1).
     """
     n = min(n, _COLLAGE_MAX_POSTERS)
     if n <= 0:
         return (1, 0, 0)
 
-    # 5 ve altı poster: ızgara kurmak yerine tek satır halinde yan yana diz.
-    if n <= _COLLAGE_SINGLE_ROW_THRESHOLD:
-        return (1, n, n)
-
     best = None  # (used_n, -|rows-cols|, rows, cols)
-    for rows in _COLLAGE_ALLOWED_ROWS:
+    for rows in range(1, _COLLAGE_MAX_ROWS + 1):
         if rows > n:
-            continue
-        used = (n // rows) * rows
-        if used == 0:
-            continue
-        cols = used // rows
-        score = (used, -abs(rows - cols))
-        if best is None or score > best[0]:
-            best = (score, rows, cols)
+            break
+        for cols in range(rows, _COLLAGE_MAX_COLS + 1):
+            used = rows * cols
+            if used > n:
+                break
+            score = (used, -abs(rows - cols))
+            if best is None or score > best[0]:
+                best = (score, rows, cols)
 
     if best is None:
-        # n, 2/3/4'ten hiçbirine bölünemiyor (n < 2 durumunda buraya
-        # düşülmez, ama güvenlik amacıyla tek satır olarak döndür).
+        # Güvenlik amaçlı yedek: teorik olarak buraya düşülmez
+        # (n >= 1 iken en azından (1, 1) her zaman uygundur).
         return (1, n, n)
 
     _, rows, cols = best
@@ -450,8 +464,9 @@ async def _build_poster_collage(movies: list[dict], tv_shows: list[dict]):
     Eklenen film/dizi posterlerinden bir kolaj görseli oluşturur.
 
     Filmler önce, sonra diziler olacak şekilde (alfabetik sıralı), en fazla
-    _COLLAGE_MAX_POSTERS adet poster; satır sayısı 2, 3 ya da 4 olacak
-    şekilde ızgara halinde birleştirilir (ör. 20 → 4x5, 24 → 4x6, 30 → 3x10).
+    _COLLAGE_MAX_POSTERS adet poster; satır ve sütun sayısı 1-7 arasında
+    olacak şekilde ızgara halinde birleştirilir (ör. 20 → 4x5, 24 → 4x6,
+    30 → 5x6; bkz. _compute_grid_layout()).
 
     Dönüş: JPEG bytes, ya da hiç poster indirilemezse None.
     """

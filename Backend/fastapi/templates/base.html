@@ -381,28 +381,51 @@ tailwind.config = {
 <!-- ── Güncelleme uyarısı ──────────────────────────────────────────────────
      Sayfa yüklendiğinde /api/admin/update-check sorgulanır; UPSTREAM_REPO
      üzerinde daha yeni bir sürüm varsa en üstte bir bant gösterilir.
+     Varsa GitHub release notes'undan alınan "ne değişti" açıklaması da
+     ikinci bir satırda gösterilir (bkz. release_description alanı).
      "Şimdi Güncelle" butonu, ayarlar sayfasındaki "Yeniden Başlat" ile aynı
      mekanizmayı (git güncellemesi + süreç yeniden başlatma) tetikler. ──── -->
-<div id="update-banner" class="fixed top-0 left-0 right-0 z-[200] hidden items-center justify-center gap-3 px-4 py-2.5 text-xs sm:text-sm font-semibold text-center flex-wrap"
+<div id="update-banner" class="fixed top-0 left-0 right-0 z-[200] hidden flex-col items-center justify-center gap-1 px-4 py-2.5 text-xs sm:text-sm font-semibold text-center"
      style="background: linear-gradient(90deg, var(--primary), var(--accent)); color: var(--bg); box-shadow: 0 2px 12px rgba(0,0,0,0.18);">
-    <i class="fa-solid fa-rocket"></i>
-    <span id="update-banner-text">Yeni bir güncelleme mevcut.</span>
-    <button id="update-banner-btn" type="button"
-        class="px-3 py-1 rounded-full text-xs font-bold bg-black/20 hover:bg-black/30 transition-colors">
-        <i class="fa-solid fa-arrows-rotate mr-1"></i> Şimdi Güncelle
-    </button>
+    <div class="flex items-center justify-center gap-3 flex-wrap">
+        <i class="fa-solid fa-rocket"></i>
+        <span id="update-banner-text">Yeni bir güncelleme mevcut.</span>
+        <button id="update-banner-btn" type="button"
+            class="px-3 py-1 rounded-full text-xs font-bold bg-black/20 hover:bg-black/30 transition-colors">
+            <i class="fa-solid fa-arrows-rotate mr-1"></i> Şimdi Güncelle
+        </button>
+    </div>
+    <div id="update-banner-desc" class="hidden text-[11px] sm:text-xs font-normal opacity-90 max-w-3xl whitespace-pre-line"></div>
 </div>
 
 <script>
 (function () {
-    const banner = document.getElementById('update-banner');
-    const textEl = document.getElementById('update-banner-text');
-    const btn    = document.getElementById('update-banner-btn');
-    const navbar = document.getElementById('navbar');
-    if (!banner || !textEl || !btn) return;
+    const banner  = document.getElementById('update-banner');
+    const textEl  = document.getElementById('update-banner-text');
+    const descEl  = document.getElementById('update-banner-desc');
+    const btn     = document.getElementById('update-banner-btn');
+    const navbar  = document.getElementById('navbar');
+    if (!banner || !textEl || !btn || !descEl) return;
 
-    function showBanner(current, latest) {
+    function showBanner(current, latest, description, releaseUrl) {
         textEl.textContent = `Yeni bir güncelleme mevcut: v${latest} (mevcut sürüm: v${current})`;
+
+        if (description) {
+            descEl.textContent = description;
+            if (releaseUrl) {
+                const link = document.createElement('a');
+                link.href = releaseUrl;
+                link.target = '_blank';
+                link.rel = 'noopener noreferrer';
+                link.textContent = ' Detaylar →';
+                link.className = 'underline font-semibold whitespace-nowrap';
+                descEl.appendChild(link);
+            }
+            descEl.classList.remove('hidden');
+        } else {
+            descEl.classList.add('hidden');
+        }
+
         banner.classList.remove('hidden');
         banner.classList.add('flex');
         requestAnimationFrame(() => {
@@ -418,7 +441,7 @@ tailwind.config = {
             if (!res.ok) return;
             const data = await res.json();
             if (data && data.update_available) {
-                showBanner(data.current_version, data.latest_version);
+                showBanner(data.current_version, data.latest_version, data.release_description, data.release_url);
             }
         } catch (e) {
             console.warn('[update-check] Sürüm kontrolü yapılamadı:', e);
@@ -429,6 +452,7 @@ tailwind.config = {
         btn.disabled = true;
         btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> Güncelleniyor…';
         textEl.textContent = 'Güncelleme uygulanıyor, lütfen bekleyin. Sayfa hazır olduğunda otomatik yenilenecek…';
+        descEl.classList.add('hidden');
         try {
             await fetch('/api/admin/restart', { method: 'POST', credentials: 'same-origin' });
         } catch (e) {

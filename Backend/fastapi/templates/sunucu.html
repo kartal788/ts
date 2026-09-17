@@ -34,17 +34,25 @@
                 <i id="sistem-refresh-icon" class="fas fa-sync-alt"></i> Yenile
             </button>
         </div>
-        <div id="sistem-durumu-grid" class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+        <div id="sistem-durumu-grid" class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
             <div class="bg-white/5 rounded-xl p-3 text-center">
                 <div class="text-xs theme-text-secondary mb-1 flex items-center justify-center gap-1"><i class="fas fa-microchip text-blue-400 text-xs"></i> CPU</div>
                 <div id="sd-cpu" class="text-lg font-bold text-blue-400">—</div>
                 <div class="w-full bg-white/10 rounded-full h-1.5 mt-2"><div id="sd-cpu-bar" class="h-1.5 rounded-full bg-blue-400 transition-all duration-500" style="width:0%"></div></div>
             </div>
-            <div class="bg-white/5 rounded-xl p-3 text-center">
+            <div class="bg-white/5 rounded-xl p-3 text-center" title="free -m ile aynı sütunlar">
                 <div class="text-xs theme-text-secondary mb-1 flex items-center justify-center gap-1"><i class="fas fa-memory text-purple-400 text-xs"></i> RAM</div>
                 <div id="sd-ram" class="text-lg font-bold text-purple-400">—</div>
                 <div class="text-xs theme-text-secondary mt-0.5" id="sd-ram-detail">—</div>
                 <div class="w-full bg-white/10 rounded-full h-1.5 mt-2"><div id="sd-ram-bar" class="h-1.5 rounded-full bg-purple-400 transition-all duration-500" style="width:0%"></div></div>
+                <div class="text-[10px] theme-text-secondary mt-1.5 leading-snug" id="sd-ram-extra">—</div>
+            </div>
+            <div class="bg-white/5 rounded-xl p-3 text-center">
+                <div class="text-xs theme-text-secondary mb-1 flex items-center justify-center gap-1"><i class="fas fa-water text-indigo-400 text-xs"></i> Swap</div>
+                <div id="sd-swap" class="text-lg font-bold text-indigo-400">—</div>
+                <div class="text-xs theme-text-secondary mt-0.5" id="sd-swap-detail">—</div>
+                <div class="w-full bg-white/10 rounded-full h-1.5 mt-2"><div id="sd-swap-bar" class="h-1.5 rounded-full bg-indigo-400 transition-all duration-500" style="width:0%"></div></div>
+                <div class="text-[10px] theme-text-secondary mt-1.5" id="sd-swap-free">—</div>
             </div>
             <div class="bg-white/5 rounded-xl p-3 text-center">
                 <div class="text-xs theme-text-secondary mb-1 flex items-center justify-center gap-1"><i class="fas fa-hdd text-orange-400 text-xs"></i> Kullanılan</div>
@@ -1653,6 +1661,7 @@ async function loadSistemDurumu() {
 
         const cpu = parseFloat(d.cpu_percent) || 0;
         const ram = parseFloat(d.ram_percent) || 0;
+        const swap = parseFloat(d.swap_percent) || 0;
         const disk = parseFloat(d.disk_percent) || 0;
 
         document.getElementById('sd-cpu').textContent = cpu.toFixed(1) + '%';
@@ -1665,6 +1674,19 @@ async function loadSistemDurumu() {
         document.getElementById('sd-ram-bar').style.width = ram + '%';
         document.getElementById('sd-ram-bar').style.background =
             ram > 85 ? '#f87171' : '#c084fc';
+        // Linux `free -m` ile aynı ek sütunlar: free, shared, buff/cache, available.
+        document.getElementById('sd-ram-extra').innerHTML =
+            'boş: ' + (d.ram_free || '—') + '<br>' +
+            'paylaşılan: ' + (d.ram_shared || '—') + ' · arabellek: ' + (d.ram_buff_cache || '—') + '<br>' +
+            'kullanılabilir: ' + (d.ram_available || '—');
+
+        // Swap — RAM'den ayrı bir kart olarak gösterilir.
+        document.getElementById('sd-swap').textContent = swap.toFixed(1) + '%';
+        document.getElementById('sd-swap-detail').textContent = (d.swap_used || '—') + ' / ' + (d.swap_total || '—');
+        document.getElementById('sd-swap-bar').style.width = swap + '%';
+        document.getElementById('sd-swap-bar').style.background =
+            swap > 50 ? '#f87171' : '#818cf8';
+        document.getElementById('sd-swap-free').textContent = 'boş: ' + (d.swap_free || '—');
 
         document.getElementById('sd-disk-used').textContent = d.disk_used || '—';
         document.getElementById('sd-disk-total').textContent = '/ ' + (d.disk_total || '—') + ' (' + disk.toFixed(1) + '%)';

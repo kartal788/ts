@@ -2067,6 +2067,62 @@ async def _fetch_pyproject_via_git(upstream_repo: str, branch: str) -> Optional[
     return None
 
 
+async def _fetch_release_notes(owner: str, repo: str, version: str) -> Optional[dict]:
+    """GitHub Releases API üzerinden en güncel sürümün "ne değişti" açıklamasını
+    (release notes) çeker. Önce `v{version}` / `{version}` etiketli sürüm
+    denenir (pyproject.toml'daki versiyonla birebir eşleşsin diye); GitHub'da
+    o an için sadece "latest" release'e erişim garantisiyse ona düşülür.
+    Sürüm/relase bulunamazsa (404) veya istek başarısız olursa None döner —
+    bu durumda güncelleme banner'ı açıklamasız, sadece sürüm numarasıyla
+    gösterilmeye devam eder."""
+    import re
+    import httpx
+
+    api_base = f"https://api.github.com/repos/{owner}/{repo}/releases"
+    headers = {"Accept": "application/vnd.github+json"}
+
+    async def _get(url: str) -> Optional[dict]:
+        try:
+            async with httpx.AsyncClient(timeout=8) as client:
+                resp = await client.get(url, headers=headers)
+            if resp.status_code == 200:
+                return resp.json()
+        except Exception as e:
+            _logger.info(f"[update-check] Release notes isteği başarısız ({url}): {e}")
+        return None
+
+    data = await _get(f"{api_base}/tags/v{version}")
+    if data is None:
+        data = await _get(f"{api_base}/tags/{version}")
+    if data is None:
+        data = await _get(f"{api_base}/latest")
+
+    if not data or not isinstance(data, dict):
+        return None
+
+    body = (data.get("body") or "").strip()
+    if not body:
+        return None
+
+    # Markdown işaretlerini (başlık #, kalın **, liste -) sadeleştirip düz
+    # metne çeviriyoruz; banner'da kısa ve okunabilir bir özet gösterilecek.
+    body = re.sub(r"^#{1,6}\s*", "", body, flags=re.MULTILINE)
+    body = re.sub(r"\*\*(.+?)\*\*", r"\1", body)
+    body = re.sub(r"^[-*]\s+", "• ", body, flags=re.MULTILINE)
+    body = re.sub(r"\r\n?", "\n", body).strip()
+
+    max_len = 400
+    truncated = len(body) > max_len
+    if truncated:
+        body = body[:max_len].rstrip() + "…"
+
+    return {
+        "description": body,
+        "url": data.get("html_url"),
+        "truncated": truncated,
+    }
+
+
 async def check_update_api() -> dict:
     """UPSTREAM_REPO'daki en güncel versiyonu kontrol eder.
 
@@ -2089,6 +2145,8 @@ async def check_update_api() -> dict:
         "update_available": False,
         "current_version": __version__,
         "latest_version": None,
+        "release_description": None,
+        "release_url": None,
     }
 
     if not upstream_repo:
@@ -2114,6 +2172,16 @@ async def check_update_api() -> dict:
             latest_tuple = _parse_version(latest_version)
             if current_tuple and latest_tuple and latest_tuple > current_tuple:
                 result["update_available"] = True
+                #----- Güncelleme varsa, GitHub release notes'undan (varsa)
+                #----- "ne değişti" açıklamasını da çekip banner'da göster.
+                try:
+                    release_info = await _fetch_release_notes(owner, repo, latest_version)
+                except Exception as e:
+                    release_info = None
+                    _logger.info(f"[update-check] Release notes çekilemedi: {e}")
+                if release_info:
+                    result["release_description"] = release_info.get("description")
+                    result["release_url"] = release_info.get("url")
         else:
             _logger.warning("[update-check] pyproject.toml içinde versiyon deseni bulunamadı.")
     else:
