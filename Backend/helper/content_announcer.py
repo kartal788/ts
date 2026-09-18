@@ -10,6 +10,9 @@ duyuru gönderilir. Örneğin bir diziye art arda birkaç bölüm eklenirse tek
 bir duyuru yeterli olur; 24 saat dolduktan sonra o başlığa yeniden içerik
 eklenirse tekrar duyurulur.
 
+Veritabanındaki kaydında imdb_id boş olan içerikler için duyuru (otomatik
+ya da manuel) hiçbir zaman gönderilmez.
+
 Hedef konu (topic) kapalıysa (TOPIC_CLOSED), bot konuyu otomatik olarak
 geçici açar, duyuruyu gönderir ve ardından kullanıcının tercihini bozmamak
 için konuyu tekrar kapatır. Bunun için botun grupta "Konuları Yönet"
@@ -141,6 +144,34 @@ def _parse_target(value: str) -> Tuple[Optional[object], Optional[int]]:
         return int(value), None
     except ValueError:
         return value, None
+
+
+#----- Duyuru göndermeden önce içeriğin VERİTABANINDAKİ kaydında imdb_id dolu
+#----- mu diye bakar. imdb_id boşsa duyuru gönderilmez (False döner).
+#-----
+#----- Neden info yerine doğrudan veritabanı kaydına bakılıyor: yeni bir video
+#----- mevcut bir kayda eklendiğinde (update_movie/update_tv_show) kaydın
+#----- imdb_id alanı yeni metadata ile ezilmez; yani "info" içindeki imdb_id
+#----- ile veritabanındaki gerçek değer birbirinden farklı olabilir. Kayıt
+#----- veritabanında bulunamazsa (veya sorgu hata verirse) info içindeki
+#----- imdb_id'ye düşülür.
+async def _has_imdb_id(info: dict) -> bool:
+    media_type = info.get("media_type")
+    tmdb_id = info.get("tmdb_id")
+
+    if media_type and tmdb_id:
+        try:
+            db_index = info.get("db_index") or db.current_db_index
+            doc = await db.get_document(media_type, tmdb_id, db_index)
+            if doc is not None:
+                return bool(str(doc.get("imdb_id") or "").strip())
+        except Exception as e:
+            LOGGER.warning(
+                f"Duyuru öncesi imdb_id veritabanından okunamadı "
+                f"({media_type}:{tmdb_id}), info içindeki değere bakılacak: {e}"
+            )
+
+    return bool(str(info.get("imdb_id") or "").strip())
 
 
 #----- Bir başlığın 18 saat içinde en fazla bir kez duyurulmasını sağlar.
@@ -377,6 +408,123 @@ async def _send_with_flood_retry(chat, thread_id, posters, caption, markup, disp
             await asyncio.sleep(wait_seconds)
 
 
+#----- media_edit.html sayfasındaki "Duyuruyu Gönder" butonundan tetiklenir.
+#----- Otomatik sistemden (_announce) iki farkı vardır:
+#-----   1) settings.announce_new_content KAPALI olsa bile gönderilir —
+#-----      admin bilinçli olarak butona bastığı için.
+#-----   2) ANNOUNCE_COOLDOWN_HOURS beklemesi uygulanmaz; içerik yakın
+#-----      zamanda otomatik duyurulmuş olsa bile admin isterse tekrar
+#-----      gönderebilir. Gönderim başarılı olursa cooldown kaydı yine de
+#-----      güncellenir; böylece otomatik sistem hemen ardından (ör. içeriğe
+#-----      yeni bir kalite/bölüm eklenmesiyle) aynı başlığı bir daha
+#-----      duyurmaya çalışmaz.
+#----- Yine de şu üç güvenlik kontrolü korunur:
+#-----   - Hedef kanal/konu (announcement_channel) ayarlanmamışsa gönderilmez.
+#-----   - Görünürlüğü "Sadece seçtiğim üye(ler)" olan içerik, gizliliği
+#-----     bozmamak için genel duyuru kanalına gönderilmez.
+#-----   - Veritabanındaki kaydında imdb_id boş olan içerik gönderilmez.
+#----- Dönüş: (başarılı mı, kullanıcıya gösterilecek mesaj).
+async def send_manual_announcement(info: dict) -> Tuple[bool, str]:
+    settings = SettingsManager.current()
+
+    visibility = info.get("visibility") or {}
+    if isinstance(visibility, dict) and visibility.get("mode") == "selected":
+        return False, (
+            'Bu içeriğin görünürlüğü "Sadece seçtiğim üye(ler)" olarak ayarlı; '
+            "gizliliği bozmamak için genel duyuru kanalına gönderilemez."
+        )
+
+    chat, thread_id = _parse_target(getattr(settings, "announcement_channel", ""))
+    if chat is None:
+        return False, (
+            'Duyuru kanalı/grubu ayarlanmamış. Lütfen önce Ayarlar sayfasından '
+            '"Yeni İçerik Duyuruları" hedefini belirleyin.'
+        )
+
+    if not await _has_imdb_id(info):
+        return False, (
+            "Bu içeriğin veritabanı kaydında imdb_id boş; "
+            "duyuru gruba gönderilmedi. Önce imdb_id alanını doldurun."
+        )
+
+    await _ensure_description_translated(info)
+
+    caption = _build_caption(info)
+    is_cam, _cam_audio = _detect_cam_quality_and_audio(info)
+    if is_cam:
+        posters = [
+            _tmdb_original_size(info.get("poster_tr")),
+            info.get("poster"),
+            info.get("backdrop_tr"),
+            info.get("backdrop"),
+            info.get("backdrop_de"),
+            info.get("poster_de"),
+        ]
+    else:
+        posters = [
+            info.get("backdrop_tr"),
+            info.get("backdrop"),
+            info.get("backdrop_de"),
+            _tmdb_original_size(info.get("poster_tr")),
+            info.get("poster"),
+            info.get("poster_de"),
+        ]
+    display_title = info.get("title_tr") or info.get("title") or "Bilinmiyor"
+
+    markup = None
+    rows = []
+    open_buttons = _build_open_buttons(info, settings)
+    if open_buttons:
+        rows.append(open_buttons)
+    bot_username = getattr(StreamBot, "username", None)
+    if bot_username:
+        app_name = (getattr(settings, "isim", "") or "").strip() or "Bot"
+        rows.append([InlineKeyboardButton(f"🤖 {app_name}'e üye ol", url=f"https://t.me/{bot_username}")])
+    if rows:
+        markup = InlineKeyboardMarkup(rows)
+
+    try:
+        await _send_with_flood_retry(chat, thread_id, posters, caption, markup, display_title)
+    except TopicClosed:
+        if thread_id is None:
+            return False, "Duyuru gönderilemedi: hedef konu kapalı."
+        try:
+            await StreamBot.reopen_forum_topic(chat, thread_id)
+        except Exception as e:
+            return False, f"Duyuru gönderilemedi: konu kapalı ve otomatik açılamadı ({e})"
+        try:
+            await _send_with_flood_retry(chat, thread_id, posters, caption, markup, display_title)
+        except FloodWait as e:
+            wait_seconds = int(getattr(e, "value", 0) or 0)
+            return False, f"Duyuru gönderilemedi: Telegram flood limiti (bekleme: {wait_seconds}sn)."
+        except Exception as e:
+            return False, f"Konu geçici açıldı ama duyuru yine gönderilemedi: {e}"
+        finally:
+            try:
+                await StreamBot.close_forum_topic(chat, thread_id)
+            except Exception as e:
+                LOGGER.warning(f"Duyuru sonrası konu tekrar kapatılamadı (chat={chat}, konu={thread_id}): {e}")
+    except FloodWait as e:
+        wait_seconds = int(getattr(e, "value", 0) or 0)
+        return False, f"Duyuru gönderilemedi: Telegram flood limiti (bekleme: {wait_seconds}sn)."
+    except Exception as e:
+        return False, f"Duyuru gönderilemedi: {e}"
+
+    #----- Manuel gönderim başarılı: cooldown kaydını güncelle (yoksa oluştur).
+    try:
+        tmdb_id = info.get("tmdb_id")
+        if tmdb_id:
+            key = f"{info.get('media_type')}:{tmdb_id}"
+            coll = db.dbs["tracking"]["announced_content"]
+            await coll.update_one(
+                {"_id": key}, {"$set": {"at": datetime.utcnow()}}, upsert=True,
+            )
+    except Exception as e:
+        LOGGER.warning(f"Manuel duyuru sonrası cooldown kaydı güncellenemedi: {e}")
+
+    return True, f'"{display_title}" duyurusu gönderildi.'
+
+
 #----- Duyuru mesajındaki "Stremio'da Aç" / "Nuvio'da Aç" butonlarını oluşturur.
 #----- Buradaki alan adı, projenin gerçek BASE_URL'inden BAĞIMSIZ olarak
 #----- ayarlar sayfasındaki "Yönlendirme Alan Adı" (redirect_base_url) alanından
@@ -410,6 +558,17 @@ async def _announce(info: dict) -> None:
 
     chat, thread_id = _parse_target(getattr(settings, "announcement_channel", ""))
     if chat is None:
+        return
+
+    #----- Veritabanında imdb_id boş olan içerikler duyurulmaz. Bu kontrol,
+    #----- _claim()'den ÖNCE yapılır; böylece atlanan içerik için cooldown
+    #----- kaydı oluşmaz ve imdb_id sonradan doldurulursa içerik
+    #----- ANNOUNCE_COOLDOWN_HOURS beklemeden duyurulabilir.
+    if not await _has_imdb_id(info):
+        LOGGER.info(
+            f"Duyuru atlandı '{info.get('title_tr') or info.get('title')}': "
+            f"veritabanında imdb_id boş."
+        )
         return
 
     if not await _claim(info.get("media_type"), info.get("tmdb_id")):

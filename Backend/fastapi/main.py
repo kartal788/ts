@@ -76,6 +76,7 @@ from Backend.fastapi.routes.notification_routes import (
 )
 from Backend.fastapi.routes.api_routes import (
     list_media_api, delete_media_api, update_media_api, requery_media_api,
+    announce_media_api,
     get_media_visibility_api, update_media_visibility_api,
     delete_movie_quality_api, delete_tv_quality_api,
     delete_tv_episode_api, delete_tv_season_api,
@@ -1131,6 +1132,10 @@ async def delete_media(tmdb_id: int, db_index: int, media_type: str, _: bool = D
 @app.put("/api/media/update")
 async def update_media(request: Request, tmdb_id: int, db_index: int, media_type: str, announce: bool = False, _: bool = Depends(require_auth)):
     return await update_media_api(request, tmdb_id, db_index, media_type, announce)
+
+@app.post("/api/media/announce")
+async def announce_media(tmdb_id: int, db_index: int, media_type: str = Query(regex="^(movie|tv)$"), _: bool = Depends(require_auth)):
+    return await announce_media_api(tmdb_id, db_index, media_type)
 
 @app.post("/api/media/requery")
 async def requery_media(

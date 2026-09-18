@@ -261,6 +261,7 @@ async def admin_usage_discrepancies_api() -> dict:
       - pending_subscription:  Abonelik planı seçip aboneliği/ödemesi onaylanmayan üyeler
       - expiring_soon:         Aboneliği 24 saat içinde sona erecek üyeler
       - expired_but_active:    Aboneliği sona ermiş ama hâlâ "active" işaretli üyeler
+      - missing_imdb:          imdb_id alanı boş olan diziler (Nuvio kataloğunda görünmezler)
     """
     try:
         discrepancy_rows = await db.get_daily_usage_discrepancies()
@@ -326,10 +327,21 @@ async def admin_usage_discrepancies_api() -> dict:
             "overdue_hours": r.get("overdue_hours"),
         } for r in expired_but_active_rows]
 
+        missing_imdb_rows = await db.get_missing_imdb_tv_shows()
+        missing_imdb_alerts = [{
+            "type":          "missing_imdb",
+            "tmdb_id":       r.get("tmdb_id"),
+            "db_index":      r.get("db_index"),
+            "title":         r.get("title"),
+            "release_year":  r.get("release_year"),
+            "media_edit_url": f"/media/edit?tmdb_id={r.get('tmdb_id')}&db_index={r.get('db_index')}&media_type=tv",
+        } for r in missing_imdb_rows]
+
         total = (
             len(alerts) + len(daily_limit_alerts)
             + len(pending_request_alerts) + len(pending_subscription_alerts)
             + len(expiring_soon_alerts) + len(expired_but_active_alerts)
+            + len(missing_imdb_alerts)
         )
 
         return {
@@ -340,6 +352,7 @@ async def admin_usage_discrepancies_api() -> dict:
             "pending_subscription_alerts": pending_subscription_alerts,
             "expiring_soon_alerts": expiring_soon_alerts,
             "expired_but_active_alerts": expired_but_active_alerts,
+            "missing_imdb_alerts": missing_imdb_alerts,
             "total": total,
         }
     except Exception as e:

@@ -348,6 +348,20 @@
                     <p class="text-sm text-text-secondary font-medium">Kontrol ediliyor…</p>
                 </div>
             </div>
+
+            <div id="alerts-pagination" class="hidden flex items-center justify-between gap-3 px-6 pb-6">
+                <button id="alerts-prev-btn" onclick="goToAlertsPage(-1)"
+                    class="flex items-center gap-2 text-xs font-bold uppercase tracking-wider px-4 py-2 rounded-full glass-panel border border-hairline hover:bg-white/5 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                    <i class="fa-solid fa-chevron-left"></i> Önceki
+                </button>
+                <span id="alerts-page-label" class="text-xs font-bold text-text-secondary uppercase tracking-wider">
+                    Sayfa 1 / 1
+                </span>
+                <button id="alerts-next-btn" onclick="goToAlertsPage(1)"
+                    class="flex items-center gap-2 text-xs font-bold uppercase tracking-wider px-4 py-2 rounded-full glass-panel border border-hairline hover:bg-white/5 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                    Sonraki <i class="fa-solid fa-chevron-right"></i>
+                </button>
+            </div>
         </div>
 
         <!-- Access Management Section -->
@@ -1173,6 +1187,32 @@
             </div>`;
     }
 
+    function renderMissingImdbAlertRow(alert) {
+        const title = escapeHtmlLocal(alert.title || 'İsimsiz Dizi');
+        const year = alert.release_year ? ` (${escapeHtmlLocal(String(alert.release_year))})` : '';
+        const editUrl = alert.media_edit_url || '#';
+
+        return `
+            <div class="glass-panel rounded-2xl p-4 border border-cyan-500/10">
+                <div class="flex items-start justify-between gap-3 flex-wrap">
+                    <div class="min-w-0">
+                        <span class="text-[9px] font-bold uppercase tracking-widest text-cyan-300/80">IMDB ID Eksik</span>
+                        <h5 class="font-bold text-sm text-text truncate">${title}${year}</h5>
+                    </div>
+                    <span class="text-[10px] font-bold px-2 py-1 rounded-lg uppercase whitespace-nowrap text-cyan-300 bg-cyan-500/10">
+                        <i class="fa-solid fa-id-badge mr-1"></i>Eksik
+                    </span>
+                </div>
+                <p class="text-xs text-text-secondary mt-3">
+                    Bu dizinin imdb id'si boş, Nuvio katalogunda görünmez.
+                </p>
+                <a href="${editUrl}"
+                    class="inline-flex items-center gap-2 text-xs font-bold text-cyan-300 hover:text-cyan-200 mt-3">
+                    <i class="fa-solid fa-pen-to-square"></i> Diziyi düzenle
+                </a>
+            </div>`;
+    }
+
     function renderAlertsEmptyState() {
         return `
             <div class="glass-panel p-8 rounded-[2rem] text-center border-dashed border-hairline">
@@ -1191,6 +1231,51 @@
             </div>`;
     }
 
+    // Uyarılar listesi sayfalama: bir sayfada en fazla bu kadar uyarı gösterilir.
+    const ALERTS_PAGE_SIZE = 10;
+    let ALERTS_ITEMS = [];
+    let ALERTS_PAGE = 1;
+
+    function renderAlertsPageView() {
+        const container = document.getElementById('alerts-container');
+        const pager = document.getElementById('alerts-pagination');
+        if (!container) return;
+
+        const total = ALERTS_ITEMS.length;
+        if (total === 0) {
+            container.innerHTML = renderAlertsEmptyState();
+            if (pager) pager.classList.add('hidden');
+            return;
+        }
+
+        const totalPages = Math.max(1, Math.ceil(total / ALERTS_PAGE_SIZE));
+        if (ALERTS_PAGE > totalPages) ALERTS_PAGE = totalPages;
+        if (ALERTS_PAGE < 1) ALERTS_PAGE = 1;
+
+        const start = (ALERTS_PAGE - 1) * ALERTS_PAGE_SIZE;
+        const pageItems = ALERTS_ITEMS.slice(start, start + ALERTS_PAGE_SIZE);
+        container.innerHTML = pageItems.join('');
+
+        if (pager) {
+            if (totalPages > 1) {
+                pager.classList.remove('hidden');
+                const pageLabel = document.getElementById('alerts-page-label');
+                if (pageLabel) pageLabel.textContent = `Sayfa ${ALERTS_PAGE} / ${totalPages}`;
+                const prevBtn = document.getElementById('alerts-prev-btn');
+                const nextBtn = document.getElementById('alerts-next-btn');
+                if (prevBtn) prevBtn.disabled = ALERTS_PAGE <= 1;
+                if (nextBtn) nextBtn.disabled = ALERTS_PAGE >= totalPages;
+            } else {
+                pager.classList.add('hidden');
+            }
+        }
+    }
+
+    function goToAlertsPage(delta) {
+        ALERTS_PAGE += delta;
+        renderAlertsPageView();
+    }
+
     async function loadUsageAlerts() {
         const container = document.getElementById('alerts-container');
         const badge = document.getElementById('alerts-count-badge');
@@ -1205,13 +1290,14 @@
             const pendingSubs        = data.pending_subscription_alerts || [];
             const expiringSoon       = data.expiring_soon_alerts || [];
             const expiredButActive   = data.expired_but_active_alerts || [];
+            const missingImdb        = data.missing_imdb_alerts || [];
 
             // Not: Dizi/film istekleri (pending_request_alerts) bilinçli olarak
             // Uyarılar bölümünde gösterilmiyor. Bu yüzden toplam sayı, backend'in
             // döndürdüğü 'total' yerine (o istek uyarılarını da içeriyor) burada
             // gösterilen kategorilerden ayrıca hesaplanıyor.
             const totalCount = usageAlerts.length + dailyLimitAlerts.length + pendingSubs.length
-                + expiringSoon.length + expiredButActive.length;
+                + expiringSoon.length + expiredButActive.length + missingImdb.length;
 
             if (badge) {
                 if (totalCount === 0) {
@@ -1223,17 +1309,19 @@
                 }
             }
 
-            if (container) {
-                const html = [
-                    expiredButActive.map(renderExpiredButActiveAlertRow).join(''),
-                    dailyLimitAlerts.map(renderDailyLimitAlertRow).join(''),
-                    expiringSoon.map(renderExpiringSoonAlertRow).join(''),
-                    pendingSubs.map(renderPendingSubscriptionAlertRow).join(''),
-                    usageAlerts.map(renderAlertRow).join(''),
-                ].join('');
+            // Tüm uyarı kategorilerini tek bir listede (her biri önceden render
+            // edilmiş bir HTML parçası olarak) topla; sayfalama bu liste üzerinden yapılır.
+            ALERTS_ITEMS = [
+                ...expiredButActive.map(renderExpiredButActiveAlertRow),
+                ...dailyLimitAlerts.map(renderDailyLimitAlertRow),
+                ...expiringSoon.map(renderExpiringSoonAlertRow),
+                ...pendingSubs.map(renderPendingSubscriptionAlertRow),
+                ...usageAlerts.map(renderAlertRow),
+                ...missingImdb.map(renderMissingImdbAlertRow),
+            ];
+            ALERTS_PAGE = 1;
 
-                container.innerHTML = totalCount ? html : renderAlertsEmptyState();
-            }
+            if (container) renderAlertsPageView();
         } catch (error) {
             console.error("Failed to load usage alerts:", error);
             if (badge) {
@@ -1241,6 +1329,8 @@
                 badge.className = 'text-[10px] font-bold uppercase tracking-[0.2em] text-red-300 bg-red-500/10 px-3 py-1 rounded-full';
             }
             if (container) container.innerHTML = renderAlertsErrorState();
+            const pager = document.getElementById('alerts-pagination');
+            if (pager) pager.classList.add('hidden');
         }
     }
 

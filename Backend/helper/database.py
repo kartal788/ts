@@ -4516,6 +4516,46 @@ class Database:
             LOGGER.error(f"get_expired_but_active_alerts error: {e}")
             return []
 
+    async def get_missing_imdb_tv_shows(self) -> list:
+        """
+        Tüm storage shard'larındaki "tv" koleksiyonunu tarar ve imdb_id alanı
+        boş/eksik olan dizileri döner. Bu diziler imdb_id olmadığı için Nuvio
+        kataloğunda görünmez; dashboard'daki "Uyarılar" kartında admin'in
+        media_edit sayfasına gidip eksik imdb_id'yi girmesi için listelenir.
+        """
+        try:
+            result = []
+            total_storage_dbs = len(self.dbs) - 1
+            filter_dict = {
+                "$or": [
+                    {"imdb_id": {"$exists": False}},
+                    {"imdb_id": None},
+                    {"imdb_id": ""},
+                ]
+            }
+            projection = {
+                "tmdb_id": 1, "db_index": 1, "title": 1,
+                "release_year": 1, "poster": 1,
+            }
+            for db_index in range(1, total_storage_dbs + 1):
+                db_key = f"storage_{db_index}"
+                storage = self.dbs.get(db_key)
+                if storage is None:
+                    continue
+                cursor = storage["tv"].find(filter_dict, projection)
+                async for doc in cursor:
+                    result.append({
+                        "tmdb_id":      doc.get("tmdb_id"),
+                        "db_index":     doc.get("db_index") or db_index,
+                        "title":        doc.get("title") or "İsimsiz Dizi",
+                        "release_year": doc.get("release_year"),
+                    })
+            result.sort(key=lambda r: (r.get("title") or "").casefold())
+            return result
+        except Exception as e:
+            LOGGER.error(f"get_missing_imdb_tv_shows error: {e}")
+            return []
+
     async def get_pending_content_request_members(self) -> list:
         """
         En az bir "pending" (onay bekleyen) içerik talebi olan üyeleri,
