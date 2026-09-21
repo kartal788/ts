@@ -1,6 +1,8 @@
 import httpx
 import re
 import asyncio
+import unicodedata
+from difflib import SequenceMatcher
 from typing import Optional, Dict, Any
 
 BASE_URL = "https://v3-cinemeta.strem.io"
@@ -27,7 +29,71 @@ def extract_first_year(year_string) -> int:
         return int(year_match.group(1))
     return 0
 
-async def search_title(query: str, type: str) -> Optional[Dict[str, Any]]:
+# Türkçe karakterleri ASCII karşılıklarına indirger (başlık karşılaştırması için)
+_TR_CHAR_MAP = str.maketrans({
+    "ı": "i", "İ": "i", "ş": "s", "Ş": "s", "ğ": "g", "Ğ": "g",
+    "ç": "c", "Ç": "c", "ö": "o", "Ö": "o", "ü": "u", "Ü": "u",
+})
+
+# Yıl uyuşmasa bile başlığı bu oranın üzerinde benzeyen sonuç kabul edilir
+# (ör. dosya adındaki yıl dizinin ilk yayın yılı değil, sezon yılı olduğunda).
+TITLE_MATCH_THRESHOLD = 0.9
+
+
+def normalize_title(text) -> str:
+    text = unicodedata.normalize("NFKD", str(text or "").translate(_TR_CHAR_MAP))
+    text = text.encode("ascii", "ignore").decode().lower()
+    return re.sub(r"[^a-z0-9]+", " ", text).strip()
+
+
+def title_similarity(a, b) -> float:
+    na, nb = normalize_title(a), normalize_title(b)
+    if not na or not nb:
+        return 0.0
+    if na == nb:
+        return 1.0
+    return SequenceMatcher(None, na, nb).ratio()
+
+
+def pick_best_meta(metas: list, query: str, year: int, prefer_year: bool = False) -> Optional[Dict[str, Any]]:
+    """
+    Cinemeta arama sonuçları arasından dosya adındaki başlık + yıla en uygun olanı seçer.
+    Ne yıl (±1) ne de başlık uyuyorsa None döner; böylece alakasız bir dizi/film
+    (ör. "Bir Ege Hayali" yerine "Bir Zamanlar Çukurova") yanlışlıkla eşleşmez.
+
+    prefer_year=True (filmler için): yılı uyan (±1) en az bir aday varsa yalnızca
+    onlar değerlendirilir; başlığı benzeyen ama yılı tutmayan aday (ör. aynı/benzer
+    adlı başka bir film) yıl uyan adayın önüne geçemez. Latin harfe indirgenemeyen
+    adlar (ör. Farsça "هرجایی") karşılaştırılamayacağı için nötr benzerlik alır;
+    bu durumda yıl + Cinemeta sıralaması belirleyicidir.
+    """
+    scored = []
+    for idx, meta in enumerate(metas[:10]):
+        name = meta.get("name", "")
+        sim = title_similarity(query, name)
+        if prefer_year and not normalize_title(name):
+            sim = 0.5
+        meta_year = extract_first_year(meta.get("releaseInfo") or meta.get("year"))
+        if meta_year:
+            year_ok = abs(meta_year - year) <= 1
+        else:
+            year_ok = None  # yıl bilgisi yok → yıl üzerinden elenmez
+
+        if year_ok is False and sim < TITLE_MATCH_THRESHOLD:
+            continue
+
+        score = sim + (0.5 if year_ok else 0.0) - idx * 0.001
+        scored.append((meta, score, year_ok))
+
+    if prefer_year and any(ok is True for _, _, ok in scored):
+        scored = [t for t in scored if t[2] is True]
+
+    if not scored:
+        return None
+    return max(scored, key=lambda t: t[1])[0]
+
+
+async def search_title(query: str, type: str, year: Optional[int] = None, prefer_year: bool = False) -> Optional[Dict[str, Any]]:
     client = await _get_client()
     cinemeta_type = "series" if type == "tvSeries" else type
     url = f"{BASE_URL}/catalog/{cinemeta_type}/imdb/search={query}.json"
@@ -37,7 +103,15 @@ async def search_title(query: str, type: str) -> Optional[Dict[str, Any]]:
             return None
         data = resp.json()
         if data and 'metas' in data and data['metas']:
-            meta = data['metas'][0]
+            metas = data['metas']
+            # Yıl verilmişse sonuçları başlık+yıl ile doğrula; verilmemişse
+            # eski davranış (ilk sonuç) korunur.
+            # Sorgu "<başlık> <yıl>" biçiminde gelebilir (Cinemeta yıllı sorguda daha
+            # iyi sıralıyor); benzerlik hesabında sondaki yıl başlığa dahil edilmez.
+            sim_query = re.sub(rf"\s+{int(year)}\s*$", "", query) if year else query
+            meta = pick_best_meta(metas, sim_query, int(year), prefer_year) if year else metas[0]
+            if not meta:
+                return None
             return {
                 'id': meta.get('imdb_id', meta.get('id', '')),
                 'type': type,

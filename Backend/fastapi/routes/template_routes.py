@@ -527,6 +527,11 @@ async def istatistik_page(request: Request, _: bool = Depends(require_auth)):
 
     api_tokens = await db.get_all_api_tokens()
 
+    try:
+        genre_stats = await db.get_genre_statistics()
+    except Exception:
+        genre_stats = {"movie_total": 0, "tv_total": 0, "movie_genres": [], "tv_genres": []}
+
     # ekle.py ile eklenen içerikleri çek (ekle_approved koleksiyonu)
     ekle_items = []
     ekle_total = 0
@@ -555,6 +560,7 @@ async def istatistik_page(request: Request, _: bool = Depends(require_auth)):
         "api_tokens": api_tokens,
         "ekle_items": ekle_items,
         "ekle_total": ekle_total,
+        "genre_stats": genre_stats,
     })
 
 

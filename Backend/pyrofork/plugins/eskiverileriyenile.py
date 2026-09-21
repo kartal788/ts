@@ -30,11 +30,10 @@ import psutil
 from pymongo import MongoClient
 from pyrogram import Client, filters, enums
 from pyrogram.types import Message
-from deep_translator import GoogleTranslator
 
 from Backend.config import Telegram
 from Backend.helper.custom_filter import CustomFilters
-from Backend.helper.metadata import GENRE_TUR_ALIASES, GENRE_DE_ALIASES
+from Backend.helper.metadata import GENRE_TUR_ALIASES, GENRE_DE_ALIASES, translate_chain
 from Backend.logger import LOGGER
 
 # ─────────────────────────────────────────────────────────────
@@ -322,11 +321,8 @@ def _translate(text: str, target: str) -> str:
     key = (text[:100], target)
     if key in _tr_cache:
         return _tr_cache[key]
-    try:
-        out = GoogleTranslator(source="auto", target=target).translate(text)
-        _tr_cache[key] = out or text
-    except Exception:
-        _tr_cache[key] = text
+    #----- Google -> (varsa) DeepL -> MyMemory zinciri; bkz. Backend.helper.metadata
+    _tr_cache[key] = translate_chain(text, target)
     return _tr_cache[key]
 
 

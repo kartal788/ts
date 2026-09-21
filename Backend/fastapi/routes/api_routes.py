@@ -187,7 +187,25 @@ async def update_media_api(
                     update_data['total_episodes'] = int(update_data['total_episodes'])
                 except (ValueError, TypeError):
                     pass
-        update_data = {k: v for k, v in update_data.items() if v != ""}
+        # Normalde boş string gönderilen alan "dokunma" anlamına gelir ve atılır.
+        # ANCAK "Yeniden Sorgula" onayı (announce=True) TAM bir yenileme olduğu
+        # için, TMDB'den boş dönen TR/DE görsel/başlık/açıklama/sertifika
+        # alanları BİLİNÇLİ olarak gönderilir — amaç, kayıt daha önce yanlış
+        # bir içerikle eşleşmişse o eski değerleri temizlemektir. Bu alanları
+        # da atarsak eski (yanlış) değerler DB'de kalıcı olarak takılı kalır.
+        _CLEARABLE_ON_REQUERY = {
+            "poster_tr", "poster_de", "backdrop_tr", "backdrop_de",
+            "logo_tr", "logo_de", "title_tr", "title_de",
+            "description_tr", "description_de",
+            "certification_tr", "certification_de", "certification_us",
+        }
+        if announce:
+            update_data = {
+                k: v for k, v in update_data.items()
+                if v != "" or k in _CLEARABLE_ON_REQUERY
+            }
+        else:
+            update_data = {k: v for k, v in update_data.items() if v != ""}
         result = await db.update_document(media_type, tmdb_id, db_index, update_data)
         if result:
             from Backend.helper.platform_catalog import platform_catalog as _pc
@@ -1725,6 +1743,26 @@ async def requery_media_api(
 
 # --- API Routes: Ayarlar (Settings) ---
 
+async def get_translate_usage_api():
+    """Çeviri motorlarının kullanım/durum bilgisini döner:
+    - DeepL: DEEPL_API ayarlıysa resmi /v2/usage'dan canlı çekilen karakter kullanımı/kotası
+    - Google / MyMemory: süreç başlangıcından bu yana başarı/başarısızlık sayaçları
+      (bunlar resmi API olmadığı için gerçek bir "limit" yok, sadece sağlık sinyali)
+    """
+    try:
+        from Backend.helper.metadata import get_translate_engine_stats, get_deepl_usage
+        stats = get_translate_engine_stats()
+        deepl_usage = await get_deepl_usage()
+        return {
+            "success": True,
+            "engines": stats,
+            "deepl_usage": deepl_usage,
+        }
+    except Exception as e:
+        _logger.error("get_translate_usage_api hatası", exc_info=True)
+        raise HTTPException(status_code=500, detail="Çeviri kullanım bilgisi alınamadı")
+
+
 async def get_settings_api():
     """Panelde gösterilecek güncel ayarları döner (hassas alanlar maskelenmez,
     çünkü bu uygulamada statik admin şifresi yok — kimlik doğrulama OTP tabanlı)."""
@@ -2157,12 +2195,12 @@ async def check_update_api() -> dict:
 async def restart_bot_api() -> dict:
     """
     Botu ve web panelini yeniden başlatır — /restart komutuyla aynı mantık
-    (uv run update.py sonrası os.execl ile süreç yeniden başlatılır).
+    (uv run update.py sonrası sys.executable ile in-place execv yapılır).
     Ayarlar sayfasındaki "Botu Yeniden Başlat" butonundan tetiklenir.
     """
-    import shutil
+    import sys
     from asyncio import create_subprocess_exec
-    from os import execl as osexecl
+    from os import execv as osexecv
 
     async def _do_restart():
         # Yanıtın tarayıcıya ulaşması için kısa bir bekleme
@@ -2173,12 +2211,13 @@ async def restart_bot_api() -> dict:
         except Exception as e:
             _logger.warning(f"[restart] update.py çalıştırılamadı: {e}")
 
-        _logger.info("[restart] Ayarlar panelinden yeniden başlatma tetiklendi.")
-        uv_path = shutil.which("uv")
-        if uv_path:
-            osexecl(uv_path, uv_path, "run", "-m", "Backend")
-        else:
-            _logger.error("[restart] 'uv' PATH içinde bulunamadı, yeniden başlatma iptal edildi.")
+        _logger.info("[restart] Ayarlar panelinden yeniden başlatma tetiklendi (in-place execv, no uv wrapper).")
+        # NOT: 'uv run -m Backend' ile execl YAPMIYORUZ — bu process zaten
+        # uv'nin fork ettiği bir çocuk; tekrar 'uv run' ile değiştirmek her
+        # restart'ta bir supervisor katmanı daha ekleyip eskisini hiç
+        # öldürmüyor (process/RAM leak). Bunun yerine doğrudan aktif venv
+        # Python'ını (sys.executable) execv ile üstüne yazıyoruz.
+        osexecv(sys.executable, [sys.executable, "-m", "Backend"])
 
     asyncio.create_task(_do_restart())
     return {"success": True, "message": "Bot yeniden başlatılıyor…"}

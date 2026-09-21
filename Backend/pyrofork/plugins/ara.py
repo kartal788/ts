@@ -7,11 +7,6 @@ Kullanım:
                                     content_announcer.py'deki duyuru
                                     mesajı formatında (poster + başlık +
                                     puan + tür + açıklama) gönderilir.
-  /ara <dizi/film adı>          → veritabanında arama yapılır, eşleşen
-                                    içerikler TEK bir mesajda buton listesi
-                                    olarak sunulur. Kullanıcı bir sonuca
-                                    dokununca o içeriğin bilgisi (yukarıdaki
-                                    gibi) ayrı bir mesaj olarak gönderilir.
 
 Diziler için "🎞 Sezonlar" butonuyla sezon/bölüm listesi aynı mesaj
 üzerinde (fotoğraf altyazısı + buton düzeni güncellenerek) gezilebilir;
@@ -22,7 +17,6 @@ tarihi, varsa bölüm görseli) aynı mesaja işlenir.
 from __future__ import annotations
 
 import asyncio
-import html
 import re
 from datetime import datetime
 from typing import Optional, Tuple
@@ -107,16 +101,11 @@ def _membership_redirect_keyboard() -> Optional[InlineKeyboardMarkup]:
         InlineKeyboardButton(f"🤖 {app_name}'e git ve üyelik al", url=f"https://t.me/{bot_username}?start=uyelik")
     ]])
 
-#----- Bir arama sonucu sayfasında gösterilecek maksimum içerik sayısı.
-PAGE_SIZE = 8
-
 # imdb.com/title/tt... (m.imdb.com, www.imdb.com dahil — alt alan adı
 # aranmaz, sadece "imdb.com/title/ttXXXXXXX" alt dizesi yeterlidir)
 _IMDB_RE = re.compile(r"imdb\.com/title/(tt\d+)", re.IGNORECASE)
 _TMDB_MOV_RE = re.compile(r"themoviedb\.org/movie/(\d+)", re.IGNORECASE)
 _TMDB_TV_RE = re.compile(r"themoviedb\.org/tv/(\d+)", re.IGNORECASE)
-
-_RESULT_HEADER_RE = re.compile(r'🔍 "(.*?)" için')
 
 
 # ============================================================
@@ -295,51 +284,6 @@ async def _send_content_info(client: Client, chat_id: int, doc: dict, is_group: 
 
 
 # ============================================================
-# İsim araması — tek mesajda sonuç listesi
-# ============================================================
-def _build_results_keyboard(results: list, page: int, total_count: int) -> InlineKeyboardMarkup:
-    rows = []
-    for r in results:
-        media_type = r.get("media_type") or "movie"
-        title = r.get("title_tr") or r.get("title") or "?"
-        year = r.get("release_year") or ""
-        icon = "📺" if media_type == "tv" else "🎬"
-        label = f"{icon} {title}" + (f" ({year})" if year else "")
-        if len(label) > 60:
-            label = label[:59] + "…"
-        cb = f"ara_sel|{media_type}|{r.get('tmdb_id')}|{r.get('db_index')}"
-        rows.append([InlineKeyboardButton(label, callback_data=cb)])
-
-    nav = []
-    if page > 1:
-        nav.append(InlineKeyboardButton("◀️ Önceki", callback_data=f"ara_pg|{page - 1}"))
-    if page * PAGE_SIZE < total_count:
-        nav.append(InlineKeyboardButton("Sonraki ▶️", callback_data=f"ara_pg|{page + 1}"))
-    if nav:
-        rows.append(nav)
-
-    return InlineKeyboardMarkup(rows)
-
-
-async def _render_search_results(query_text: str, page: int) -> Tuple[str, Optional[InlineKeyboardMarkup]]:
-    result = await db.search_documents(query_text, page, PAGE_SIZE)
-    results = result.get("results") or []
-    total = result.get("total_count") or 0
-    safe_query = html.escape(query_text)
-
-    if not results:
-        return f'🔍 "{safe_query}" için sonuç bulunamadı.', None
-
-    start = (page - 1) * PAGE_SIZE + 1
-    end = min(page * PAGE_SIZE, total)
-    text = (
-        f'🔍 "{safe_query}" için {total} sonuç bulundu ({start}-{end}):\n'
-        "Bilgilerini görmek istediğiniz içeriğe dokunun."
-    )
-    return text, _build_results_keyboard(results, page, total)
-
-
-# ============================================================
 # /ara komutu
 # ============================================================
 @Client.on_message(filters.command("ara") & _ARA_ALLOWED_CHATS)
@@ -358,12 +302,10 @@ async def ara_command(client: Client, message: Message):
     if len(parts) < 2 or not parts[1].strip():
         return await message.reply_text(
             "ℹ️ <b>Kullanım:</b>\n"
-            "<code>/ara &lt;IMDB veya TMDB linki&gt;</code>\n"
-            "<code>/ara &lt;dizi veya film adı&gt;</code>\n\n"
+            "<code>/ara &lt;IMDB veya TMDB linki&gt;</code>\n\n"
             "<b>Örnekler:</b>\n"
             "• <code>/ara https://m.imdb.com/title/tt10986410/</code>\n"
-            "• <code>/ara https://www.themoviedb.org/movie/550</code>\n"
-            "• <code>/ara Breaking Bad</code>",
+            "• <code>/ara https://www.themoviedb.org/movie/550</code>",
             parse_mode=enums.ParseMode.HTML,
             quote=True,
         )
@@ -372,9 +314,11 @@ async def ara_command(client: Client, message: Message):
     kind, value = _parse_link(query_text)
 
     if kind is None:
-        text, markup = await _render_search_results(query_text, page=1)
         return await message.reply_text(
-            text, reply_markup=markup, disable_web_page_preview=True, quote=True,
+            "❌ <b>Geçerli bir IMDB veya TMDB linki değil.</b>\n"
+            "Yalnızca <code>/ara &lt;IMDB veya TMDB linki&gt;</code> ile arama yapılabilir.",
+            parse_mode=enums.ParseMode.HTML,
+            quote=True,
         )
 
     # ---- Link ile doğrudan arama ----
@@ -404,55 +348,6 @@ async def ara_command(client: Client, message: Message):
         )
 
     await _send_content_info(client, message.chat.id, doc, is_group=_is_group_chat(message.chat))
-
-
-# ============================================================
-# Callback: sayfalama (isim araması sonuçları)
-# ============================================================
-@Client.on_callback_query(filters.regex(r"^ara_pg\|(\d+)$"))
-async def ara_page_callback(client: Client, callback_query: CallbackQuery):
-    ok, reason = await _check_access(callback_query.from_user.id)
-    if not ok:
-        return await callback_query.answer(_plain(reason), show_alert=True)
-
-    page = int(callback_query.matches[0].group(1))
-    header = callback_query.message.text or ""
-    m = _RESULT_HEADER_RE.search(header)
-    if not m:
-        return await callback_query.answer(
-            "Arama bilgisi bulunamadı, lütfen /ara ile tekrar arayın.", show_alert=True
-        )
-
-    await callback_query.answer()
-    query_text = html.unescape(m.group(1))
-    text, markup = await _render_search_results(query_text, page)
-    try:
-        await callback_query.message.edit_text(text, reply_markup=markup, disable_web_page_preview=True)
-    except MessageNotModified:
-        pass
-
-
-# ============================================================
-# Callback: bir arama sonucuna dokunulunca içerik bilgisini gönder
-# ============================================================
-@Client.on_callback_query(filters.regex(r"^ara_sel\|(movie|tv)\|(\d+)\|(\d+)$"))
-async def ara_select_callback(client: Client, callback_query: CallbackQuery):
-    media_type, tmdb_id, db_index = callback_query.matches[0].groups()
-    ok, reason = await _check_access(callback_query.from_user.id)
-    if not ok:
-        return await callback_query.answer(_plain(reason), show_alert=True)
-
-    doc = await db.get_document(media_type, int(tmdb_id), int(db_index))
-    if not doc:
-        return await callback_query.answer("İçerik artık bulunamadı.", show_alert=True)
-    if not is_media_visible_to_member(doc, callback_query.from_user.id):
-        return await callback_query.answer("Bu içeriğe erişim izniniz yok.", show_alert=True)
-
-    await callback_query.answer("Bilgiler gönderiliyor…")
-    await _send_content_info(
-        client, callback_query.message.chat.id, doc,
-        is_group=_is_group_chat(callback_query.message.chat),
-    )
 
 
 # ============================================================

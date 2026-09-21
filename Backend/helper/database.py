@@ -2174,6 +2174,78 @@ class Database:
 
         return None
 
+    async def get_genre_statistics(self) -> Dict[str, Any]:
+        """Veritabanındaki (tüm storage shard'ları dahil) film ve dizi sayısını
+        ve her türden kaçar tane içerik olduğunu döndürür.
+
+        Tür adı olarak öncelikle Türkçe alan (genres_tr) kullanılır; boşsa
+        orijinal dildeki genres alanına düşer. Dönüş:
+            {
+                "movie_total": int, "tv_total": int,
+                "movie_genres": [{"genre": str, "count": int}, ...]  (azalan sırada),
+                "tv_genres":    [{"genre": str, "count": int}, ...]  (azalan sırada),
+            }
+        """
+        movie_total = 0
+        tv_total = 0
+        movie_genre_counts: Dict[str, int] = {}
+        tv_genre_counts: Dict[str, int] = {}
+
+        pipeline = [
+            {
+                "$project": {
+                    "genre_list": {
+                        "$cond": [
+                            {"$gt": [{"$size": {"$ifNull": ["$genres_tr", []]}}, 0]},
+                            "$genres_tr",
+                            {"$ifNull": ["$genres", []]},
+                        ]
+                    }
+                }
+            },
+            {"$unwind": {"path": "$genre_list", "preserveNullAndEmptyArrays": True}},
+            {
+                "$group": {
+                    "_id": {"$ifNull": ["$genre_list", "Bilinmiyor"]},
+                    "count": {"$sum": 1},
+                }
+            },
+        ]
+
+        for db_key, storage in self.dbs.items():
+            if db_key == "tracking" or storage is None:
+                continue
+            try:
+                movie_total += await storage["movie"].count_documents({})
+                tv_total += await storage["tv"].count_documents({})
+
+                async for row in storage["movie"].aggregate(pipeline):
+                    genre = row.get("_id") or "Bilinmiyor"
+                    movie_genre_counts[genre] = movie_genre_counts.get(genre, 0) + row.get("count", 0)
+
+                async for row in storage["tv"].aggregate(pipeline):
+                    genre = row.get("_id") or "Bilinmiyor"
+                    tv_genre_counts[genre] = tv_genre_counts.get(genre, 0) + row.get("count", 0)
+            except Exception as e:
+                LOGGER.warning(f"[get_genre_statistics] {db_key} okunamadı: {e}")
+                continue
+
+        movie_genres = sorted(
+            ({"genre": g, "count": c} for g, c in movie_genre_counts.items()),
+            key=lambda x: x["count"], reverse=True,
+        )
+        tv_genres = sorted(
+            ({"genre": g, "count": c} for g, c in tv_genre_counts.items()),
+            key=lambda x: x["count"], reverse=True,
+        )
+
+        return {
+            "movie_total": movie_total,
+            "tv_total": tv_total,
+            "movie_genres": movie_genres,
+            "tv_genres": tv_genres,
+        }
+
     @staticmethod
     def _quality_signature(q: Dict[str, Any]):
         return (

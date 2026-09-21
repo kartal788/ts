@@ -1213,6 +1213,124 @@
             </div>`;
     }
 
+    // ---- DeepL uyarıları -------------------------------------------------
+    // DeepL uyarısı şu durumlarda üretilir (sadece DeepL API anahtarı girilmişse):
+    //  - Yenileme/bitiş tarihi geldi veya geçti  (kırmızı)
+    //  - Bitmesine 1 gün kaldı                   (sarı)
+    //  - Kalan karakter <= DEEPL_LOW_CHARS_THRESHOLD (sarı) / 0 (kırmızı)
+    //  - DeepL API hata verdi (geçersiz anahtar, ağ hatası vb.) (kırmızı)
+    const DEEPL_LOW_CHARS_THRESHOLD = 5000;
+
+    function renderDeeplAlertRow(a) {
+        const danger = a.level === 'danger';
+        const border = danger ? 'border-red-500/10' : 'border-yellow-500/10';
+        const label  = danger ? 'text-red-300/80' : 'text-yellow-300/80';
+        const badge  = danger ? 'text-red-400 bg-red-500/10' : 'text-yellow-300 bg-yellow-500/10';
+        const icon   = a.icon || 'fa-triangle-exclamation';
+
+        return `
+            <div class="glass-panel rounded-2xl p-4 border ${border}">
+                <div class="flex items-start justify-between gap-3 flex-wrap">
+                    <div class="min-w-0">
+                        <span class="text-[9px] font-bold uppercase tracking-widest ${label}">DeepL</span>
+                        <h5 class="font-bold text-sm text-text">${escapeHtmlLocal(a.title)}</h5>
+                    </div>
+                    <span class="text-[10px] font-bold px-2 py-1 rounded-lg uppercase whitespace-nowrap ${badge}">
+                        <i class="fa-solid ${icon} mr-1"></i>${escapeHtmlLocal(a.badge)}
+                    </span>
+                </div>
+                <p class="text-xs text-text-secondary mt-3">${escapeHtmlLocal(a.message)}</p>
+            </div>`;
+    }
+
+    // Ayarlar + DeepL kullanım verisinden DeepL uyarı listesini üretir.
+    // Bu iki istekten biri başarısız olursa diğer uyarılar etkilenmesin diye
+    // hata fırlatmaz; sadece o kısmı atlar.
+    async function collectDeeplAlerts() {
+        const alerts = [];
+        try {
+            const [settingsRes, usageRes] = await Promise.all([
+                fetch('/api/admin/settings'),
+                fetch('/api/admin/settings/translate-usage'),
+            ]);
+            if (!settingsRes.ok) return alerts;
+
+            const settingsData = await settingsRes.json();
+            const st = (settingsData && settingsData.settings) || {};
+            const hasKey = !!String(st.deepl_api || '').trim();
+            if (!hasKey) return alerts; // DeepL kullanılmıyor, uyarı yok
+
+            // 1) Bitiş / yenileme tarihi
+            const renewalStr = String(st.deepl_renewal_date || '').trim();
+            if (renewalStr) {
+                const today = new Date(); today.setHours(0, 0, 0, 0);
+                const renewal = new Date(renewalStr + 'T00:00:00');
+                if (!isNaN(renewal.getTime())) {
+                    const daysLeft = Math.round((renewal - today) / 86400000);
+                    const dateTr = renewal.toLocaleDateString('tr-TR');
+                    if (daysLeft < 0) {
+                        alerts.push({
+                            level: 'danger', icon: 'fa-calendar-xmark',
+                            title: 'DeepL abonelik süresi bitti',
+                            badge: 'Süre doldu',
+                            message: `Bitiş/yenileme tarihi ${dateTr} idi (${Math.abs(daysLeft)} gün önce). Aboneliği yenileyip Ayarlar'dan tarihi güncelleyin.`,
+                        });
+                    } else if (daysLeft === 0) {
+                        alerts.push({
+                            level: 'danger', icon: 'fa-calendar-xmark',
+                            title: 'DeepL abonelik süresi bugün bitiyor',
+                            badge: 'Bugün bitiyor',
+                            message: `Bitiş/yenileme tarihi bugün (${dateTr}). Aboneliği yenileyip Ayarlar'dan tarihi güncelleyin.`,
+                        });
+                    } else if (daysLeft === 1) {
+                        alerts.push({
+                            level: 'warning', icon: 'fa-calendar-day',
+                            title: 'DeepL abonelik süresinin bitmesine 1 gün kaldı',
+                            badge: '1 gün kaldı',
+                            message: `Bitiş/yenileme tarihi ${dateTr}. Yenilemeyi unutmayın.`,
+                        });
+                    }
+                }
+            }
+
+            // 2) Kalan karakter + 3) API hatası
+            if (!usageRes.ok) return alerts;
+            const usageData = await usageRes.json();
+            const du = usageData && usageData.deepl_usage;
+            if (!du) return alerts;
+
+            if (du.error) {
+                alerts.push({
+                    level: 'danger', icon: 'fa-plug-circle-xmark',
+                    title: 'DeepL API hata veriyor',
+                    badge: 'API hatası',
+                    message: `DeepL kullanım bilgisi alınamadı: ${du.error}`,
+                });
+            } else if (du.character_limit && du.character_count !== null && du.character_count !== undefined) {
+                const remaining = du.character_limit - du.character_count;
+                const fmt = n => Number(n).toLocaleString('tr-TR');
+                if (remaining <= 0) {
+                    alerts.push({
+                        level: 'danger', icon: 'fa-battery-empty',
+                        title: 'DeepL karakter limiti doldu',
+                        badge: 'Limit doldu',
+                        message: `Kullanım: ${fmt(du.character_count)} / ${fmt(du.character_limit)}. Çeviriler Google/MyMemory'ye düşecek.`,
+                    });
+                } else if (remaining <= DEEPL_LOW_CHARS_THRESHOLD) {
+                    alerts.push({
+                        level: 'warning', icon: 'fa-battery-quarter',
+                        title: 'DeepL kalan karakter azaldı',
+                        badge: `${fmt(remaining)} karakter kaldı`,
+                        message: `Kullanım: ${fmt(du.character_count)} / ${fmt(du.character_limit)}. Kalan karakter ${fmt(DEEPL_LOW_CHARS_THRESHOLD)} veya altına düştü.`,
+                    });
+                }
+            }
+        } catch (e) {
+            console.error('DeepL uyarıları alınamadı:', e);
+        }
+        return alerts;
+    }
+
     function renderAlertsEmptyState() {
         return `
             <div class="glass-panel p-8 rounded-[2rem] text-center border-dashed border-hairline">
@@ -1281,7 +1399,10 @@
         const badge = document.getElementById('alerts-count-badge');
 
         try {
-            const response = await fetch('/api/admin/uyarilar');
+            const [response, deeplAlerts] = await Promise.all([
+                fetch('/api/admin/uyarilar'),
+                collectDeeplAlerts(),
+            ]);
             if (!response.ok) throw new Error('HTTP ' + response.status);
             const data = await response.json();
 
@@ -1297,7 +1418,8 @@
             // döndürdüğü 'total' yerine (o istek uyarılarını da içeriyor) burada
             // gösterilen kategorilerden ayrıca hesaplanıyor.
             const totalCount = usageAlerts.length + dailyLimitAlerts.length + pendingSubs.length
-                + expiringSoon.length + expiredButActive.length + missingImdb.length;
+                + expiringSoon.length + expiredButActive.length + missingImdb.length
+                + deeplAlerts.length;
 
             if (badge) {
                 if (totalCount === 0) {
@@ -1312,6 +1434,7 @@
             // Tüm uyarı kategorilerini tek bir listede (her biri önceden render
             // edilmiş bir HTML parçası olarak) topla; sayfalama bu liste üzerinden yapılır.
             ALERTS_ITEMS = [
+                ...deeplAlerts.map(renderDeeplAlertRow),
                 ...expiredButActive.map(renderExpiredButActiveAlertRow),
                 ...dailyLimitAlerts.map(renderDailyLimitAlertRow),
                 ...expiringSoon.map(renderExpiringSoonAlertRow),

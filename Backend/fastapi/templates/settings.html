@@ -103,6 +103,24 @@
                     <label class="s-label">TMDB API Anahtarı</label>
                     <input class="s-input" id="s-tmdb_api" value="{{ settings.tmdb_api }}">
                 </div>
+                <div>
+                    <label class="s-label">DeepL API Anahtarı (opsiyonel)</label>
+                    <input class="s-input" id="s-deepl_api" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx:fx" value="{{ settings.deepl_api }}">
+                </div>
+                <div>
+                    <label class="s-label">DeepL Yenileme / Bitiş Tarihi (elle girilir)</label>
+                    <input class="s-input" type="date" id="s-deepl_renewal_date" value="{{ settings.deepl_renewal_date }}">
+                </div>
+                <div class="md:col-span-2">
+                    <label class="s-label">Çeviri Kullanımı</label>
+                    <div id="translate-usage-box" class="rounded-xl border p-4 text-sm" style="border-color:var(--border-color,rgba(255,255,255,0.1))">
+                        <div class="flex items-center justify-between mb-3">
+                            <span class="text-text-sec text-xs">Google / DeepL / MyMemory durumu ve DeepL karakter kotası</span>
+                            <button type="button" id="translate-usage-refresh" class="add-btn" onclick="loadTranslateUsage()"><i class="fa-solid fa-rotate"></i> Yenile</button>
+                        </div>
+                        <div id="translate-usage-content" class="text-text-sec text-xs">Yükleniyor…</div>
+                    </div>
+                </div>
                 <div class="flex flex-col justify-end gap-3">
                     <label class="toggle-wrap">
                         <input type="checkbox" class="toggle-input" id="s-replace_mode" {% if settings.replace_mode %}checked{% endif %}>
@@ -936,6 +954,8 @@ function renderSettings(s) {
     document.getElementById('s-eklenti_logosu').value = s.eklenti_logosu || '';
     document.getElementById('s-bolum_resimi').value = s.bolum_resimi || '';
     document.getElementById('s-tmdb_api').value = s.tmdb_api || '';
+    document.getElementById('s-deepl_api').value = s.deepl_api || '';
+    document.getElementById('s-deepl_renewal_date').value = s.deepl_renewal_date || '';
     document.getElementById('s-replace_mode').checked = !!s.replace_mode;
     document.getElementById('s-hide_catalog').checked = !!s.hide_catalog;
     document.getElementById('s-websitesi').checked = !!s.websitesi;
@@ -1009,6 +1029,8 @@ function buildPayload() {
         eklenti_logosu: document.getElementById('s-eklenti_logosu').value.trim(),
         bolum_resimi: document.getElementById('s-bolum_resimi').value.trim(),
         tmdb_api: document.getElementById('s-tmdb_api').value.trim(),
+        deepl_api: document.getElementById('s-deepl_api').value.trim(),
+        deepl_renewal_date: document.getElementById('s-deepl_renewal_date').value,
         replace_mode: document.getElementById('s-replace_mode').checked,
         hide_catalog: document.getElementById('s-hide_catalog').checked,
         websitesi: document.getElementById('s-websitesi').checked,
@@ -1182,6 +1204,70 @@ function spinIcon(btn, on) {
     if (icon) icon.classList.toggle('fa-spin', on);
 }
 
+async function loadTranslateUsage() {
+    const box = document.getElementById('translate-usage-content');
+    const btn = document.getElementById('translate-usage-refresh');
+    spinIcon(btn, true);
+    try {
+        const res = await fetch('/api/admin/settings/translate-usage');
+        const data = await res.json();
+        if (!data.success) throw new Error('failed');
+
+        const eng = data.engines || {};
+        const engineRow = (name, label) => {
+            const st = eng[name] || { success: 0, fail: 0 };
+            const total = st.success + st.fail;
+            const rate = total ? Math.round((st.success / total) * 100) : null;
+            return `<div class="flex items-center justify-between py-1.5 border-b" style="border-color:var(--border-color,rgba(255,255,255,0.06))">
+                <span>${label}</span>
+                <span>${st.success} başarılı / ${st.fail} başarısız${rate !== null ? ` (%${rate})` : ''}</span>
+            </div>`;
+        };
+
+        let deeplBlock = '<div class="py-1.5 text-text-sec">DeepL key girilmemiş.</div>';
+        const du = data.deepl_usage;
+        if (du && du.error) {
+            deeplBlock = `<div class="py-1.5" style="color:#ef4444">DeepL kullanım bilgisi alınamadı: ${escapeHtml(du.error)}</div>`;
+        } else if (du && du.character_limit) {
+            const pct = du.percent_used ?? 0;
+            const barColor = pct >= 90 ? '#ef4444' : (pct >= 70 ? '#f59e0b' : '#22c55e');
+            deeplBlock = `
+                <div class="py-1.5">
+                    <div class="flex items-center justify-between mb-1">
+                        <span>DeepL karakter kullanımı</span>
+                        <span>${du.character_count.toLocaleString('tr-TR')} / ${du.character_limit.toLocaleString('tr-TR')} (%${pct})</span>
+                    </div>
+                    <div style="background:rgba(255,255,255,0.08);border-radius:999px;height:6px;overflow:hidden">
+                        <div style="width:${Math.min(pct, 100)}%;height:100%;background:${barColor}"></div>
+                    </div>
+                </div>`;
+        }
+
+        const renewalInput = document.getElementById('s-deepl_renewal_date').value;
+        let renewalBlock = '';
+        if (renewalInput) {
+            const today = new Date(); today.setHours(0,0,0,0);
+            const renewal = new Date(renewalInput + 'T00:00:00');
+            const daysLeft = Math.round((renewal - today) / 86400000);
+            const daysText = daysLeft > 0 ? `${daysLeft} gün kaldı` : (daysLeft === 0 ? 'Bugün yenileniyor' : `${Math.abs(daysLeft)} gün önce doldu`);
+            renewalBlock = `<div class="py-1.5 border-t mt-1 pt-2" style="border-color:var(--border-color,rgba(255,255,255,0.06))">
+                DeepL yenileme: <b>${renewalInput}</b> — ${daysText}
+            </div>`;
+        }
+
+        box.innerHTML =
+            engineRow('google', 'Google Translate') +
+            engineRow('deepl', 'DeepL') +
+            engineRow('mymemory', 'MyMemory (yedek)') +
+            deeplBlock + renewalBlock +
+            `<div class="pt-2 text-[10px] text-text-sec">Sayaçlar süreç son başladığından beri; Google resmi bir API olmadığından gerçek bir kotası yok, bu sayı sadece o an sağlıklı çalışıp çalışmadığını gösterir.</div>`;
+    } catch (e) {
+        box.innerHTML = `<span style="color:#ef4444">Kullanım bilgisi yüklenemedi.</span>`;
+    } finally {
+        spinIcon(btn, false);
+    }
+}
+
 async function loadDbStats(btn) {
     const grid = document.getElementById('stats-grid');
     spinIcon(btn, true);
@@ -1227,6 +1313,7 @@ function toggleLiveLogs() {
 }
 
 document.addEventListener('DOMContentLoaded', () => renderSettings(currentSettings));
+document.addEventListener('DOMContentLoaded', () => loadTranslateUsage());
 document.addEventListener('DOMContentLoaded', () => loadDbStats());
 document.addEventListener('DOMContentLoaded', () => loadLogs());
 document.addEventListener('DOMContentLoaded', () => loadSettingsFiles());

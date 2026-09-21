@@ -6,7 +6,6 @@ from collections import defaultdict
 import psutil
 from pyrogram import Client, filters, enums
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
-from deep_translator import GoogleTranslator
 from Backend.helper.metadata import metadata
 from Backend.helper.custom_filter import CustomFilters
 from Backend.config import Telegram

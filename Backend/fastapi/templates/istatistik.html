@@ -4,51 +4,75 @@
 {% block content %}
 <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-8">
 
-  <!-- ══════════════════════════════════════════ TOKEN KARTI (EN ÜSTTE) -->
+  <!-- ══════════════════════════════════════════ İÇERİK / TÜR İSTATİSTİKLERİ -->
   <section>
     <h2 class="text-lg font-semibold mb-3 flex items-center gap-2">
-      <i class="fas fa-key text-primary"></i> API Tokenları
+      <i class="fas fa-layer-group text-primary"></i> Veritabanındaki İçerikler
     </h2>
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-      {% for tok in api_tokens %}
-      <div class="theme-card rounded-xl p-4 border border-gray-700 hover:border-primary transition-colors">
-        <div class="flex items-start justify-between mb-2">
-          <span class="font-medium text-sm truncate max-w-[70%]">{{ tok.name or ("Token " ~ loop.index) }}</span>
-          <span class="text-xs px-2 py-0.5 rounded-full
-            {% if tok.subscription_status == 'active' %}bg-green-600 text-white
-            {% else %}bg-gray-600 text-gray-200{% endif %}">
-            {{ tok.subscription_status or "pasif" }}
-          </span>
+
+    <div class="grid grid-cols-2 gap-3 mb-4">
+      <div class="theme-card rounded-xl p-4 border border-gray-700 flex items-center gap-3">
+        <i class="fas fa-film text-2xl text-primary"></i>
+        <div>
+          <div class="text-2xl font-bold">{{ genre_stats.movie_total }}</div>
+          <div class="text-xs theme-text-secondary">Toplam Film</div>
         </div>
-        <div class="font-mono text-xs theme-text-secondary mb-3 truncate">{{ tok.token }}</div>
-        <div class="grid grid-cols-2 gap-1 text-xs">
-          <div class="theme-text-secondary">Günlük</div>
-          <div class="text-right font-medium">
-            {% set d = tok.usage.daily.bytes if tok.usage and tok.usage.daily else 0 %}
-            {{ "%.2f"|format(d / 1073741824) }} GB
-          </div>
-          <div class="theme-text-secondary">Aylık</div>
-          <div class="text-right font-medium">
-            {% set m = tok.usage.monthly.bytes if tok.usage and tok.usage.monthly else 0 %}
-            {{ "%.2f"|format(m / 1073741824) }} GB
-          </div>
-          <div class="theme-text-secondary">Toplam</div>
-          <div class="text-right font-medium text-primary">
-            {% set t = tok.usage.total_bytes if tok.usage else 0 %}
-            {{ "%.2f"|format(t / 1073741824) }} GB
-          </div>
-        </div>
-        {% if tok.limits %}
-        <div class="mt-2 pt-2 border-t border-gray-700 text-xs theme-text-secondary">
-          Limit: {{ tok.limits.daily_limit_gb or "∞" }} GB/gün · {{ tok.limits.monthly_limit_gb or "∞" }} GB/ay
-        </div>
-        {% endif %}
       </div>
-      {% else %}
-      <div class="col-span-full theme-card rounded-xl p-6 text-center theme-text-secondary">
-        Henüz token yok.
+      <div class="theme-card rounded-xl p-4 border border-gray-700 flex items-center gap-3">
+        <i class="fas fa-tv text-2xl text-primary"></i>
+        <div>
+          <div class="text-2xl font-bold">{{ genre_stats.tv_total }}</div>
+          <div class="text-xs theme-text-secondary">Toplam Dizi</div>
+        </div>
       </div>
-      {% endfor %}
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <!-- Film türleri -->
+      <div class="theme-card rounded-xl p-4 border border-gray-700">
+        <h3 class="text-sm font-semibold mb-3 flex items-center gap-2 theme-text-secondary">
+          <i class="fas fa-film"></i> Türe Göre Filmler
+        </h3>
+        {% set max_movie_genre = (genre_stats.movie_genres | map(attribute='count') | max) if genre_stats.movie_genres else 1 %}
+        <div class="space-y-2">
+          {% for g in genre_stats.movie_genres %}
+          <div>
+            <div class="flex items-center justify-between text-xs mb-1">
+              <span>{{ g.genre }}</span>
+              <span class="theme-text-secondary font-mono">{{ g.count }}</span>
+            </div>
+            <div class="h-2 rounded-full bg-gray-700 w-full">
+              <div class="h-2 rounded-full bg-primary transition-all" style="width:{{ (g.count / max_movie_genre * 100) | int }}%"></div>
+            </div>
+          </div>
+          {% else %}
+          <div class="text-center theme-text-secondary text-sm py-4">Veri yok</div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <!-- Dizi türleri -->
+      <div class="theme-card rounded-xl p-4 border border-gray-700">
+        <h3 class="text-sm font-semibold mb-3 flex items-center gap-2 theme-text-secondary">
+          <i class="fas fa-tv"></i> Türe Göre Diziler
+        </h3>
+        {% set max_tv_genre = (genre_stats.tv_genres | map(attribute='count') | max) if genre_stats.tv_genres else 1 %}
+        <div class="space-y-2">
+          {% for g in genre_stats.tv_genres %}
+          <div>
+            <div class="flex items-center justify-between text-xs mb-1">
+              <span>{{ g.genre }}</span>
+              <span class="theme-text-secondary font-mono">{{ g.count }}</span>
+            </div>
+            <div class="h-2 rounded-full bg-gray-700 w-full">
+              <div class="h-2 rounded-full bg-blue-400 transition-all" style="width:{{ (g.count / max_tv_genre * 100) | int }}%"></div>
+            </div>
+          </div>
+          {% else %}
+          <div class="text-center theme-text-secondary text-sm py-4">Veri yok</div>
+          {% endfor %}
+        </div>
+      </div>
     </div>
   </section>
 

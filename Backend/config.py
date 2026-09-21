@@ -20,6 +20,11 @@ class Telegram:
 
     TMDB_API = getenv("TMDB_API", "")
 
+    #----- DeepL çeviri API anahtarı. Boşsa çeviri zincirinde DeepL atlanır
+    #----- (Google -> [DeepL varsa] -> MyMemory). Free-tier key'ler ":fx" ile
+    #----- biter; hangi endpoint kullanılacağı buna göre otomatik seçilir.
+    DEEPL_API = getenv("DEEPL_API", "")
+
     UPSTREAM_REPO = getenv("UPSTREAM_REPO", "")
     UPSTREAM_BRANCH = getenv("UPSTREAM_BRANCH", "")
 

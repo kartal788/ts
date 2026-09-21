@@ -31,6 +31,16 @@ _DEFAULTS: Dict[str, Any] = {
     "hide_catalog": False,
     "auth_channels": [],
     "tmdb_api": "",
+    #----- DeepL çeviri API anahtarı (bkz. Backend.helper.metadata çeviri zinciri).
+    #----- Boş bırakılırsa DeepL adımı atlanır, Google -> MyMemory zincirine düşülür.
+    "deepl_api": "",
+    #----- DeepL API kendi abonelik/faturalama dönemini (başlangıç-bitiş)
+    #----- DÖNMÜYOR, sadece karakter kullanımı/kotasını veriyor (bkz.
+    #----- Backend.helper.metadata.get_deepl_usage). Bu yüzden dönem
+    #----- tarihleri panelde kullanıcı tarafından elle girilir; "kalan gün"
+    #----- deepl_renewal_date'ten istemci tarafında hesaplanır.
+    "deepl_billing_start": "",
+    "deepl_renewal_date": "",
     "base_url": "",
     #----- Duyurulardaki Stremio/Nuvio "aç" butonlarında kullanılan alan adı.
     #----- Kasıtlı olarak base_url'den AYRI tutulur: bu genellikle gerçek
@@ -106,6 +116,7 @@ _SETTINGS_TO_TELEGRAM_ATTR: Dict[str, str] = {
     "hide_catalog": "HIDE_CATALOG",
     "auth_channels": "AUTH_CHANNEL",
     "tmdb_api": "TMDB_API",
+    "deepl_api": "DEEPL_API",
     "base_url": "BASE_URL",
     "upstream_repo": "UPSTREAM_REPO",
     "upstream_branch": "UPSTREAM_BRANCH",
@@ -147,6 +158,7 @@ def _seed_from_env() -> Dict[str, Any]:
         "hide_catalog":         Telegram.HIDE_CATALOG,
         "auth_channels":        list(Telegram.AUTH_CHANNEL),
         "tmdb_api":             Telegram.TMDB_API,
+        "deepl_api":            Telegram.DEEPL_API,
         "base_url":             Telegram.BASE_URL,
         "upstream_repo":        Telegram.UPSTREAM_REPO,
         "upstream_branch":      Telegram.UPSTREAM_BRANCH,

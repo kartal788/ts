@@ -1,4 +1,5 @@
 import asyncio
+from typing import Dict
 import traceback
 import time
 import threading
@@ -6,14 +7,14 @@ import httpx
 import PTN
 import re
 from re import compile, IGNORECASE
-from Backend.helper.imdb import get_detail, get_season, search_title
+from Backend.helper.imdb import get_detail, get_season, search_title, title_similarity
 from themoviedb import aioTMDb
 from Backend.config import Telegram
 import Backend
 from Backend.logger import LOGGER
 from Backend.helper.encrypt import encode_string
 from Backend.helper.split_files import parse_split_info
-from deep_translator import GoogleTranslator
+from deep_translator import GoogleTranslator, MyMemoryTranslator
 
 # ----------------- Configuration -----------------
 DELAY = 0
@@ -234,19 +235,78 @@ def extract_default_id(url: str) -> tuple[str | None, str | None]:
 
     return None, None
 
-async def safe_imdb_search(title: str, type_: str) -> str | None:
-    key = f"imdb::{type_}::{title}"
+async def safe_imdb_search(title: str, type_: str, year=None, prefer_year: bool = False) -> str | None:
+    key = f"imdb::{type_}::{title}::{year}"
     if key in IMDB_CACHE:
         return IMDB_CACHE[key]
     try:
         async with API_SEMAPHORE:
-            result = await search_title(query=title, type=type_)
+            result = await search_title(query=title, type=type_, year=year, prefer_year=prefer_year)
         imdb_id = result["id"] if result else None
+        if year and not imdb_id:
+            LOGGER.info(f"IMDb search: '{title}' ({year}) için başlık/yıl uyumlu sonuç yok → TMDb'ye düşülecek")
         IMDB_CACHE[key] = imdb_id
         return imdb_id
     except Exception as e:
         LOGGER.warning(f"IMDb search failed for '{title}' [{type_}]: {e}")
         return None
+
+# IMDb (Cinemeta) adayının başlığı dosya adındaki başlığa bu oranın altında
+# benziyorsa aday şüpheli sayılır ve TMDb ile çapraz kontrol edilir.
+ANTHOLOGY_SUSPECT_SIM = 0.75
+# TMDb sonucunun kabul edilmesi için gereken asgari benzerlik ve IMDb adayına
+# göre asgari üstünlük.
+ANTHOLOGY_TMDB_MIN_SIM = 0.85
+ANTHOLOGY_TMDB_MARGIN = 0.15
+
+
+async def _anthology_tmdb_override(title: str, imdb_id: str, imdb_tv: dict, year=None) -> int | None:
+    """
+    IMDb/Cinemeta antoloji yapımlarını tek bir "çatı dizi" altında toplar
+    (ör. "Monster" = Dahmer + Menendez + Ed Gein + Lizzie Borden), oysa TMDb'de
+    her bölüm/yapım ayrı bir dizidir ve dosya adları da bu yüzden S01E01 ile başlar.
+    Sonuç: "Monster The Lizzie Borden Story S01E01" → Cinemeta "Monster"ı döndürür →
+    bölüm yanlışlıkla Dahmer'in S01E01'ine eklenir.
+
+    Bu fonksiyon, aramadan gelen IMDb adayının başlığı (Cinemeta + TMDb adları:
+    tr/orijinal/en/de) dosya adındaki başlığa yeterince benzemiyorsa TMDb'de tam
+    başlıkla arar. TMDb sonucu belirgin şekilde daha iyi eşleşiyorsa o TMDb ID'sini
+    döndürür; aksi halde None döner ve mevcut IMDb akışı aynen sürer.
+    """
+    try:
+        raw = (imdb_tv or {}).get("moviedb_id")
+        cand_tmdb = int(raw) if raw and str(raw).isdigit() else await _resolve_tmdb_id_from_imdb(imdb_id, "tv")
+
+        names = [(imdb_tv or {}).get("title")]
+        if cand_tmdb:
+            det = await _tmdb_tv_details(cand_tmdb)
+            if det:
+                names += [
+                    getattr(det, "name", ""), getattr(det, "original_name", ""),
+                    getattr(det, "name_en", ""), getattr(det, "name_de", ""),
+                ]
+        imdb_sim = max((title_similarity(title, n) for n in names if n), default=0.0)
+        if imdb_sim >= ANTHOLOGY_SUSPECT_SIM:
+            return None  # başlık uyuyor → normal IMDb akışı
+
+        hit = await safe_tmdb_search(title, "tv", year)
+        if not hit or (cand_tmdb and hit.id == cand_tmdb):
+            return None
+        hit_sim = max(
+            (title_similarity(title, n) for n in (getattr(hit, "name", ""), getattr(hit, "original_name", "")) if n),
+            default=0.0,
+        )
+        if hit_sim >= ANTHOLOGY_TMDB_MIN_SIM and hit_sim > imdb_sim + ANTHOLOGY_TMDB_MARGIN:
+            LOGGER.info(
+                f"Antoloji/çatı dizi düzeltmesi: '{title}' IMDb {imdb_id} (tmdb={cand_tmdb}, "
+                f"benzerlik={imdb_sim:.2f}) ile eşleşmiyor → TMDb {hit.id} kullanılıyor "
+                f"(benzerlik={hit_sim:.2f})"
+            )
+            return hit.id
+    except Exception as e:
+        LOGGER.warning(f"Antoloji doğrulaması başarısız [{title}]: {e}")
+    return None
+
 
 async def safe_tmdb_search(title: str, type_: str, year=None):
     key = f"tmdb_search::{type_}::{title}::{year}"
@@ -587,14 +647,19 @@ def _is_translate_error_page(text: str) -> bool:
     return any(sig in lowered for sig in _TRANSLATE_ERROR_SIGNATURES)
 
 
-#----- Google Translate scraping (deep_translator) resmi bir API olmadığı için
-#----- rastgele/geçici olarak (özellikle art arda çok sayıda istek gittiğinde)
-#----- kendi hata sayfasını dönebiliyor. Tek denemede pes edip orijinal metne
-#----- düşmek yerine, kısa bir bekleme ile birkaç kez daha denemek çoğu geçici
-#----- hatayı kendiliğinden çözüyor. Deneme sayısını abartmıyoruz ki zaten
-#----- baskı altındaki Google'a daha da fazla istek göndermeyelim.
-_TRANSLATE_MAX_ATTEMPTS = 3
-_TRANSLATE_RETRY_DELAY_SECONDS = 20
+#----- Çeviri zinciri: Google (scraping, ücretsiz) -> DeepL (resmi API, ancak
+#----- DEEPL_API ayarlıysa devreye girer) -> MyMemory (resmi API, ücretsiz,
+#----- key gerekmez). Bir motor tükenmeden bir sonrakine geçilmez; zincirin
+#----- tamamı başarısız olursa orijinal metne düşülür (bkz. _translate_with_retry).
+#----- Her motor için ayrı deneme sayısı/bekleme süresi: Google scraping
+#----- olduğu için birkaç kez denemeye değer ama uzun beklemelerle Google'a
+#----- ek yük bindirmemek adına kısa tutulur; DeepL/MyMemory resmi API
+#----- oldukları için transient ağ hatalarına karşı sadece 1-2 kez denenir.
+_ENGINE_RETRY_CONFIG = {
+    "google": {"attempts": 2, "delay": 5},
+    "deepl": {"attempts": 2, "delay": 3},
+    "mymemory": {"attempts": 2, "delay": 3},
+}
 
 #----- GÖZLEM: Google'ın kötüye kullanım tespiti, aynı oturum/IP'den art arda
 #----- çok sayıda istek geldikçe KADEMELİ OLARAK SERTLEŞİYOR gibi görünüyor —
@@ -634,30 +699,170 @@ TRANSLATE_RECENT_FAIL:    _LRUCache = _LRUCache(maxsize=1000)
 TRANSLATE_DE_RECENT_FAIL: _LRUCache = _LRUCache(maxsize=1000)
 
 
-def _translate_with_retry(text: str, target: str, cache: "_LRUCache", log_lang_label: str) -> str:
-    last_result = text
-    for attempt in range(1, _TRANSLATE_MAX_ATTEMPTS + 1):
-        _throttle_google_translate_call()
-        try:
-            translated = GoogleTranslator(source="auto", target=target).translate(text)
-        except Exception:
-            translated = None
+#----- Panelde ("Ayarlar" sayfası, Çeviri Kullanımı kartı) gösterilmek üzere
+#----- her motorun süreç başlangıcından bu yana kaç kez başarılı/başarısız
+#----- olduğunu sayan basit, thread-safe bir sayaç. Google resmi bir API
+#----- olmadığı (scraping) için gerçek bir "limit" kavramı yok; bu sayaçlar
+#----- onun yerine "şu an sağlıklı çalışıyor mu" sinyalini veriyor.
+_ENGINE_STATS_LOCK = threading.Lock()
+_ENGINE_STATS: Dict[str, Dict[str, int]] = {
+    "google": {"success": 0, "fail": 0},
+    "deepl": {"success": 0, "fail": 0},
+    "mymemory": {"success": 0, "fail": 0},
+}
 
-        if translated and not _is_translate_error_page(translated):
-            cache[text] = translated
-            return translated
 
-        last_result = text
-        if attempt < _TRANSLATE_MAX_ATTEMPTS:
-            time.sleep(_TRANSLATE_RETRY_DELAY_SECONDS)
+def _record_engine_result(engine: str, ok: bool) -> None:
+    with _ENGINE_STATS_LOCK:
+        _ENGINE_STATS[engine]["success" if ok else "fail"] += 1
 
-    #----- Tüm denemeler başarısız oldu: orijinal metne düş, SONUCU CACHE'LEME
-    #----- ki bir sonraki gerçek çağrıda yeniden denenebilsin.
-    LOGGER.warning(
-        f"Çeviri ({log_lang_label}) {_TRANSLATE_MAX_ATTEMPTS} denemede de başarısız oldu "
-        f"(Google hata sayfası/erişim sorunu), orijinal metin kullanılıyor: {text[:60]!r}"
+
+def get_translate_engine_stats() -> Dict[str, Dict[str, int]]:
+    """Süreç başlangıcından bu yana motor başına başarı/başarısızlık sayıları."""
+    with _ENGINE_STATS_LOCK:
+        return {k: dict(v) for k, v in _ENGINE_STATS.items()}
+
+
+#----- DeepL'in resmi /v2/usage uç noktasından bu ayki karakter kullanımı ve
+#----- kotayı çeker. DeepL API bir "abonelik dönemi başlangıcı/bitişi" alanı
+#----- DÖNMÜYOR — sadece character_count / character_limit veriyor. Dönem
+#----- tarihleri (varsa) panelde kullanıcının kendi girdiği alanlardan gelir.
+async def get_deepl_usage() -> "dict | None":
+    api_key = (getattr(Telegram, "DEEPL_API", "") or "").strip()
+    if not api_key:
+        return None
+    base_url = (
+        "https://api-free.deepl.com/v2/usage"
+        if api_key.endswith(":fx")
+        else "https://api.deepl.com/v2/usage"
     )
-    return last_result
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                base_url,
+                headers={"Authorization": f"DeepL-Auth-Key {api_key}"},
+            )
+        if resp.status_code != 200:
+            try:
+                msg = resp.json().get("message")
+            except Exception:
+                msg = None
+            return {"error": msg or f"HTTP {resp.status_code}"}
+        data = resp.json()
+        used = data.get("character_count")
+        limit = data.get("character_limit")
+        return {
+            "character_count": used,
+            "character_limit": limit,
+            "percent_used": round((used / limit) * 100, 1) if used is not None and limit else None,
+        }
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
+def _google_translate_once(text: str, target: str) -> "str | None":
+    _throttle_google_translate_call()
+    try:
+        translated = GoogleTranslator(source="auto", target=target).translate(text)
+    except Exception:
+        return None
+    if translated and not _is_translate_error_page(translated):
+        return translated
+    return None
+
+
+#----- DeeplTranslator (deep_translator) source="auto" verildiğinde bunu
+#----- OLDUĞU GİBİ DeepL API'sine "source_lang=auto" olarak gönderiyor;
+#----- DeepL bu değeri KABUL ETMİYOR (source_lang otomatik algılama için
+#----- parametrenin TAMAMEN GÖNDERİLMEMESİNİ bekliyor). Bu yüzden hazır
+#----- sınıf yerine doğrudan resmi API'ye istek atıyoruz — source_lang'i
+#----- hiç göndermeyip DeepL'in kendi otomatik dil tespitine bırakıyoruz.
+#----- Free-tier key'ler ":fx" ile biter ve sadece api-free uç noktasında
+#----- çalışır; Pro key'ler ise sadece api.deepl.com'da çalışır, bu yüzden
+#----- endpoint key'in sonuna bakılarak otomatik seçilir.
+def _deepl_translate_once(text: str, target: str, api_key: str) -> "str | None":
+    if not api_key:
+        return None
+    base_url = (
+        "https://api-free.deepl.com/v2/translate"
+        if api_key.strip().endswith(":fx")
+        else "https://api.deepl.com/v2/translate"
+    )
+    try:
+        resp = httpx.post(
+            base_url,
+            headers={"Authorization": f"DeepL-Auth-Key {api_key}"},
+            data={"text": text, "target_lang": target.upper()},
+            timeout=15,
+        )
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
+        translated = data["translations"][0]["text"]
+        return translated or None
+    except Exception:
+        return None
+
+
+def _mymemory_translate_once(text: str, target: str) -> "str | None":
+    try:
+        translated = MyMemoryTranslator(source="auto", target=target).translate(text)
+    except Exception:
+        return None
+    if translated and not _is_translate_error_page(translated):
+        return translated
+    return None
+
+
+#----- Zincir: Google -> (DEEPL_API ayarlıysa) DeepL -> MyMemory. Her motor
+#----- kendi deneme sayısı kadar denenir (_ENGINE_RETRY_CONFIG), tükenince
+#----- bir sonraki motora geçilir. Hiçbiri başarılı olamazsa orijinal metne
+#----- düşülür ve sonuç CACHE'LENMEZ (bir sonraki çağrıda baştan denensin diye).
+def _translate_with_retry(text: str, target: str, cache: "_LRUCache", log_lang_label: str) -> str:
+    deepl_key = (getattr(Telegram, "DEEPL_API", "") or "").strip()
+
+    engines = [
+        ("google", lambda: _google_translate_once(text, target)),
+    ]
+    if deepl_key:
+        engines.append(("deepl", lambda: _deepl_translate_once(text, target, deepl_key)))
+    engines.append(("mymemory", lambda: _mymemory_translate_once(text, target)))
+
+    tried = []
+    for engine_name, call in engines:
+        cfg = _ENGINE_RETRY_CONFIG[engine_name]
+        tried.append(engine_name)
+        for attempt in range(1, cfg["attempts"] + 1):
+            translated = call()
+            _record_engine_result(engine_name, bool(translated))
+            if translated:
+                cache[text] = translated
+                return translated
+            if attempt < cfg["attempts"]:
+                time.sleep(cfg["delay"])
+
+    #----- Zincirdeki tüm motorlar başarısız oldu: orijinal metne düş,
+    #----- SONUCU CACHE'LEME ki bir sonraki gerçek çağrıda yeniden denenebilsin.
+    LOGGER.warning(
+        f"Çeviri ({log_lang_label}) tüm motorlarda başarısız oldu ({', '.join(tried)}), "
+        f"orijinal metin kullanılıyor: {text[:60]!r}"
+    )
+    return text
+
+
+#----- Genel amaçlı çeviri zinciri (Google -> DeepL -> MyMemory), TRANSLATE_CACHE
+#----- gibi bu modüle özel önbelleklere bağlı olmadan doğrudan çağrılabilir.
+#----- Diğer modüller (eskiverileriyenile.py, istatistik.py gibi) kendi yerel
+#----- GoogleTranslator çağrılarını bununla değiştirerek aynı Google -> DeepL
+#----- -> MyMemory düşme mantığından faydalanabilir.
+def translate_chain(text: str, target: str, log_lang_label: str = "") -> str:
+    if not text or not str(text).strip():
+        return text
+    text = str(text).strip()
+    if len(text) < 3:
+        return text
+    dummy_cache: dict = {}
+    return _translate_with_retry(text, target, dummy_cache, log_lang_label or target)
 
 
 def translate_text_safe(text: str) -> str:
@@ -1194,6 +1399,7 @@ async def _fetch_tv_metadata_impl(title, season, episode, encoded_string, year=N
     imdb_tv = None
     imdb_ep = None
     use_tmdb = False
+    imdb_from_search = False  # IMDb ID kullanıcı/varsayılan ID'den değil, aramadan geldi
 
     # -------------------------------------------------------
     # 1. Handle default ID (IMDb / TMDb)
@@ -1217,7 +1423,8 @@ async def _fetch_tv_metadata_impl(title, season, episode, encoded_string, year=N
             LOGGER.info(f"Short title '{title}' (≤3 chars) — skipping IMDb search, using TMDb directly")
             use_tmdb = True
         else:
-            imdb_id = await safe_imdb_search(title, "tvSeries")
+            imdb_id = await safe_imdb_search(title, "tvSeries", year)
+            imdb_from_search = bool(imdb_id)
             use_tmdb = not bool(imdb_id)
 
     # -------------------------------------------------------
@@ -1233,14 +1440,25 @@ async def _fetch_tv_metadata_impl(title, season, episode, encoded_string, year=N
                     imdb_tv = await get_detail(imdb_id=imdb_id, media_type="tvSeries")
                 IMDB_CACHE[imdb_id] = imdb_tv
 
+            # ----- antoloji / çatı dizi doğrulaması (yalnızca aramadan gelen IMDb ID için;
+            # kullanıcının verdiği ID'lere dokunulmaz)
+            if imdb_from_search and imdb_tv:
+                override_tmdb_id = await _anthology_tmdb_override(title, imdb_id, imdb_tv, year)
+                if override_tmdb_id:
+                    tmdb_id = override_tmdb_id
+                    imdb_id = None
+                    imdb_tv = None
+                    use_tmdb = True
+
             # ----- episode details
-            ep_key = f"{imdb_id}::{season}::{episode}"
-            if ep_key in EPISODE_CACHE:
-                imdb_ep = EPISODE_CACHE[ep_key]
-            else:
-                async with API_SEMAPHORE:
-                    imdb_ep = await get_season(imdb_id=imdb_id, season_id=season, episode_id=episode)
-                EPISODE_CACHE[ep_key] = imdb_ep
+            if not use_tmdb:
+                ep_key = f"{imdb_id}::{season}::{episode}"
+                if ep_key in EPISODE_CACHE:
+                    imdb_ep = EPISODE_CACHE[ep_key]
+                else:
+                    async with API_SEMAPHORE:
+                        imdb_ep = await get_season(imdb_id=imdb_id, season_id=season, episode_id=episode)
+                    EPISODE_CACHE[ep_key] = imdb_ep
 
         except Exception as e:
             LOGGER.warning(f"IMDb TV fetch failed [{imdb_id}] → {e}")
@@ -1587,9 +1805,15 @@ async def _fetch_movie_metadata_impl(title, encoded_string, year=None, quality=N
             LOGGER.info(f"Short title '{title}' (≤3 chars) — skipping IMDb search, using TMDb directly")
             use_tmdb = True
         else:
+            # Sorgu eskisi gibi "<başlık> <yıl>" (Cinemeta yıllı sorguda daha iyi
+            # sıralıyor); yıl ayrıca parametre olarak da iletilir ki search_title()
+            # içindeki başlık+yıl doğrulaması (pick_best_meta) filmler için de
+            # çalışsın. Doğrulama geçemezse TMDb'ye düşülür.
             imdb_id = await safe_imdb_search(
                 f"{title} {year}" if year else title,
-                "movie"
+                "movie",
+                year,
+                prefer_year=True,
             )
             use_tmdb = not bool(imdb_id)
 

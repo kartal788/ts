@@ -3,7 +3,22 @@
 {% block title %}{{ media_type|title }} Düzenle - Yönetici Paneli{% endblock %}
 
 {% block content %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/flag-icons/7.2.3/css/flag-icons.min.css" crossorigin="anonymous"/>
 <style>
+  /* Emoji bayrak karakterleri (🇹🇷 🇩🇪 🇺🇸 🇬🇧) bazı işletim sistemi/tarayıcı
+     kombinasyonlarında (özellikle Windows) düz harf kodu olarak görünüp
+     bayrak ikonu olarak render edilmeyebiliyor. Bunun yerine flag-icons
+     kütüphanesinin SVG tabanlı ikonları kullanılır, böylece bayraklar her
+     platformda garanti şekilde görünür. */
+  .field-flag {
+    display: inline-block;
+    width: 1.1em;
+    height: 0.8em;
+    margin-right: 5px;
+    vertical-align: middle;
+    border-radius: 2px;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.15);
+  }
   .glass-card {
     background: color-mix(in srgb, var(--card) 94%, var(--bg));
     border: 1px solid color-mix(in srgb, var(--border) 95%, transparent);
@@ -502,10 +517,16 @@
 
     <!-- Media Preview -->
     {% if media_details %}
+    {# TR alanı boşsa varsayılan (İngilizce/orijinal) alana düş #}
+    {% set hero_title = media_details.title_tr or media_details.title %}
+    {% set hero_poster = media_details.poster_tr or media_details.poster %}
+    {% set hero_backdrop = media_details.backdrop_tr or media_details.backdrop %}
+    {% set hero_genres = media_details.genres_tr or media_details.genres %}
+    {% set hero_description = media_details.description_tr or media_details.description %}
     <div class="glass-card rounded-3xl overflow-hidden mb-6 sm:mb-8">
         <div class="hero-wrap">
-            {% if media_details.backdrop %}
-            <img src="{{ media_details.backdrop }}" alt="{{ media_details.title }} backdrop" class="hero-backdrop"
+            {% if hero_backdrop %}
+            <img src="{{ hero_backdrop }}" alt="{{ hero_title }} backdrop" class="hero-backdrop"
                  onerror="this.style.display='none'">
             {% endif %}
             <div class="hero-gradient"></div>
@@ -513,15 +534,15 @@
             <div class="relative z-10 p-5 sm:p-6 lg:p-8">
                 <div class="flex flex-col md:flex-row md:items-end gap-5 sm:gap-6">
                     <div class="mx-auto md:mx-0 flex-shrink-0">
-                        <img src="{{ media_details.poster or '/static/placeholder.jpg' }}"
-                             alt="{{ media_details.title }}"
+                        <img src="{{ hero_poster or '/static/placeholder.jpg' }}"
+                             alt="{{ hero_title }}"
                              class="w-36 sm:w-40 md:w-48 h-54 sm:h-60 md:h-72 object-cover rounded-2xl shadow-2xl border border-hairline-strong"
                              onerror="this.src='https://via.placeholder.com/300x450/e5e7eb/9ca3af?text=No+Image'">
                     </div>
 
                     <div class="flex-1 min-w-0 text-center md:text-left">
                         <h2 class="text-2xl sm:text-3xl md:text-4xl font-black tracking-tight text-white drop-shadow">
-                            {{ media_details.title }}
+                            {{ hero_title }}
                         </h2>
 
                         <div class="flex flex-wrap justify-center md:justify-start items-center gap-2 sm:gap-3 mt-4">
@@ -535,9 +556,9 @@
                             </span>
                         </div>
 
-                        {% if media_details.genres %}
+                        {% if hero_genres %}
                         <div class="flex flex-wrap justify-center md:justify-start gap-2 mt-4">
-                            {% for genre in media_details.genres[:8] %}
+                            {% for genre in hero_genres[:8] %}
                             <span class="pill">{{ genre }}</span>
                             {% endfor %}
                         </div>
@@ -547,10 +568,10 @@
             </div>
         </div>
 
-        {% if media_details.description %}
+        {% if hero_description %}
         <div class="border-t border-hairline p-5 sm:p-6 lg:p-8">
             <h3 class="section-title text-base sm:text-lg mb-3">Özet</h3>
-            <p class="muted leading-relaxed text-sm sm:text-base">{{ media_details.description }}</p>
+            <p class="muted leading-relaxed text-sm sm:text-base">{{ hero_description }}</p>
         </div>
         {% endif %}
     </div>
@@ -836,31 +857,66 @@
             </div>
         </div>
         <form onsubmit="updateMedia(event)" id="edit-form">
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 mb-6">
-                <div class="sm:col-span-2">
-    <label class="block text-sm font-medium mb-2">Başlık *</label>
-    <input type="text" id="title" name="title"
-        value="{{ media_details.title if media_details else '' }}"
-        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
-        required>
-</div>
+            <!-- TMDB ID / IMDB ID / Koleksiyon ID -->
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6 mb-6">
+                <div>
+                    <label class="block text-sm font-medium mb-2">TMDB ID *</label>
+                    <input type="number" id="tmdb_id" name="tmdb_id"
+                        value="{{ tmdb_id }}"
+                        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
+                        required>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-2">IMDB ID</label>
+                    <input type="text" id="imdb_id" name="imdb_id"
+                        value="{{ media_details.imdb_id if media_details and media_details.imdb_id else '' }}"
+                        placeholder="tt1234567"
+                        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-2">🎬 Koleksiyon ID</label>
+                    <input type="number" id="collection_id" name="collection_id"
+                        value="{{ media_details.collection_id if media_details and media_details.collection_id else '' }}"
+                        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
+                        placeholder="Örn: 1102372">
+                    {% if media_details and media_details.collection_id %}
+                    <a href="https://www.themoviedb.org/collection/{{ media_details.collection_id }}"
+                        target="_blank"
+                        class="inline-flex items-center gap-1 mt-2 text-xs text-blue-600 hover:underline">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+                        TMDB Koleksiyonu Aç (ID: {{ media_details.collection_id }})
+                    </a>
+                    {% endif %}
+                </div>
+            </div>
 
-<div>
-    <label class="block text-sm font-medium mb-2">TMDB ID *</label>
-    <input type="number" id="tmdb_id" name="tmdb_id"
-        value="{{ tmdb_id }}"
-        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
-        required>
-</div>
-<div>
-    <label class="block text-sm font-medium mb-2">IMDB ID</label>
-    <input type="text" id="imdb_id" name="imdb_id"
-        value="{{ media_details.imdb_id if media_details and media_details.imdb_id else '' }}"
-        placeholder="tt1234567"
-        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary">
-</div>
-<div>
-    <label class="block text-sm font-medium mb-2">Çıkış Yılı *</label>
+            <!-- Başlık: İngilizce / Türkçe / Almanca -->
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+                <div>
+                    <label class="block text-sm font-medium mb-2"><span class="fi fi-gb field-flag"></span>İngilizce Başlık *</label>
+                    <input type="text" id="title" name="title"
+                        value="{{ media_details.title if media_details else '' }}"
+                        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
+                        required>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-2"><span class="fi fi-tr field-flag"></span>Türkçe Başlık</label>
+                    <input type="text" id="title_tr" name="title_tr"
+                        value="{{ media_details.title_tr if media_details else '' }}"
+                        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-2"><span class="fi fi-de field-flag"></span>Almanca Başlık</label>
+                    <input type="text" id="title_de" name="title_de"
+                        value="{{ media_details.title_de if media_details else '' }}"
+                        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary">
+                </div>
+            </div>
+
+            <!-- Çıkış Yılı / Puan / Orijinal Dil -->
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6 mb-6">
+                <div>
+                    <label class="block text-sm font-medium mb-2">Çıkış Yılı *</label>
                     <input type="number" id="release_year" name="release_year"
                         value="{{ media_details.release_year if media_details else '' }}"
                         class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
@@ -872,125 +928,129 @@
                         value="{{ media_details.rating if media_details else '' }}"
                         class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary">
                 </div>
-                <div class="sm:col-span-2">
-                    <label class="block text-sm font-medium mb-2">Logo URL</label>
-                    <input type="url" id="logo" name="logo" value="{{ media_details.logo if media_details else '' }}"
-                        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary">
+                <div>
+                    <label class="block text-sm font-medium mb-2">🌐 Orijinal Dil</label>
+                    <input type="text" id="original_language" name="original_language"
+                        value="{{ media_details.original_language if media_details and media_details.original_language else '' }}"
+                        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
+                        placeholder="Örn: en, tr, de, fr, ja, ko"
+                        maxlength="10">
+                    <p class="mt-1 text-xs text-gray-400">Orijinal dil kodu Örn: <code>en</code> İngilizce, <code>tr</code> Türkçe.</p>
                 </div>
+            </div>
 
-                <div class="sm:col-span-2">
-                    <label class="block text-sm font-medium mb-2">Poster URL</label>
+            <!-- Poster: İngilizce / Türkçe / Almanca -->
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+                <div>
+                    <label class="block text-sm font-medium mb-2"><span class="fi fi-gb field-flag"></span>İngilizce Poster</label>
                     <input type="url" id="poster" name="poster"
                         value="{{ media_details.poster if media_details else '' }}"
                         class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary">
                 </div>
-                <div class="sm:col-span-2">
-                    <label class="block text-sm font-medium mb-2">Backdrop URL</label>
-                    <input type="url" id="backdrop" name="backdrop"
-                        value="{{ media_details.backdrop if media_details else '' }}"
-                        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary">
-                </div>
-            </div>
-
-            <div class="mb-6">
-                <label class="block text-sm font-medium mb-2">Açıklama</label>
-                <textarea id="description" name="description" rows="3"
-                    class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary">{{ media_details.description if media_details else '' }}</textarea>
-            </div>
-
-            <!-- TR/DE Alanları (düz liste) -->
-            <div class="mb-6">
-                <label class="block text-sm font-medium mb-2">🇹🇷 Türkçe Başlık (title_tr)</label>
-                <input type="text" id="title_tr" name="title_tr"
-                    value="{{ media_details.title_tr if media_details else '' }}"
-                    class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary">
-            </div>
-
-            <div class="mb-6">
-                <label class="block text-sm font-medium mb-2">🇹🇷 Türkçe Açıklama (description_tr)</label>
-                <textarea id="description_tr" name="description_tr" rows="3"
-                    class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary">{{ media_details.description_tr if media_details else '' }}</textarea>
-            </div>
-
-            <div class="mb-6">
-                <label class="block text-sm font-medium mb-2">🇩🇪 Almanca Başlık (title_de)</label>
-                <input type="text" id="title_de" name="title_de"
-                    value="{{ media_details.title_de if media_details else '' }}"
-                    class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary">
-            </div>
-
-            <div class="mb-6">
-                <label class="block text-sm font-medium mb-2">🇩🇪 Almanca Açıklama (description_de)</label>
-                <textarea id="description_de" name="description_de" rows="3"
-                    class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary">{{ media_details.description_de if media_details else '' }}</textarea>
-            </div>
-
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
                 <div>
-                    <label class="block text-sm font-medium mb-2">🇹🇷 Türkçe Poster (poster_tr)</label>
+                    <label class="block text-sm font-medium mb-2"><span class="fi fi-tr field-flag"></span>Türkçe Poster</label>
                     <input type="url" id="poster_tr" name="poster_tr"
                         value="{{ media_details.poster_tr if media_details else '' }}"
                         class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary">
                 </div>
                 <div>
-                    <label class="block text-sm font-medium mb-2">🇩🇪 Almanca Poster (poster_de)</label>
+                    <label class="block text-sm font-medium mb-2"><span class="fi fi-de field-flag"></span>Almanca Poster</label>
                     <input type="url" id="poster_de" name="poster_de"
                         value="{{ media_details.poster_de if media_details else '' }}"
                         class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary">
                 </div>
+            </div>
+
+            <!-- Logo: İngilizce / Türkçe / Almanca -->
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
                 <div>
-                    <label class="block text-sm font-medium mb-2">🇹🇷 Türkçe Backdrop (backdrop_tr)</label>
-                    <input type="url" id="backdrop_tr" name="backdrop_tr"
-                        value="{{ media_details.backdrop_tr if media_details else '' }}"
+                    <label class="block text-sm font-medium mb-2"><span class="fi fi-gb field-flag"></span>İngilizce Logo</label>
+                    <input type="url" id="logo" name="logo" value="{{ media_details.logo if media_details else '' }}"
                         class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary">
                 </div>
                 <div>
-                    <label class="block text-sm font-medium mb-2">🇩🇪 Almanca Backdrop (backdrop_de)</label>
-                    <input type="url" id="backdrop_de" name="backdrop_de"
-                        value="{{ media_details.backdrop_de if media_details else '' }}"
-                        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary">
-                </div>
-                <div>
-                    <label class="block text-sm font-medium mb-2">🇹🇷 Türkçe Logo (logo_tr)</label>
+                    <label class="block text-sm font-medium mb-2"><span class="fi fi-tr field-flag"></span>Türkçe Logo</label>
                     <input type="url" id="logo_tr" name="logo_tr"
                         value="{{ media_details.logo_tr if media_details else '' }}"
                         class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary">
                 </div>
                 <div>
-                    <label class="block text-sm font-medium mb-2">🇩🇪 Almanca Logo (logo_de)</label>
+                    <label class="block text-sm font-medium mb-2"><span class="fi fi-de field-flag"></span>Almanca Logo</label>
                     <input type="url" id="logo_de" name="logo_de"
                         value="{{ media_details.logo_de if media_details else '' }}"
                         class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary">
                 </div>
             </div>
 
+            <!-- Arkaplan: İngilizce / Türkçe / Almanca -->
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+                <div>
+                    <label class="block text-sm font-medium mb-2"><span class="fi fi-gb field-flag"></span>İngilizce Arkaplan</label>
+                    <input type="url" id="backdrop" name="backdrop"
+                        value="{{ media_details.backdrop if media_details else '' }}"
+                        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-2"><span class="fi fi-tr field-flag"></span>Türkçe Arkaplan</label>
+                    <input type="url" id="backdrop_tr" name="backdrop_tr"
+                        value="{{ media_details.backdrop_tr if media_details else '' }}"
+                        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-2"><span class="fi fi-de field-flag"></span>Almanca Arkaplan</label>
+                    <input type="url" id="backdrop_de" name="backdrop_de"
+                        value="{{ media_details.backdrop_de if media_details else '' }}"
+                        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary">
+                </div>
+            </div>
+
+            <!-- Açıklama: İngilizce / Türkçe / Almanca -->
             <div class="mb-6">
-                <label class="block text-sm font-medium mb-2">Türler (virgülle ayrılmış)</label>
-                <input type="text" id="genres" name="genres"
-                    value="{% if media_details and media_details.genres %}{{ media_details.genres|join(', ') }}{% endif %}"
-                    class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
-                    placeholder="Aksiyon, Komedi, Drama">
+                <label class="block text-sm font-medium mb-2"><span class="fi fi-gb field-flag"></span>İngilizce Açıklama</label>
+                <textarea id="description" name="description" rows="3"
+                    class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary">{{ media_details.description if media_details else '' }}</textarea>
             </div>
 
             <div class="mb-6">
-                <label class="block text-sm font-medium mb-2">🇹🇷 Türkçe Türler (genres_tr, virgülle)</label>
-                <input type="text" id="genres_tr" name="genres_tr"
-                    value="{% if media_details and media_details.genres_tr %}{{ media_details.genres_tr|join(', ') }}{% endif %}"
-                    class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
-                    placeholder="Aksiyon, Komedi, Drama">
+                <label class="block text-sm font-medium mb-2"><span class="fi fi-tr field-flag"></span>Türkçe Açıklama</label>
+                <textarea id="description_tr" name="description_tr" rows="3"
+                    class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary">{{ media_details.description_tr if media_details else '' }}</textarea>
             </div>
 
             <div class="mb-6">
-                <label class="block text-sm font-medium mb-2">🇩🇪 Almanca Türler (genres_de, virgülle)</label>
-                <input type="text" id="genres_de" name="genres_de"
-                    value="{% if media_details and media_details.genres_de %}{{ media_details.genres_de|join(', ') }}{% endif %}"
-                    class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
-                    placeholder="Action, Komödie, Drama">
+                <label class="block text-sm font-medium mb-2"><span class="fi fi-de field-flag"></span>Almanca Açıklama</label>
+                <textarea id="description_de" name="description_de" rows="3"
+                    class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary">{{ media_details.description_de if media_details else '' }}</textarea>
+            </div>
+
+            <!-- Türler: İngilizce / Türkçe / Almanca (aynı satırda) -->
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+                <div>
+                    <label class="block text-sm font-medium mb-2"><span class="fi fi-gb field-flag"></span>İngilizce Türler</label>
+                    <input type="text" id="genres" name="genres"
+                        value="{% if media_details and media_details.genres %}{{ media_details.genres|join(', ') }}{% endif %}"
+                        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
+                        placeholder="Action, Comedy, Drama">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-2"><span class="fi fi-tr field-flag"></span>Türkçe Türler</label>
+                    <input type="text" id="genres_tr" name="genres_tr"
+                        value="{% if media_details and media_details.genres_tr %}{{ media_details.genres_tr|join(', ') }}{% endif %}"
+                        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
+                        placeholder="Aksiyon, Komedi, Drama">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-2"><span class="fi fi-de field-flag"></span>Almanca Türler</label>
+                    <input type="text" id="genres_de" name="genres_de"
+                        value="{% if media_details and media_details.genres_de %}{{ media_details.genres_de|join(', ') }}{% endif %}"
+                        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
+                        placeholder="Action, Komödie, Drama">
+                </div>
             </div>
 
             <!-- Oyuncular -->
             <div class="mb-6">
-                <label class="block text-sm font-medium mb-2">🎭 Oyuncular (cast)</label>
+                <label class="block text-sm font-medium mb-2">🎭 Oyuncular</label>
                 <div id="cast-container" class="space-y-2 mb-2">
                     {% if media_details and media_details.cast %}
                         {% for actor in media_details.cast %}
@@ -1019,52 +1079,24 @@
                 <p class="mt-1 text-xs text-gray-400">Her satıra bir oyuncu adı girin. Sıralama korunur.</p>
             </div>
 
-            <!-- Orijinal Dil -->
-            <div class="mb-6">
-                <label class="block text-sm font-medium mb-2">🌐 Orijinal Dil (original_language, ISO 639-1)</label>
-                <input type="text" id="original_language" name="original_language"
-                    value="{{ media_details.original_language if media_details and media_details.original_language else '' }}"
-                    class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
-                    placeholder="Örn: en, tr, de, fr, ja, ko"
-                    maxlength="10">
-                <p class="mt-1 text-xs text-gray-400">TMDB'den çekilen orijinal dil kodu (ISO 639-1). Örn: <code>en</code> İngilizce, <code>tr</code> Türkçe.</p>
-            </div>
-
-            <!-- Koleksiyon -->
-            <div class="mb-6">
-                <label class="block text-sm font-medium mb-2">🎬 Koleksiyon ID (collection_id)</label>
-                <input type="number" id="collection_id" name="collection_id"
-                    value="{{ media_details.collection_id if media_details and media_details.collection_id else '' }}"
-                    class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
-                    placeholder="Örn: 1102372">
-                {% if media_details and media_details.collection_id %}
-                <a href="https://www.themoviedb.org/collection/{{ media_details.collection_id }}"
-                    target="_blank"
-                    class="inline-flex items-center gap-1 mt-2 text-xs text-blue-600 hover:underline">
-                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
-                    TMDB Koleksiyonu Aç (ID: {{ media_details.collection_id }})
-                </a>
-                {% endif %}
-            </div>
-
             <!-- Sertifikalar -->
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
                 <div>
-                    <label class="block text-sm font-medium mb-2">🇹🇷 TR Sertifikası (certification_tr)</label>
+                    <label class="block text-sm font-medium mb-2"><span class="fi fi-tr field-flag"></span>TR Sertifikası</label>
                     <input type="text" id="certification_tr" name="certification_tr"
                         value="{{ media_details.certification_tr if media_details and media_details.certification_tr else '' }}"
                         class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
                         placeholder="Örn: 13+, 18+, G">
                 </div>
                 <div>
-                    <label class="block text-sm font-medium mb-2">🇩🇪 DE Sertifikası (certification_de)</label>
+                    <label class="block text-sm font-medium mb-2"><span class="fi fi-de field-flag"></span>DE Sertifikası</label>
                     <input type="text" id="certification_de" name="certification_de"
                         value="{{ media_details.certification_de if media_details and media_details.certification_de else '' }}"
                         class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
                         placeholder="Örn: FSK 12, FSK 18">
                 </div>
                 <div>
-                    <label class="block text-sm font-medium mb-2">🇺🇸 US Sertifikası (certification_us)</label>
+                    <label class="block text-sm font-medium mb-2"><span class="fi fi-us field-flag"></span>US Sertifikası</label>
                     <input type="text" id="certification_us" name="certification_us"
                         value="{{ media_details.certification_us if media_details and media_details.certification_us else '' }}"
                         class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
@@ -1075,11 +1107,11 @@
             <div class="flex flex-col sm:flex-row justify-end gap-2 sm:gap-4">
                 <button type="button" onclick="window.history.back()"
                     class="w-full sm:w-auto px-6 py-2 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors text-sm">
-                    Cancel
+                    İptal
                 </button>
                 <button type="submit"
                     class="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-md transition-colors text-sm shadow-sm">
-                    Save Changes
+                    Kaydet
                 </button>
             </div>
         </form>
@@ -2172,8 +2204,23 @@
             'certification_tr','certification_de','certification_us',
             'collection_id','total_seasons','total_episodes','cast','seasons'
         ];
+        // Bu alanlar TMDB'de karşılığı olmayabilir (boş string dönebilir).
+        // "Yeniden Sorgula" akışı TAM bir yenileme olduğu için, boş bile
+        // olsalar açıkça gönderilmeli — aksi halde eski (ör. yanlış eşleşmiş
+        // bir diziye ait) TR/DE görsel/başlık/açıklama değerleri backend'de
+        // hiç güncellenmez ve DB'de kalıcı olarak takılı kalır.
+        const ALWAYS_OVERWRITE = new Set([
+            'poster', 'backdrop', 'logo',
+            'poster_tr', 'backdrop_tr', 'logo_tr',
+            'poster_de', 'backdrop_de', 'logo_de',
+            'title_tr', 'title_de',
+            'description_tr', 'description_de',
+            'certification_tr', 'certification_de', 'certification_us'
+        ]);
         for (const f of fields) {
-            if (preview[f] !== undefined && preview[f] !== null && preview[f] !== '') {
+            if (ALWAYS_OVERWRITE.has(f)) {
+                updateData[f] = preview[f] ?? '';
+            } else if (preview[f] !== undefined && preview[f] !== null && preview[f] !== '') {
                 updateData[f] = preview[f];
             }
         }
@@ -2297,11 +2344,11 @@
                     <div id="rq-title" class="text-sm font-medium"></div>
                 </div>
                 <div>
-                    <div class="text-xs font-semibold theme-text-secondary uppercase tracking-wide mb-1">🇹🇷 Başlık TR</div>
+                    <div class="text-xs font-semibold theme-text-secondary uppercase tracking-wide mb-1"><span class="fi fi-tr field-flag"></span>Başlık TR</div>
                     <div id="rq-title-tr" class="text-sm"></div>
                 </div>
                 <div>
-                    <div class="text-xs font-semibold theme-text-secondary uppercase tracking-wide mb-1">🇩🇪 Başlık DE</div>
+                    <div class="text-xs font-semibold theme-text-secondary uppercase tracking-wide mb-1"><span class="fi fi-de field-flag"></span>Başlık DE</div>
                     <div id="rq-title-de" class="text-sm"></div>
                 </div>
             </div>
@@ -2313,11 +2360,11 @@
                     <div id="rq-genres" class="text-sm"></div>
                 </div>
                 <div>
-                    <div class="text-xs font-semibold theme-text-secondary uppercase tracking-wide mb-1">🇹🇷 Türler TR</div>
+                    <div class="text-xs font-semibold theme-text-secondary uppercase tracking-wide mb-1"><span class="fi fi-tr field-flag"></span>Türler TR</div>
                     <div id="rq-genres-tr" class="text-sm"></div>
                 </div>
                 <div>
-                    <div class="text-xs font-semibold theme-text-secondary uppercase tracking-wide mb-1">🇩🇪 Türler DE</div>
+                    <div class="text-xs font-semibold theme-text-secondary uppercase tracking-wide mb-1"><span class="fi fi-de field-flag"></span>Türler DE</div>
                     <div id="rq-genres-de" class="text-sm"></div>
                 </div>
             </div>
@@ -2335,11 +2382,11 @@
             </div>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                    <div class="text-xs font-semibold theme-text-secondary uppercase tracking-wide mb-1">🇹🇷 Özet TR</div>
+                    <div class="text-xs font-semibold theme-text-secondary uppercase tracking-wide mb-1"><span class="fi fi-tr field-flag"></span>Özet TR</div>
                     <p id="rq-desc-tr" class="text-sm theme-text-secondary leading-relaxed line-clamp-2"></p>
                 </div>
                 <div>
-                    <div class="text-xs font-semibold theme-text-secondary uppercase tracking-wide mb-1">🇩🇪 Özet DE</div>
+                    <div class="text-xs font-semibold theme-text-secondary uppercase tracking-wide mb-1"><span class="fi fi-de field-flag"></span>Özet DE</div>
                     <p id="rq-desc-de" class="text-sm theme-text-secondary leading-relaxed line-clamp-2"></p>
                 </div>
             </div>

@@ -447,8 +447,15 @@ async def send_manual_announcement(info: dict) -> Tuple[bool, str]:
             "duyuru gruba gönderilmedi. Önce imdb_id alanını doldurun."
         )
 
-    await _ensure_description_translated(info)
-
+    # NOT: Otomatik duyuru sisteminden (_announce) farklı olarak burada
+    # _ensure_description_translated() ÇAĞRILMAZ. "Duyuruyu Gönder" butonu
+    # bilinçli olarak veritabanında hâlihazırda yazılı olan bilgiyi ANINDA
+    # gönderir — Google Translate'e gidip description_tr'yi düzeltmeye
+    # çalışmaz. (Bu kontrol, altta çağrılan GoogleTranslator isteğinin bir
+    # timeout'u olmadığı için ağ erişimi engellenmiş/yavaş bir ortamda
+    # tamamen kilitlenebiliyor ve buton süresiz "Gönderiliyor..." durumunda
+    # kalıyordu.) description_tr'yi düzeltmek isteyen admin, içeriği
+    # "Yeniden Sorgula" ile güncelleyip öyle duyurmalı.
     caption = _build_caption(info)
     is_cam, _cam_audio = _detect_cam_quality_and_audio(info)
     if is_cam:
@@ -580,8 +587,20 @@ async def _announce(info: dict) -> None:
     #----- Bu, kuyruktaki tek işçiyi (worker) bu süre boyunca meşgul eder;
     #----- yani bu içerikten sonraki duyurular da bu kadar gecikir — bu,
     #----- Telegram'a yarım çevrilmiş bir duyuru göndermemek için bilinçli
-    #----- bir tercihtir.
-    await _ensure_description_translated(info)
+    #----- bir tercihtir. GoogleTranslator isteğinin kendi bir timeout'u
+    #----- olmadığından, ağ erişimi engellenmiş/çok yavaş bir ortamda bu adım
+    #----- teorik olarak süresiz sürebilir; bu yüzden dıştan sert bir üst
+    #----- sınır konur — süre aşılırsa orijinal (çevrilmemiş) metinle devam
+    #----- edilir, kuyruk tıkanmaz.
+    _translate_guard_seconds = (ANNOUNCE_TRANSLATE_RETRY_DELAY_SECONDS + 30) * ANNOUNCE_TRANSLATE_MAX_ATTEMPTS
+    try:
+        await asyncio.wait_for(_ensure_description_translated(info), timeout=_translate_guard_seconds)
+    except asyncio.TimeoutError:
+        LOGGER.warning(
+            f"Duyuru öncesi çeviri düzeltmesi {_translate_guard_seconds}sn içinde "
+            f"tamamlanamadı (muhtemelen ağ sorunu), orijinal metinle devam ediliyor: "
+            f"{info.get('title_tr') or info.get('title')!r}"
+        )
 
     caption = _build_caption(info)
     is_cam, _cam_audio = _detect_cam_quality_and_audio(info)

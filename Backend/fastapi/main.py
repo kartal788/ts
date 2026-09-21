@@ -90,7 +90,7 @@ from Backend.fastapi.routes.api_routes import (
     get_all_subscribers_api, manage_subscriber_api,
     get_all_tokens_api, assign_plan_api, link_token_user_api,
     get_pending_subscription_requests_api, admin_review_subscription_request_api,
-    get_settings_api, update_settings_api,
+    get_settings_api, update_settings_api, get_translate_usage_api,
     export_settings_backup_api, import_settings_backup_api,
     invalidate_admin_sessions_api,
     get_settings_files_api, upload_settings_file_api, delete_settings_file_api,
@@ -1014,6 +1014,10 @@ async def admin_settings(request: Request, _: bool = Depends(require_auth)):
 @app.get("/api/admin/settings")
 async def get_settings(_: bool = Depends(require_auth)):
     return await get_settings_api()
+
+@app.get("/api/admin/settings/translate-usage")
+async def get_translate_usage(_: bool = Depends(require_auth)):
+    return await get_translate_usage_api()
 
 @app.put("/api/admin/settings")
 async def update_settings(payload: dict, _: bool = Depends(require_auth)):
