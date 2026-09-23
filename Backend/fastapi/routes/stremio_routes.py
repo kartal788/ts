@@ -2086,9 +2086,13 @@ async def get_catalog(token: str, media_type: str, id: str, extra: Optional[str]
 
     try:
         if search_query:
-            search_results = await db.search_documents(query=search_query, page=page, page_size=PAGE_SIZE)
-            all_items = search_results.get("results", [])
             db_media_type = "tv" if media_type == "series" else "movie"
+            # media_type verilince sadece ilgili koleksiyon taranır (daha hızlı) ve
+            # aşamalı aramada "önce bulunan sonuç yanlış türde" durumu engellenir.
+            search_results = await db.search_documents(
+                query=search_query, page=page, page_size=PAGE_SIZE, media_type=db_media_type
+            )
+            all_items = search_results.get("results", [])
             items = [item for item in all_items if item.get("media_type") == db_media_type and _has_video_stream(item)]
             items = _apply_member_restrictions(items, member_restrictions, user_id=token_data.get("user_id"))
         else:
@@ -3349,7 +3353,10 @@ async def admin_catalog_media_search(
     if not q or not q.strip():
         return {"results": []}
 
-    result = await db.search_documents(query=q, page=1, page_size=20)
+    result = await db.search_documents(
+        query=q, page=1, page_size=20,
+        media_type=media_type if media_type in ("movie", "tv") else None,
+    )
     results = result.get("results", [])
 
     if media_type in ("movie", "tv"):

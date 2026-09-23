@@ -1,6 +1,7 @@
 import secrets
 import string
 from asyncio import create_task
+import asyncio as _asyncio
 from bson import ObjectId
 import motor.motor_asyncio
 from datetime import datetime, timezone, timedelta as _td
@@ -163,6 +164,68 @@ def _verify_password(password: str, stored_hash: str) -> bool:
 
 
 
+# ── Arama yardımcıları (Türkçe/Almanca karakter duyarsız eşleşme) ─────────────
+# Python .lower() "İ" harfini "i" + birleştirici nokta (U+0307) yapar, MongoDB
+# regex "i" bayrağı da İ/ı ↔ i eşleştirmez. Bu yüzden "son imparator" yazınca
+# "Son İmparator" bulunamıyordu. Burada hem sorgu hem de Mongo regex'i
+# "katlanmış" (İ,ı,I→i  ş→s  ç→c  ğ→g  ö→o  ü→u  ä→a ...) biçimde kurulur.
+import unicodedata as _ud
+
+_FOLD_EXTRA = {
+    "ı": "i", "İ": "i", "ß": "ss", "ø": "o", "æ": "ae", "œ": "oe", "đ": "d", "ł": "l",
+}
+_FOLD_VARIANTS_CACHE: Optional[Dict[str, str]] = None
+
+
+def _search_fold(text) -> str:
+    """Küçük harfe çevirir + aksan/nokta işaretlerini kaldırır (İ,ı→i, ş→s, ö→o ...)."""
+    out = []
+    for ch in str(text or ""):
+        rep = _FOLD_EXTRA.get(ch)
+        if rep is None:
+            base = "".join(c for c in _ud.normalize("NFKD", ch) if not _ud.combining(c))
+            rep = base.lower()
+        out.append(rep)
+    return "".join(out)
+
+
+def _search_words(text, max_words: int = 10, max_word_len: int = 40) -> List[str]:
+    """Metni katlayıp harf/rakam kelimelerine böler ('The.Last-Emperor' → 3 kelime)."""
+    folded = _search_fold(text).replace("_", " ")
+    return [w[:max_word_len] for w in re.findall(r"\w+", folded)][:max_words]
+
+
+def _fold_variants() -> Dict[str, str]:
+    """Her katlanmış harf için, o harfe katlanan tüm karakterler (regex sınıfı içi)."""
+    global _FOLD_VARIANTS_CACHE
+    if _FOLD_VARIANTS_CACHE is None:
+        table: Dict[str, set] = {}
+        for cp in range(0x30, 0x250):
+            ch = chr(cp)
+            f = _search_fold(ch)
+            if len(f) == 1 and f.isalnum():
+                table.setdefault(f, set()).add(ch)
+        _FOLD_VARIANTS_CACHE = {k: "".join(sorted(v)) for k, v in table.items()}
+    return _FOLD_VARIANTS_CACHE
+
+
+def _search_word_pattern(word: str) -> str:
+    """Katlanmış bir kelime için aksan/büyük-küçük harf duyarsız regex parçası üretir."""
+    variants = _fold_variants()
+    parts: List[str] = []
+    i = 0
+    while i < len(word):
+        if word.startswith("ss", i) and variants.get("s"):
+            parts.append("(?:[" + variants["s"] + "]{2}|ß)")
+            i += 2
+            continue
+        v = variants.get(word[i])
+        parts.append("[" + v + "]" if v else re.escape(word[i]))
+        i += 1
+    return "".join(parts)
+
+
+
 class Database:
     def __init__(self, db_name: str = "dbFyvio"):
         self.db_uris = Telegram.DATABASE
@@ -316,6 +379,24 @@ class Database:
             )
         except Exception as idx_err:
             LOGGER.warning(f"movie search_text_idx: {idx_err}")
+
+        # ── Aşamalı arama için alan bazlı normal indexler ────────────────────
+        # search_documents() artık $text yerine alan alan regex kullanıyor.
+        # Regex, index anahtarları üzerinde taranır; belgelerin kendisi (dev
+        # seasons/episodes dizileri) sadece eşleşenler için okunur.
+        for _coll, _fields in (
+            ("movie", ("title_tr", "title", "title_de", "telegram.name", "cast")),
+            ("tv",    ("title_tr", "title", "title_de", "seasons.episodes.telegram.name", "cast")),
+        ):
+            for _f in _fields:
+                try:
+                    await db[_coll].create_index(
+                        [(_f, ASCENDING)],
+                        name=f"search_{_f.replace('.', '_')}_idx",
+                        background=True,
+                    )
+                except Exception as idx_err:
+                    LOGGER.warning(f"{_coll} search_{_f} index: {idx_err}")
 
         # ── updated_on index (varsayılan sıralama için) ──────────────────────
         # _get_sort_dict() arama yokken {"updated_on": DESCENDING} kullanıyor.
@@ -1776,309 +1857,131 @@ class Database:
             "tv_shows": [convert_objectid_to_str(result) for result in results],
         }
 
-    def _search_words_all_present(self, doc: dict, words: List[str]) -> bool:
-        """
-        $text sorgusu kelimeleri OR mantığıyla eşleştirir (herhangi biri
-        geçerse belge döner). Orijinal davranışı (tüm kelimeler geçmeli,
-        sıra önemsiz) korumak için, $text index'inin ön elediği küçük aday
-        kümesi üzerinde bu ek AND kontrolü uygulanır — artık tüm koleksiyon
-        değil, sadece indexten dönen adaylar taranıyor.
-        """
-        parts = [
-            str(doc.get("title") or ""),
-            str(doc.get("title_tr") or ""),
-            str(doc.get("title_de") or ""),
-        ]
-        cast = doc.get("cast") or []
-        if isinstance(cast, list):
-            parts.extend(str(c) for c in cast)
-        else:
-            parts.append(str(cast))
+    # ── AŞAMALI ARAMA ────────────────────────────────────────────────────────
+    # Sıra: title_tr → dosya adı (name) → title → title_de → oyuncu (cast).
+    # Bir aşamada sonuç bulunursa sonraki aşamalara GEÇİLMEZ (erken çıkış).
+    # (aşama adı, movie koleksiyonundaki alan, tv koleksiyonundaki alan)
+    _SEARCH_STAGES = (
+        ("title_tr", "title_tr",      "title_tr"),
+        ("name",     "telegram.name", "seasons.episodes.telegram.name"),
+        ("title",    "title",         "title"),
+        ("title_de", "title_de",      "title_de"),
+        ("cast",     "cast",          "cast"),
+    )
+    _SEARCH_MIN_HITS = 1            # bir aşamanın "bulundu" sayılması için gereken min. sonuç
+    _SEARCH_MAX_PER_QUERY = 200     # tek koleksiyon/DB sorgusundan en fazla kaç belge
+    _SEARCH_MAX_TIME_MS = 10000     # tek sorgu için MongoDB zaman aşımı
 
-        parts.extend(self._telegram_names(doc.get("telegram")))
+    _SEARCH_PROJECTION_COMMON = {
+        "_id": 1, "tmdb_id": 1, "title": 1, "title_tr": 1, "title_de": 1,
+        "genres": 1, "genres_tr": 1, "genres_de": 1, "rating": 1, "imdb_id": 1,
+        "release_year": 1, "poster": 1, "backdrop": 1,
+        "description": 1, "description_tr": 1, "description_de": 1, "logo": 1,
+        "poster_tr": 1, "backdrop_tr": 1, "logo_tr": 1,
+        "poster_de": 1, "backdrop_de": 1, "logo_de": 1,
+        "media_type": 1, "db_index": 1,
+        "cast": 1, "language": 1,
+        "certification_tr": 1, "certification_de": 1, "certification_us": 1,
+    }
 
-        for season in (doc.get("seasons") or []):
-            if not isinstance(season, dict):
-                continue
-            for ep in (season.get("episodes") or []):
-                if not isinstance(ep, dict):
-                    continue
-                parts.extend(self._telegram_names(ep.get("telegram")))
-
-        haystack = " ".join(parts).lower()
-        return all(w in haystack for w in words)
+    async def _search_collection(self, db, coll_name: str, field: str, rx: dict) -> List[dict]:
+        """Tek bir koleksiyonda, tek bir alanda regex araması yapar."""
+        projection = dict(self._SEARCH_PROJECTION_COMMON)
+        projection["seasons" if coll_name == "tv" else "telegram"] = 1
+        cursor = (
+            db[coll_name]
+            .find({field: rx}, projection)
+            .max_time_ms(self._SEARCH_MAX_TIME_MS)
+            .limit(self._SEARCH_MAX_PER_QUERY)
+        )
+        return await cursor.to_list(length=self._SEARCH_MAX_PER_QUERY)
 
     @staticmethod
-    def _telegram_names(telegram) -> List[str]:
-        """
-        `telegram` alanı hem film hem bölüm belgelerinde bir kalite listesi
-        (`[{"name": ..., "quality": ..., ...}, ...]`) olarak saklanır — tek
-        bir dict değil. Eski arama kodu bunu yanlışlıkla dict sanıyordu ve
-        bölüm belgelerinde 'list' object has no attribute 'get' hatasına
-        yol açıyordu. Burada hem liste (doğru/güncel şema) hem de olası
-        eski/tekil dict biçimi güvenle işlenir.
-        """
-        if not telegram:
-            return []
-        entries = telegram if isinstance(telegram, list) else [telegram]
-        names = []
-        for entry in entries:
-            if isinstance(entry, dict) and entry.get("name"):
-                names.append(str(entry["name"]))
-        return names
+    def _search_rank(doc: dict, words: List[str]) -> int:
+        """0: başlık birebir · 1: başlık sorguyla başlıyor · 2: başlıkta tüm kelimeler · 3: diğer."""
+        nq = " ".join(words)
+        best = 3
+        for key in ("title_tr", "title", "title_de"):
+            t = " ".join(_search_words(doc.get(key), max_words=50, max_word_len=100))
+            if not t:
+                continue
+            if t == nq:
+                return 0
+            if t.startswith(nq):
+                best = min(best, 1)
+            elif all(w in t for w in words):
+                best = min(best, 2)
+        return best
+
+    @staticmethod
+    def _search_year(doc: dict) -> int:
+        try:
+            return int(doc.get("release_year") or 0)
+        except (TypeError, ValueError):
+            return 0
 
     async def search_documents(
             self,
             query: str,
             page: int,
-            page_size: int
+            page_size: int,
+            media_type: Optional[str] = None,
         ) -> dict:
+            """
+            Aşamalı arama: title_tr → name (dosya adı) → title → title_de → cast.
+            Bir aşamada sonuç bulunursa arama orada biter (daha yavaş aşamalar
+            çalıştırılmaz). Kelimeler sıra bağımsız (AND) eşleşir; büyük/küçük
+            harf, aksan ve Türkçe İ/ı farkı yok sayılır ("son imparator" →
+            "Son İmparator"; "last emperor" → "The.Last.Emperor.1987.mkv").
 
-            skip = (page - 1) * page_size
+            media_type: "movie" | "tv" verilirse sadece o koleksiyon taranır.
+            """
+            skip = (max(1, page) - 1) * page_size
 
-            _MAX_QUERY_LEN  = 100   # toplam girdi karakter sınırı
-            _MAX_WORD_LEN   = 40    # tek kelime karakter sınırı
-            _MAX_WORD_COUNT = 10    # maksimum kelime sayısı
-
-            query = query.strip()[:_MAX_QUERY_LEN]
-            if not query:
-                return {"total_count": 0, "results": []}
-
-            words = [
-                w[:_MAX_WORD_LEN].lower()
-                for w in query.split()
-                if w.strip()
-            ][:_MAX_WORD_COUNT]
-
+            query = (query or "").strip()[:100]
+            words = _search_words(query)
             if not words:
                 return {"total_count": 0, "results": []}
 
-            # $text $search söz diziminde çift tırnak ifade eşleşmesi
-            # (phrase match) ve "-" hariç tutma anlamı taşır; kullanıcı
-            # girdisinde bunlar özel anlam kazanmasın diye temizlenir.
-            text_search = " ".join(
-                w.replace('"', '').replace("-", " ") for w in words
-            ).strip()
-
-            if not text_search:
-                return {"total_count": 0, "results": []}
-
-            # NOT: {"$sort": {"score": {"$meta": "textScore"}}} bazı MongoDB
-            # sürümlerinde "FieldPath field names may not start with '$',
-            # given '$computed0'" hatasına yol açıyor (sort optimizer'ın
-            # meta alanını materialize etmeden sıralamaya çalışmasından
-            # kaynaklanıyor). Skoru önce gerçek bir alan olarak $addFields
-            # ile üretip öyle sıralamak bu hatayı ortadan kaldırıyor.
-            base_stage = [
-                {"$match": {"$text": {"$search": text_search}}},
-                {"$addFields": {"score": {"$meta": "textScore"}}},
-                {"$sort": {"score": -1}},
-            ]
-
-            tv_pipeline = base_stage + [
-                {"$project": {
-                    "_id": 1, "tmdb_id": 1, "title": 1, "title_tr": 1, "title_de": 1,
-                    "genres": 1, "genres_tr": 1, "genres_de": 1, "rating": 1, "imdb_id": 1,
-                    "release_year": 1, "poster": 1, "backdrop": 1,
-                    "description": 1, "description_tr": 1, "description_de": 1, "logo": 1,
-                    "poster_tr": 1, "backdrop_tr": 1, "logo_tr": 1,
-                    "poster_de": 1, "backdrop_de": 1, "logo_de": 1,
-                    "media_type": 1, "db_index": 1,
-                    "cast": 1, "language": 1,
-                    "certification_tr": 1, "certification_de": 1, "certification_us": 1,
-                    "seasons": 1
-                }}
-            ]
-
-            movie_pipeline = base_stage + [
-                {"$project": {
-                    "_id": 1, "tmdb_id": 1, "title": 1, "title_tr": 1, "title_de": 1,
-                    "genres": 1, "genres_tr": 1, "genres_de": 1, "rating": 1,
-                    "release_year": 1, "poster": 1, "backdrop": 1,
-                    "description": 1, "description_tr": 1, "description_de": 1,
-                    "media_type": 1, "db_index": 1, "imdb_id": 1, "logo": 1,
-                    "poster_tr": 1, "backdrop_tr": 1, "logo_tr": 1,
-                    "poster_de": 1, "backdrop_de": 1, "logo_de": 1,
-                    "cast": 1, "language": 1,
-                    "certification_tr": 1, "certification_de": 1, "certification_us": 1,
-                    "telegram": 1
-                }}
-            ]
-
-            try:
-                results: List[dict] = []
-                dbs_checked = []
-
-                active_db_key = f"storage_{self.current_db_index}"
-                active_db = self.dbs[active_db_key]
-                dbs_checked.append(self.current_db_index)
-
-                tv_results = await active_db["tv"].aggregate(tv_pipeline).to_list(None)
-                movie_results = await active_db["movie"].aggregate(movie_pipeline).to_list(None)
-                results.extend(
-                    r for r in (tv_results + movie_results)
-                    if self._search_words_all_present(r, words)
-                )
-
-                if len(results) < page_size:
-                    previous_db_index = self.current_db_index - 1
-                    while previous_db_index > 0 and len(results) < page_size:
-                        prev_db_key = f"storage_{previous_db_index}"
-                        prev_db = self.dbs[prev_db_key]
-                        tv_results_prev = await prev_db["tv"].aggregate(tv_pipeline).to_list(None)
-                        movie_results_prev = await prev_db["movie"].aggregate(movie_pipeline).to_list(None)
-                        results.extend(
-                            r for r in (tv_results_prev + movie_results_prev)
-                            if self._search_words_all_present(r, words)
-                        )
-                        dbs_checked.append(previous_db_index)
-                        previous_db_index -= 1
-
-                # total_count sadece taranan (dbs_checked) veritabanlarını
-                # kapsar — orijinal davranışla aynı sınırlama.
-                total_count = len(results)
-                paged_results = results[skip:skip + page_size]
-
-                return {
-                    "total_count": total_count,
-                    "results": [convert_objectid_to_str(doc) for doc in paged_results]
-                }
-
-            except Exception as text_err:
-                # Text index henüz oluşturulmadıysa (ör. arka planda build
-                # sürüyorsa) veya $text kullanılamıyorsa eski regex tabanlı
-                # aramaya düş — böylece arama hiçbir zaman tamamen kesilmez.
-                LOGGER.warning(f"search_documents $text hatası, regex'e düşülüyor: {text_err}")
-                return await self._search_documents_regex_fallback(query, page, page_size)
-
-    async def _search_documents_regex_fallback(
-            self,
-            query: str,
-            page: int,
-            page_size: int
-        ) -> dict:
-            """$text index kullanılamadığında devreye giren eski regex tabanlı arama."""
-
-            skip = (page - 1) * page_size
-
-            import re as _re
-
-            _MAX_QUERY_LEN  = 100
-            _MAX_WORD_LEN   = 40
-            _MAX_WORD_COUNT = 10
-
-            query = query.strip()[:_MAX_QUERY_LEN]
-            if not query:
-                return {"total_count": 0, "results": []}
-
-            words = [
-                _re.escape(w[:_MAX_WORD_LEN])
-                for w in query.split()
-                if w.strip()
-            ][:_MAX_WORD_COUNT]
-
-            if not words:
-                return {"total_count": 0, "results": []}
-
-            pattern = "".join(f"(?=.*{w})" for w in words)
-            regex_query = {'$regex': pattern, '$options': 'i'}
-
-            tv_pipeline = [
-                {"$match": {"$or": [
-                    {"title": regex_query},
-                    {"title_de": regex_query},
-                    {"title_tr": regex_query},
-                    {"cast": regex_query},
-                    {"seasons.episodes.telegram.name": regex_query}
-                ]}},
-                {"$project": {
-                    "_id": 1, "tmdb_id": 1, "title": 1, "title_tr": 1, "title_de": 1,
-                    "genres": 1, "genres_tr": 1, "genres_de": 1, "rating": 1, "imdb_id": 1,
-                    "release_year": 1, "poster": 1, "backdrop": 1,
-                    "description": 1, "description_tr": 1, "description_de": 1, "logo": 1,
-                    "poster_tr": 1, "backdrop_tr": 1, "logo_tr": 1,
-                    "poster_de": 1, "backdrop_de": 1, "logo_de": 1,
-                    "media_type": 1, "db_index": 1,
-                    "cast": 1, "language": 1,
-                    "certification_tr": 1, "certification_de": 1, "certification_us": 1,
-                    "seasons": 1
-                }}
-            ]
-
-            movie_pipeline = [
-                {"$match": {"$or": [
-                    {"title": regex_query},
-                    {"title_de": regex_query},
-                    {"title_tr": regex_query},
-                    {"cast": regex_query},
-                    {"telegram.name": regex_query}
-                ]}},
-                {"$project": {
-                    "_id": 1, "tmdb_id": 1, "title": 1, "title_tr": 1, "title_de": 1,
-                    "genres": 1, "genres_tr": 1, "genres_de": 1, "rating": 1,
-                    "release_year": 1, "poster": 1, "backdrop": 1,
-                    "description": 1, "description_tr": 1, "description_de": 1,
-                    "media_type": 1, "db_index": 1, "imdb_id": 1, "logo": 1,
-                    "poster_tr": 1, "backdrop_tr": 1, "logo_tr": 1,
-                    "poster_de": 1, "backdrop_de": 1, "logo_de": 1,
-                    "cast": 1, "language": 1,
-                    "certification_tr": 1, "certification_de": 1, "certification_us": 1,
-                    "telegram": 1
-                }}
-            ]
-
-            results = []
-            dbs_checked = []
-
-            active_db_key = f"storage_{self.current_db_index}"
-            active_db = self.dbs[active_db_key]
-            dbs_checked.append(self.current_db_index)
-
-            tv_results = await active_db["tv"].aggregate(tv_pipeline).to_list(None)
-            movie_results = await active_db["movie"].aggregate(movie_pipeline).to_list(None)
-            results.extend(tv_results + movie_results)
-
-            if len(results) < page_size:
-                previous_db_index = self.current_db_index - 1
-                while previous_db_index > 0 and len(results) < page_size:
-                    prev_db_key = f"storage_{previous_db_index}"
-                    prev_db = self.dbs[prev_db_key]
-                    tv_results_prev = await prev_db["tv"].aggregate(tv_pipeline).to_list(None)
-                    movie_results_prev = await prev_db["movie"].aggregate(movie_pipeline).to_list(None)
-                    results.extend(tv_results_prev + movie_results_prev)
-                    dbs_checked.append(previous_db_index)
-                    previous_db_index -= 1
-
-            total_count = 0
-            for db_index in dbs_checked:
-                key = f"storage_{db_index}"
-                db = self.dbs[key]
-                tv_count = await db["tv"].count_documents({
-                    "$or": [
-                        {"title": regex_query},
-                        {"title_de": regex_query},
-                        {"title_tr": regex_query},
-                        {"cast": regex_query},
-                        {"seasons.episodes.telegram.name": regex_query}
-                    ]
-                })
-                movie_count = await db["movie"].count_documents({
-                    "$or": [
-                        {"title": regex_query},
-                        {"title_de": regex_query},
-                        {"title_tr": regex_query},
-                        {"cast": regex_query},
-                        {"telegram.name": regex_query}
-                    ]
-                })
-                total_count += (tv_count + movie_count)
-
-            paged_results = results[skip:skip + page_size]
-
-            return {
-                "total_count": total_count,
-                "results": [convert_objectid_to_str(doc) for doc in paged_results]
+            # ^(?=.*kelime1)(?=.*kelime2)... -> sira bagimsiz AND; "s" secenegi noktanin satir sonunu da yakalamasini saglar
+            rx = {
+                "$regex": "^" + "".join(f"(?=.*{_search_word_pattern(w)})" for w in words),
+                "$options": "s",
             }
+
+            collections = (media_type,) if media_type in ("movie", "tv") else ("movie", "tv")
+
+            # Önce aktif DB, sonra eskiler (orijinal davranış).
+            db_indexes = [self.current_db_index] + list(range(self.current_db_index - 1, 0, -1))
+            needed = skip + page_size
+
+            for stage_name, movie_field, tv_field in self._SEARCH_STAGES:
+                try:
+                    results: List[dict] = []
+                    for db_idx in db_indexes:
+                        db = self.dbs[f"storage_{db_idx}"]
+                        parts = await _asyncio.gather(*(
+                            self._search_collection(
+                                db, coll, movie_field if coll == "movie" else tv_field, rx
+                            )
+                            for coll in collections
+                        ))
+                        for part in parts:
+                            results.extend(part)
+                        if len(results) >= needed:
+                            break
+                except Exception as stage_err:
+                    LOGGER.warning(f"search_documents '{stage_name}' aşaması hata verdi, sonrakine geçiliyor: {stage_err}")
+                    continue
+
+                if len(results) >= self._SEARCH_MIN_HITS:
+                    results.sort(key=lambda d: (self._search_rank(d, words), -self._search_year(d)))
+                    return {
+                        "total_count": len(results),
+                        "results": [convert_objectid_to_str(doc) for doc in results[skip:skip + page_size]],
+                    }
+
+            return {"total_count": 0, "results": []}
 
 
     async def get_media_details(
