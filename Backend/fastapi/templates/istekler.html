@@ -176,12 +176,18 @@
         ? `<img src="${escHtml(g.poster)}" alt="" class="w-24 h-36 sm:w-32 sm:h-48 object-cover rounded-lg flex-shrink-0 border" style="border-color:var(--hairline)" onerror="this.style.display='none'">`
         : `<div class="w-24 h-36 sm:w-32 sm:h-48 rounded-lg flex-shrink-0 flex items-center justify-center bg-primary/10 text-primary"><i class="fas ${t.icon} text-3xl"></i></div>`;
 
-      const requesterChips = (g.requesters || []).map(r => `
+      const requesterChips = (g.requesters || []).map(r => {
+        const uname = (r.username || '').replace(/^@/, '');
+        const unameHtml = uname
+          ? ` <a href="https://t.me/${escHtml(uname)}" target="_blank" rel="noopener" class="text-primary hover:underline" onclick="event.stopPropagation()">@${escHtml(uname)}</a>`
+          : '';
+        return `
         <span class="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-white/5 border" style="border-color:var(--hairline)">
           <i class="fas fa-user text-[10px] theme-text-secondary"></i>
-          ${escHtml(r.name)}${r.username ? ` <span class="theme-text-secondary">@${escHtml(r.username)}</span>` : ''}
+          ${escHtml(r.name)}${unameHtml}
         </span>
-      `).join('');
+      `;
+      }).join('');
 
       const actionsHtml = g.status === 'pending' ? `
         <div class="flex items-center gap-2 mt-3">
@@ -305,9 +311,13 @@
     container.innerHTML = list.map(r => {
       const safeName = escHtml(r.name || String(r.user_id));
       const planText = r.plan_label ? r.plan_label : `${r.duration_days || 0} gün`;
+      const tgUsername = (r.username || '').replace(/^@/, '');
+      const tgLink = tgUsername
+        ? `<a href="https://t.me/${escHtml(tgUsername)}" target="_blank" rel="noopener" class="text-primary hover:underline" onclick="event.stopPropagation()"><i class="fa-brands fa-telegram"></i> @${escHtml(tgUsername)}</a>`
+        : '';
       return `<div class="theme-card rounded-2xl border p-4 flex flex-wrap items-center justify-between gap-3" data-user-id="${r.user_id}">
         <div class="min-w-0">
-          <div class="font-semibold text-text truncate">${safeName} <span class="text-xs theme-text-secondary">(ID: ${r.user_id})</span></div>
+          <div class="font-semibold text-text truncate">${safeName} <span class="text-xs theme-text-secondary">(ID: ${r.user_id})</span>${tgLink ? ` &nbsp;${tgLink}` : ''}</div>
           <div class="text-xs theme-text-secondary mt-1">
             📦 ${escHtml(planText)} — ${r.price || 0} ${escHtml(r.currency || 'TRY')}
             &nbsp;•&nbsp; 🕒 ${fmtDate(r.requested_at)}

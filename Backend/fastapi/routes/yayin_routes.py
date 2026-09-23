@@ -19,8 +19,10 @@ Akış:
 import asyncio
 import logging
 import mimetypes
+import json
 import os
 import re
+import shutil
 import time
 from collections import deque
 from datetime import datetime, timezone, timedelta
@@ -421,6 +423,290 @@ def _pick_best_hls_from_master(manifest: str, base: str) -> str:
                         best_url = stream_url
                     break
     return best_url or ""
+
+
+def _attr_value(block: str, name: str) -> Optional[str]:
+    """
+    HLS tag satırındaki (EXT-X-STREAM-INF / EXT-X-MEDIA) tek bir attribute
+    değerini döndürür. Hem tırnaklı (LANGUAGE="tur") hem tırnaksız
+    (BANDWIDTH=5000000) değerleri destekler.
+    """
+    m = re.search(rf'{name}="([^"]*)"', block)
+    if m:
+        return m.group(1)
+    m = re.search(rf'{name}=([^,\s]+)', block)
+    if m:
+        return m.group(1)
+    return None
+
+
+# ISO 639-1/639-2 dil kodu → Türkçe görünen ad. Bilinmeyen kodlar olduğu gibi
+# (büyük harfe çevrilerek) gösterilir.
+_LANGUAGE_NAMES = {
+    "tr": "Türkçe", "tur": "Türkçe",
+    "en": "İngilizce", "eng": "İngilizce",
+    "de": "Almanca", "ger": "Almanca", "deu": "Almanca",
+    "fr": "Fransızca", "fre": "Fransızca", "fra": "Fransızca",
+    "es": "İspanyolca", "spa": "İspanyolca",
+    "it": "İtalyanca", "ita": "İtalyanca",
+    "ru": "Rusça", "rus": "Rusça",
+    "ar": "Arapça", "ara": "Arapça",
+    "ja": "Japonca", "jpn": "Japonca",
+    "ko": "Korece", "kor": "Korece",
+    "zh": "Çince", "chi": "Çince", "zho": "Çince",
+    "nl": "Felemenkçe", "dut": "Felemenkçe", "nld": "Felemenkçe",
+    "pt": "Portekizce", "por": "Portekizce",
+    "pl": "Lehçe", "pol": "Lehçe",
+    "el": "Yunanca", "gre": "Yunanca", "ell": "Yunanca",
+    "fa": "Farsça", "per": "Farsça", "fas": "Farsça",
+    "und": "Bilinmeyen",
+}
+
+
+def _language_label(code: Optional[str], name: Optional[str] = None) -> str:
+    """Dil kodunu (varsa) okunabilir Türkçe etikete çevirir; olmazsa NAME kullanılır."""
+    if code:
+        label = _LANGUAGE_NAMES.get(code.strip().lower())
+        if label:
+            return label
+    if name:
+        return name
+    return (code or "Bilinmeyen").upper()
+
+
+def _channel_layout_label(channels: Optional[str]) -> str:
+    """
+    HLS EXT-X-MEDIA CHANNELS attribute değerini (örn. "2", "6", "6/JOC")
+    insan-okunur ses kanalı etiketine çevirir (Stereo, 5.1, 7.1 vb.).
+    """
+    if not channels:
+        return ""
+    raw = channels.split("/")[0].strip()
+    mapping = {
+        "1": "Mono",
+        "2": "2.0 (Stereo)",
+        "6": "5.1",
+        "8": "7.1",
+    }
+    if raw in mapping:
+        label = mapping[raw]
+    elif raw.isdigit():
+        label = f"{raw} kanal"
+    else:
+        label = raw
+    if "JOC" in channels.upper():
+        label += " (Dolby Atmos)"
+    return label
+
+
+def _extract_playlist_technical_info(manifest: str) -> dict:
+    """
+    Bir HLS master playlist metninden teknik bilgileri çıkarır:
+      - resolutions:      görüntülenebilir en boy oranları (ör. "1920x1080")
+      - audio_tracks:     [{language, channels, name}]
+      - subtitle_tracks:  [{language, name}]
+      - is_master:        master playlist mi (EXT-X-STREAM-INF/EXT-X-MEDIA içeriyor mu)
+    """
+    resolutions: List[str] = []
+    audio_tracks: List[dict] = []
+    subtitle_tracks: List[dict] = []
+    is_master = False
+
+    for raw_line in manifest.splitlines():
+        line = raw_line.strip()
+        if line.startswith("#EXT-X-STREAM-INF"):
+            is_master = True
+            res = _attr_value(line, "RESOLUTION")
+            if res and res not in resolutions:
+                resolutions.append(res)
+        elif line.startswith("#EXT-X-MEDIA"):
+            is_master = True
+            media_type = (_attr_value(line, "TYPE") or "").upper()
+            lang_code  = _attr_value(line, "LANGUAGE")
+            name       = _attr_value(line, "NAME")
+            if media_type == "AUDIO":
+                channels = _attr_value(line, "CHANNELS")
+                entry = {
+                    "language": _language_label(lang_code, name),
+                    "channels": _channel_layout_label(channels),
+                    "name": name or "",
+                }
+                if entry not in audio_tracks:
+                    audio_tracks.append(entry)
+            elif media_type == "SUBTITLES":
+                entry = {
+                    "language": _language_label(lang_code, name),
+                    "name": name or "",
+                }
+                if entry not in subtitle_tracks:
+                    subtitle_tracks.append(entry)
+
+    # En yüksek çözünürlük başta olacak şekilde sırala (piksel sayısına göre)
+    def _px(res: str) -> int:
+        try:
+            w, h = res.lower().split("x")
+            return int(w) * int(h)
+        except Exception:
+            return 0
+    resolutions.sort(key=_px, reverse=True)
+
+    return {
+        "is_master": is_master,
+        "resolutions": resolutions,
+        "audio_tracks": audio_tracks,
+        "subtitle_tracks": subtitle_tracks,
+    }
+
+
+_FFPROBE_BIN = shutil.which("ffprobe") or "ffprobe"
+
+
+async def _ffprobe_stream_info(url: str) -> Optional[dict]:
+    """
+    Playlist/manifest etiketlerinde (RESOLUTION/AUDIO/SUBTITLES) teknik bilgi
+    yayınlanmıyorsa, ffprobe (MediaInfo/FFmpeg tabanlı analiz aracı) ile
+    yayının şu an aktif olan profilini doğrudan analiz eder.
+    Not: Bu yöntem yalnızca o an oynatılan tek profili görebilir — canlı
+    yayının playliste yayınlanmamış alternatif kalite/dil seçenekleri
+    bu şekilde tespit edilemez.
+    """
+    cmd = [
+        _FFPROBE_BIN, "-v", "error",
+        "-print_format", "json",
+        "-show_streams",
+        "-analyzeduration", "5000000",
+        "-probesize", "5000000",
+        url,
+    ]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout, _stderr = await asyncio.wait_for(proc.communicate(), timeout=12)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            logger.warning(f"[Teknik Bilgi] ffprobe zaman aşımı: {url}")
+            return None
+        if proc.returncode != 0 or not stdout:
+            return None
+        data = json.loads(stdout.decode("utf-8", errors="ignore"))
+    except FileNotFoundError:
+        logger.warning("[Teknik Bilgi] ffprobe bulunamadı (sunucuda kurulu değil).")
+        return None
+    except Exception as e:
+        logger.warning(f"[Teknik Bilgi] ffprobe hata: {e}")
+        return None
+
+    resolutions: List[str] = []
+    audio_tracks: List[dict] = []
+    subtitle_tracks: List[dict] = []
+
+    for s in data.get("streams", []):
+        codec_type = s.get("codec_type")
+        tags = s.get("tags", {}) or {}
+        lang_code = tags.get("language") or tags.get("LANGUAGE")
+        name      = tags.get("title") or tags.get("TITLE")
+
+        if codec_type == "video":
+            w, h = s.get("width"), s.get("height")
+            if w and h:
+                res = f"{w}x{h}"
+                if res not in resolutions:
+                    resolutions.append(res)
+        elif codec_type == "audio":
+            channels = s.get("channels")
+            entry = {
+                "language": _language_label(lang_code, name),
+                "channels": _channel_layout_label(str(channels)) if channels else "",
+                "name": name or "",
+            }
+            if entry not in audio_tracks:
+                audio_tracks.append(entry)
+        elif codec_type == "subtitle":
+            entry = {
+                "language": _language_label(lang_code, name),
+                "name": name or "",
+            }
+            if entry not in subtitle_tracks:
+                subtitle_tracks.append(entry)
+
+    if not (resolutions or audio_tracks or subtitle_tracks):
+        return None
+
+    return {
+        "resolutions": resolutions,
+        "audio_tracks": audio_tracks,
+        "subtitle_tracks": subtitle_tracks,
+    }
+
+
+async def probe_stream_technical_info(url: str) -> dict:
+    """
+    Verilen yayın URL'sini analiz ederek teknik bilgileri (çözünürlük, ses
+    dili/kanalı, altyazı) çıkarır. Önce playlist etiketlerine (RESOLUTION/
+    EXT-X-MEDIA) bakılır; orada bilgi yoksa ffprobe ile yayının aktif
+    profili doğrudan analiz edilir. Hiçbir şekilde bilgi bulunamazsa
+    "message" alanında kullanıcıya gösterilecek bir açıklama döner.
+    """
+    if not url:
+        return {
+            "resolutions": [], "audio_tracks": [], "subtitle_tracks": [],
+            "message": "Yayın URL'i bulunamadı.", "source": None,
+        }
+
+    manifest_info = None
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(connect=8, read=15, write=8, pool=8),
+            follow_redirects=True,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; HLSProxy/1.0)"},
+        ) as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+            body = resp.content[:4096]
+            ct   = resp.headers.get("content-type", "")
+            kind = _detect_stream_type(url, ct, body)
+            if kind in ("master", "hls"):
+                manifest_info = _extract_playlist_technical_info(resp.text)
+    except Exception as e:
+        logger.warning(f"[Teknik Bilgi] {url} manifest alınamadı: {e}")
+
+    if manifest_info and (
+        manifest_info["resolutions"] or manifest_info["audio_tracks"] or manifest_info["subtitle_tracks"]
+    ):
+        return {
+            "resolutions": manifest_info["resolutions"],
+            "audio_tracks": manifest_info["audio_tracks"],
+            "subtitle_tracks": manifest_info["subtitle_tracks"],
+            "message": None,
+            "source": "playlist",
+        }
+
+    # Playlist'te bilgi yayınlanmıyor (ya da playlist'e hiç ulaşılamadı) —
+    # ffprobe ile yayının şu an aktif olan profilini doğrudan analiz et.
+    probe = await _ffprobe_stream_info(url)
+    if probe:
+        note = None
+        if manifest_info and manifest_info["is_master"]:
+            note = ("Alternatif kalite/dil seçenekleri playlist'te yayınlanmadığından "
+                    "yalnızca şu an aktif profil gösteriliyor (ffprobe analizi).")
+        return {
+            "resolutions": probe["resolutions"],
+            "audio_tracks": probe["audio_tracks"],
+            "subtitle_tracks": probe["subtitle_tracks"],
+            "message": note,
+            "source": "ffprobe",
+        }
+
+    return {
+        "resolutions": [], "audio_tracks": [], "subtitle_tracks": [],
+        "message": "Yayın adresine ulaşılamadı veya teknik bilgi tespit edilemedi.",
+        "source": None,
+    }
 
 
 def _parse_m3u8(manifest: str, base: str) -> List[Tuple[str, float]]:
@@ -1000,6 +1286,24 @@ async def yayin_status(broadcast_id: str, _: bool = Depends(require_auth)):
         "total_bytes_served": 0,
         "avg_mbps":           0.0,
     }
+
+
+@router.get("/api/yayin/{broadcast_id}/teknik-bilgi")
+async def yayin_teknik_bilgi(broadcast_id: str, _: bool = Depends(require_auth)):
+    """Yayının çözünürlük / ses dili-kanalı / altyazı bilgilerini döndürür."""
+    bc = await db.get_broadcast(broadcast_id)
+    if not bc:
+        raise HTTPException(status_code=404, detail="Yayın bulunamadı")
+    return await probe_stream_technical_info(bc.get("stream_url", ""))
+
+
+@router.get("/api/stream-teknik-bilgi")
+async def stream_teknik_bilgi(url: str, _: bool = Depends(require_auth)):
+    """
+    Herhangi bir yayın URL'i (canlı yayın kanal linki dahil) için çözünürlük /
+    ses dili-kanalı / altyazı bilgilerini döndüren genel amaçlı uç nokta.
+    """
+    return await probe_stream_technical_info(url)
 
 
 # ─── Üye: HLS Proxy Stream ────────────────────────────────────────────────────

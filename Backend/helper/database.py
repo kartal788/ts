@@ -4437,6 +4437,16 @@ class Database:
                 {}, {"_id": 0, "token": 1, "name": 1, "user_id": 1, "usage": 1}
             ).to_list(None)
 
+            # ── Token'lara bağlı kullanıcıların telegram kullanıcı adlarını topla ──
+            token_user_ids = [t.get("user_id") for t in tokens if t.get("user_id")]
+            usernames_by_uid: dict = {}
+            if token_user_ids:
+                ucursor = self.dbs["tracking"]["users"].find(
+                    {"_id": {"$in": token_user_ids}}, {"_id": 1, "username": 1}
+                )
+                async for u in ucursor:
+                    usernames_by_uid[u["_id"]] = u.get("username") or ""
+
             discrepancies = []
             seen_tokens = set()
             for t in tokens:
@@ -4458,6 +4468,7 @@ class Database:
                 discrepancies.append({
                     "user_id":       t.get("user_id"),
                     "name":          t.get("name") or (f"Kullanıcı {t.get('user_id')}" if t.get("user_id") else f"Token …{token_str[-6:]}"),
+                    "username":      usernames_by_uid.get(t.get("user_id"), ""),
                     "token":         token_str,
                     "history_bytes": history_bytes,
                     "daily_bytes":   daily_bytes,
@@ -4473,6 +4484,7 @@ class Database:
                 discrepancies.append({
                     "user_id":       None,
                     "name":          f"Token …{tok_str[-6:]}" if tok_str else "Bilinmeyen",
+                    "username":      "",
                     "token":         tok_str,
                     "history_bytes": hbytes,
                     "daily_bytes":   0,
@@ -4496,6 +4508,15 @@ class Database:
                 {"token": 1, "name": 1, "user_id": 1, "usage": 1, "limits": 1},
             ).to_list(None)
 
+            token_user_ids = [t.get("user_id") for t in tokens if t.get("user_id")]
+            usernames_by_uid: dict = {}
+            if token_user_ids:
+                ucursor = self.dbs["tracking"]["users"].find(
+                    {"_id": {"$in": token_user_ids}}, {"_id": 1, "username": 1}
+                )
+                async for u in ucursor:
+                    usernames_by_uid[u["_id"]] = u.get("username") or ""
+
             result = []
             for t in tokens:
                 usage = t.get("usage", {}) or {}
@@ -4504,6 +4525,7 @@ class Database:
                 result.append({
                     "user_id":        t.get("user_id"),
                     "name":           t.get("name") or (f"Kullanıcı {t.get('user_id')}" if t.get("user_id") else None),
+                    "username":       usernames_by_uid.get(t.get("user_id"), ""),
                     "token":          t.get("token"),
                     "daily_used_bytes":  daily_bytes,
                     "daily_limit_gb":    limits.get("daily_limit_gb", 0),
@@ -4543,6 +4565,7 @@ class Database:
                 result.append({
                     "user_id":         uid,
                     "name":            name,
+                    "username":        u.get("username") or "",
                     "expires_at":      expiry.isoformat() if isinstance(expiry, datetime) else expiry,
                     "hours_remaining": remaining,
                 })
@@ -4580,6 +4603,7 @@ class Database:
                 result.append({
                     "user_id":       uid,
                     "name":          name,
+                    "username":      u.get("username") or "",
                     "expired_at":    expiry.isoformat() if isinstance(expiry, datetime) else expiry,
                     "overdue_hours": overdue_hours,
                 })
@@ -4669,6 +4693,7 @@ class Database:
                 result.append({
                     "user_id":            uid,
                     "name":               name,
+                    "username":           u.get("username") or "",
                     "pending_count":      r.get("count", 0),
                     "last_title":         r.get("last_title") or r.get("last_link") or "",
                     "last_media_type":    r.get("last_media_type"),
@@ -4702,6 +4727,7 @@ class Database:
                 result.append({
                     "user_id":      u.get("_id"),
                     "name":         name,
+                    "username":     u.get("username") or "",
                     "plan_label":   pp.get("label") or "",
                     "duration_days": pp.get("duration", 0),
                     "price":        pp.get("price", 0),

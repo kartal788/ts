@@ -951,9 +951,19 @@
 
     function getUserDisplayName(u) {
         let name = u.first_name || '';
-        if (u.username) name += (name ? ' ' : '') + `(@${u.username})`;
         if (!name) name = `Kullanıcı ${u._id}`;
         return name;
+    }
+
+    function escHtmlLocal(s) {
+        return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    function getUserTelegramLink(u) {
+        const uname = (u.username || '').replace(/^@/, '');
+        return uname
+            ? `<a href="https://t.me/${escHtmlLocal(uname)}" target="_blank" rel="noopener" class="text-primary hover:underline" onclick="event.stopPropagation()"><i class="fa-brands fa-telegram"></i> @${escHtmlLocal(uname)}</a>`
+            : '';
     }
 
     function renderDesktopRows(slice) {
@@ -972,6 +982,7 @@
         tbody.innerHTML = slice.map(u => {
             const expiry = formatExpiry(u.subscription_expiry);
             const name = getUserDisplayName(u);
+            const tgLink = getUserTelegramLink(u);
             const safeName = name.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
             const statusBadge = getStatusBadge(u.subscription_status);
 
@@ -979,7 +990,10 @@
                 <tr>
                     <td class="px-6 py-4">
                         <div class="font-semibold section-title">${name}</div>
-                        <div class="text-xs text-soft mt-1">ID: ${u._id}</div>
+                        <div class="text-xs text-soft mt-1 flex items-center gap-2 flex-wrap">
+                            <span>ID: ${u._id}</span>
+                            ${tgLink}
+                        </div>
                     </td>
                     <td class="px-6 py-4 text-center">${statusBadge}</td>
                     <td class="px-6 py-4 text-center text-sm section-title">${expiry}</td>
@@ -1012,6 +1026,7 @@
         mobileWrap.innerHTML = slice.map(u => {
             const expiry = formatExpiry(u.subscription_expiry);
             const name = getUserDisplayName(u);
+            const tgLink = getUserTelegramLink(u);
             const safeName = name.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
             const statusBadge = getStatusBadge(u.subscription_status);
 
@@ -1021,6 +1036,7 @@
                         <div class="min-w-0">
                             <div class="font-semibold section-title break-words">${name}</div>
                             <div class="text-xs text-soft mt-1 break-all">ID: ${u._id}</div>
+                            ${tgLink ? `<div class="text-xs mt-1">${tgLink}</div>` : ''}
                         </div>
                         <div class="shrink-0">${statusBadge}</div>
                     </div>

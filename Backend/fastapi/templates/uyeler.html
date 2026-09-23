@@ -202,6 +202,10 @@
       const name = m.user_name || m.name || `Kullanıcı ${m.user_id || "?"}`;
       const uid  = m.user_id || "";
       const token = m.token || "";
+      const tgUsername = (m.username || "").replace(/^@/, "");
+      const tgLink = tgUsername
+        ? `<a href="https://t.me/${escHtml(tgUsername)}" target="_blank" rel="noopener" class="text-primary hover:underline text-xs" onclick="event.stopPropagation()"><i class="fa-brands fa-telegram"></i> @${escHtml(tgUsername)}</a>`
+        : "";
       const status = m.subscription_status || m.status || "unknown";
       const expiry = m.subscription_expiry || m.expiry || null;
       const totalBytes   = m.total_bytes   || 0;
@@ -218,7 +222,10 @@
             </div>
             <div>
               <div class="font-semibold text-text leading-tight">${escHtml(name)}</div>
-              <div class="text-xs theme-text-secondary mt-0.5">${uid ? `ID: ${uid}` : token ? `Token: ${token.substring(0,8)}…` : "—"}</div>
+              <div class="text-xs theme-text-secondary mt-0.5 flex items-center gap-2 flex-wrap">
+                <span>${uid ? `ID: ${uid}` : token ? `Token: ${token.substring(0,8)}…` : "—"}</span>
+                ${tgLink}
+              </div>
             </div>
           </div>
         </td>

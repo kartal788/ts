@@ -14,6 +14,7 @@ RUN apt-get update && \
         ca-certificates \
         locales \
         unzip \
+        mediainfo \
         ffmpeg && \
     locale-gen en_US.UTF-8 && \
     # rclone kur

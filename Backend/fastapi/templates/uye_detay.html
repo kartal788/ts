@@ -31,6 +31,7 @@
         <div class="flex flex-wrap items-center gap-3 mb-1">
           <h1 class="text-xl font-bold text-text" id="member-name">—</h1>
           <span id="member-status-badge"></span>
+          <span id="member-telegram"></span>
         </div>
         <div class="flex flex-wrap gap-4 text-sm theme-text-secondary" id="member-meta">
           <span id="meta-id"></span>
@@ -764,6 +765,11 @@
       document.getElementById("header-name").textContent = name;
       document.getElementById("member-name").textContent = name;
       document.getElementById("avatar-letter").textContent = (name.charAt(0) || "?").toUpperCase();
+
+      const tgUsername = (member?.username || "").replace(/^@/, "");
+      document.getElementById("member-telegram").innerHTML = tgUsername
+        ? `<a href="https://t.me/${escHtml(tgUsername)}" target="_blank" rel="noopener" class="text-primary hover:underline text-sm"><i class="fa-brands fa-telegram"></i> @${escHtml(tgUsername)}</a>`
+        : "";
 
       // Durum badge
       const statusLabels = {

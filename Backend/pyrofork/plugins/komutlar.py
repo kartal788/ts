@@ -27,6 +27,11 @@ ADMIN_COMMANDS = [
     ("/m3ukontrol",   None,             "Verilen M3U linklerini eş zamanlı kontrol eder; gerçek .m3u döndüren çalışan linkleri filtreler ve sonuçları .txt olarak gönderir."),
 ]
 
+# Komut değil, otomatik tetiklenen özellik — /komutlar listesinde bilgi amaçlı gösterilir.
+ADMIN_AUTO_FEATURES = [
+    ("📼 MediaInfo", "Botla DM'de bir video/ses dosyası gönderirseniz, teknik bilgilerini (çözünürlük, ses dili/kanalı, altyazı vb.) içeren MediaInfo raporunu .txt olarak geri gönderir."),
+]
+
 
 def _build_komutlar_text() -> str:
     lines = ["<b>🛠 Yönetici Komutları</b>\n"]
@@ -36,6 +41,10 @@ def _build_komutlar_text() -> str:
         # kendisine dokunulduğunda yalnızca "/xxx" kısmı mesaj olarak gider.
         header = f"{cmd} <i>{arg_hint}</i>" if arg_hint else cmd
         lines.append(f"{header}\n{desc}\n")
+    if ADMIN_AUTO_FEATURES:
+        lines.append("<b>⚡ Otomatik Özellikler</b>\n")
+        for title, desc in ADMIN_AUTO_FEATURES:
+            lines.append(f"{title}\n{desc}\n")
     return "\n".join(lines).strip()
 
 

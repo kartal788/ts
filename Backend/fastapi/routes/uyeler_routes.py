@@ -144,6 +144,7 @@ async def _build_members_list() -> list[dict]:
         result.append({
             "user_id":              token_user_id,
             "user_name":            name,
+            "username":             (user.get("username") if user else "") or "",
             "token":                token_str,
             "subscription_status":  sub_status,
             "subscription_expiry":  expiry.isoformat() if isinstance(expiry, datetime) else expiry,
@@ -167,6 +168,7 @@ async def _build_members_list() -> list[dict]:
         result.append({
             "user_id":             u.get("_id"),
             "user_name":           name,
+            "username":            u.get("username") or "",
             "token":               None,
             "subscription_status": sub_status,
             "subscription_expiry": expiry.isoformat() if isinstance(expiry, datetime) else None,
