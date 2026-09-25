@@ -18,6 +18,18 @@ from Backend.pyrofork.bot import work_loads, multi_clients, client_dc_map, clien
 ACTIVE_STREAMS: Dict[str, Dict] = {}
 RECENT_STREAMS = deque(maxlen=200)
 
+# --- file_reference refresh tuning (fetch_chunk_with_retries) ---------------
+# FileReferenceExpired sonrası refresh başarılı olsa bile bu aralıkta rastgele
+# kısa bir backoff uygulanır. Art arda expire olan chunk'ların (örn. aynı
+# stream'de aynı anda birden fazla seq) beklemeden continue edip 10 deneme
+# bütçesini <1 saniyede tüketmesini engeller.
+FILE_REF_REFRESH_BACKOFF_MIN = 0.3
+FILE_REF_REFRESH_BACKOFF_MAX = 0.5
+# Başarılı refresh sonrası tekrar denemeler bu sayıya kadar genel `tries`
+# bütçesinden ayrı sayılır (yani stream'i erken durdurmaz). Bu sayı da
+# dolarsa genel bütçeye düşülür.
+MAX_FILE_REF_REFRESH_TRIES = 6
+
 
 def get_adaptive_chunk_size(client_index: int) -> int:
     """Return the best chunk size (bytes) for this client based on recent speed.
@@ -252,8 +264,18 @@ class ByteStreamer:
                            still with 30 s timeout
             On every TimeoutError the primary client's failure counter is incremented
             so select_best_client will avoid it for future requests.
+
+            FileReferenceExpired is handled separately from the main `tries` budget:
+            a successful refresh gets its own small budget (MAX_FILE_REF_REFRESH_TRIES)
+            and a short randomized backoff (FILE_REF_REFRESH_BACKOFF_MIN/MAX) before
+            retrying, instead of an immediate `continue`, so several chunks expiring
+            at once can't burn through all 10 tries within the same second. FloodWait
+            also proactively refreshes the file_reference on the same client right
+            after its wait, before the loop is allowed to fall back to a different
+            client.
             """
             tries = 0
+            ref_refresh_tries = 0  # FileReferenceExpired sonrası refresh denemeleri — ayrı bütçe
             while tries < 10 and not stop_event.is_set():
                 # --- choose which media session to use this attempt ---
                 # Her denemede _get_media_session çağır: dead session otomatik yenilenir
@@ -331,22 +353,49 @@ class ByteStreamer:
                         seq_idx, off, tries, use_client_idx, wait_s,
                     )
                     await asyncio.sleep(wait_s)
+                    #----- FloodWait beklemesi uzun sürebilir (e.value bazen
+                    #----- 10s'nin çok üzerinde) ve bu süre içinde file_reference
+                    #----- sessizce expire olmuş olabilir. tries>=2 olduğunda bir
+                    #----- sonraki döngü farklı bir client'a geçebilir — ONDAN
+                    #----- ÖNCE, hâlâ aynı client/self.client üzerinden referansı
+                    #----- kontrol edip gerekiyorsa yenile. Böylece fallback
+                    #----- client'ta anında yeni bir FileReferenceExpired
+                    #----- turu (ve onun getirdiği ekstra client_failures cezası)
+                    #----- yaşanmaz. _refresh_file_reference kendi içinde 5s'lik
+                    #----- throttle uyguladığı için gereksiz sık çağrı yapılmaz.
+                    if chat_id is not None and message_id is not None:
+                        await _refresh_file_reference("floodwait sonrası")
                     continue
                 except FileReferenceExpired:
                     #----- Bayat file_reference — client değiştirmenin faydası
                     #----- yok, mesajı yeniden çekip TAZE bir referans almalıyız.
-                    tries += 1
+                    ref_refresh_tries += 1
                     LOGGER.warning(
                         "[chunk hatası] file_reference süresi doldu (FileReferenceExpired) "
-                        "seq=%s off=%s try=%s client=%s — yenileniyor",
-                        seq_idx, off, tries, use_client_idx,
+                        "seq=%s off=%s try=%s ref_try=%s client=%s — yenileniyor",
+                        seq_idx, off, tries, ref_refresh_tries, use_client_idx,
                     )
                     refreshed = await _refresh_file_reference("chunk fetch")
-                    if refreshed:
-                        # Yeni referansla hemen tekrar dene, geri sayım bekleme.
+                    if refreshed and ref_refresh_tries <= MAX_FILE_REF_REFRESH_TRIES:
+                        #----- Yeni referansla tekrar dene — ama HİÇ beklemeden
+                        #----- değil. Aynı stream'de art arda birden fazla chunk
+                        #----- (örn. seq 453/454) aynı anda expire olduğunda,
+                        #----- beklemesiz continue art arda gelen 8 denemeyi
+                        #----- <1 saniyede tüketip stream'i gereksiz yere
+                        #----- durduruyordu. Kısa (0.3-0.5s, jitter'lı) bir
+                        #----- backoff ekle. Bu deneme genel `tries` bütçesinden
+                        #----- SAYILMAZ — refresh kendi başına bir "başarısızlık"
+                        #----- değil, sadece TAZE referansla bir sonraki denemeye
+                        #----- geçiş.
+                        jitter = secrets.randbelow(
+                            int((FILE_REF_REFRESH_BACKOFF_MAX - FILE_REF_REFRESH_BACKOFF_MIN) * 1000)
+                        ) / 1000
+                        await asyncio.sleep(FILE_REF_REFRESH_BACKOFF_MIN + jitter)
                         continue
-                    # chat_id/message_id bilinmiyor ya da yenileme başarısız oldu
-                    # → normal exponential back-off'a düş.
+                    # Yenileme başarısız oldu YA DA refresh'e özel bütçe
+                    # (MAX_FILE_REF_REFRESH_TRIES) tükendi → genel deneme
+                    # sayacına düş ve normal exponential back-off'a geç.
+                    tries += 1
                 except Exception as e:
                     tries += 1
                     err_str = str(e).lower()
