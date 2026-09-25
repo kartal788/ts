@@ -1047,8 +1047,9 @@ async def admin_review_subscription_request_api(user_id: int, payload: dict) -> 
 
     async def _update_admin_messages(label: str):
         """
-        Botun yöneticilere gönderdiği bekleyen onay mesajını günceller: onayla/reddet/banla
-        butonlarını kaldırır ve talebin web panelinden hangi kararla sonuçlandığını ekler.
+        Botun yöneticilere gönderdiği bekleyen onay mesajını günceller: eski mesajı
+        (onayla/reddet/banla butonlarıyla birlikte) siler ve yerine talebin web
+        panelinden hangi kararla sonuçlandığını belirten yeni bir mesaj gönderir.
         Bu sayede talep botta hâlâ 'beklemede' görünmeye devam etmez.
         """
         if not admin_messages:
@@ -1065,18 +1066,26 @@ async def admin_review_subscription_request_api(user_id: int, payload: dict) -> 
             except Exception:
                 original_text = ""
             try:
-                await StreamBot.edit_message_text(
+                await StreamBot.delete_messages(
                     chat_id=am["chat_id"],
-                    message_id=am["message_id"],
-                    text=f"{original_text}{status_section}" if original_text else status_section,
-                    parse_mode=_enums.ParseMode.HTML,
-                    disable_web_page_preview=True,
-                    reply_markup=None,
+                    message_ids=am["message_id"],
                 )
             except Exception as e:
                 _logger.warning(
-                    "Panel işlemi sonrası admin mesajı güncellenemedi (%s/%s): %s",
+                    "Panel işlemi sonrası admin mesajı silinemedi (%s/%s): %s",
                     am.get("chat_id"), am.get("message_id"), e
+                )
+            try:
+                await StreamBot.send_message(
+                    chat_id=am["chat_id"],
+                    text=f"{original_text}{status_section}" if original_text else status_section,
+                    parse_mode=_enums.ParseMode.HTML,
+                    disable_web_page_preview=True,
+                )
+            except Exception as e:
+                _logger.warning(
+                    "Panel işlemi sonrası yeni admin mesajı gönderilemedi (%s): %s",
+                    am.get("chat_id"), e
                 )
 
     if action == "approve":

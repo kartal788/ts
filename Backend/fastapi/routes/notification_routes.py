@@ -1541,31 +1541,27 @@ async def admin_review_content_requests(request: Request) -> dict:
                 except Exception:
                     original_text = ""
                 try:
-                    await _StreamBot.edit_message_text(
+                    await _StreamBot.delete_messages(
                         chat_id=am["chat_id"],
-                        message_id=am["message_id"],
-                        text=f"{original_text}{status_section}" if original_text else status_section,
-                        parse_mode=enums.ParseMode.HTML,
-                        disable_web_page_preview=True,
-                        reply_markup=None,
+                        message_ids=am["message_id"],
                     )
                 except Exception as e:
                     _logger.warning(
-                        "Panel onayı sonrası admin mesajı güncellenemedi (%s/%s): %s",
+                        "Panel onayı sonrası admin mesajı silinemedi (%s/%s): %s",
                         am.get("chat_id"), am.get("message_id"), e
                     )
-
-    # Yöneticinin botuna işlemi özetleyen yeni bir mesaj gönder
-    # (örn. "Ahmet'in Inception talebi web üzerinden onaylandı.")
-    if updated > 0:
-        await _notify_admins_web_action(
-            admin_name=admin_name,
-            requester_names=action_requester_names,
-            title=action_title,
-            media_type=action_media_type,
-            link=action_link,
-            new_status=new_status,
-        )
+                try:
+                    await _StreamBot.send_message(
+                        chat_id=am["chat_id"],
+                        text=f"{original_text}{status_section}" if original_text else status_section,
+                        parse_mode=enums.ParseMode.HTML,
+                        disable_web_page_preview=True,
+                    )
+                except Exception as e:
+                    _logger.warning(
+                        "Panel onayı sonrası yeni admin mesajı gönderilemedi (%s): %s",
+                        am.get("chat_id"), e
+                    )
 
     return {"ok": True, "updated": updated, "status": new_status}
 

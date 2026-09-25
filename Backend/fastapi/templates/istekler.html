@@ -37,11 +37,11 @@
   <!-- Durum Sekmeleri -->
   <div class="flex flex-wrap gap-2 mb-6" id="status-tabs">
     <button data-status="all" onclick="setStatusFilter('all')"
-      class="istek-tab active px-4 py-2 rounded-xl text-sm font-semibold border transition-all">
+      class="istek-tab px-4 py-2 rounded-xl text-sm font-semibold border transition-all">
       Tümü <span class="istek-tab-count" id="cnt-all">0</span>
     </button>
     <button data-status="pending" onclick="setStatusFilter('pending')"
-      class="istek-tab px-4 py-2 rounded-xl text-sm font-semibold border transition-all">
+      class="istek-tab active px-4 py-2 rounded-xl text-sm font-semibold border transition-all">
       <i class="fas fa-clock text-yellow-400 mr-1"></i> Beklemede <span class="istek-tab-count" id="cnt-pending">0</span>
     </button>
     <button data-status="approved" onclick="setStatusFilter('approved')"
@@ -98,7 +98,7 @@
 
 <script>
   let ALL_GROUPS = [];
-  let CURRENT_FILTER = 'all';
+  let CURRENT_FILTER = 'pending';
 
   function escHtml(s) {
     return String(s || '').replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
@@ -315,6 +315,9 @@
       const tgLink = tgUsername
         ? `<a href="https://t.me/${escHtml(tgUsername)}" target="_blank" rel="noopener" class="text-primary hover:underline" onclick="event.stopPropagation()"><i class="fa-brands fa-telegram"></i> @${escHtml(tgUsername)}</a>`
         : '';
+      const renewalBadge = r.is_renewal
+        ? `<div class="text-xs text-amber-400 mt-1"><i class="fas fa-rotate"></i> Yenileme — önceki abonelik ${fmtDate(r.previous_expiry)} tarihinde bitti</div>`
+        : '';
       return `<div class="theme-card rounded-2xl border p-4 flex flex-wrap items-center justify-between gap-3" data-user-id="${r.user_id}">
         <div class="min-w-0">
           <div class="font-semibold text-text truncate">${safeName} <span class="text-xs theme-text-secondary">(ID: ${r.user_id})</span>${tgLink ? ` &nbsp;${tgLink}` : ''}</div>
@@ -322,6 +325,7 @@
             📦 ${escHtml(planText)} — ${r.price || 0} ${escHtml(r.currency || 'TRY')}
             &nbsp;•&nbsp; 🕒 ${fmtDate(r.requested_at)}
           </div>
+          ${renewalBadge}
         </div>
         <div class="flex items-center gap-2 flex-shrink-0">
           <button onclick="reviewPendingSub(${r.user_id}, '${safeName}', 'approve')"

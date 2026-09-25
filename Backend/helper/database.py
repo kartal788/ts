@@ -4616,7 +4616,7 @@ class Database:
         try:
             cursor = self.dbs["tracking"]["users"].find(
                 {"pending_payment": {"$exists": True, "$ne": None}},
-                {"_id": 1, "first_name": 1, "username": 1, "pending_payment": 1},
+                {"_id": 1, "first_name": 1, "username": 1, "pending_payment": 1, "subscription_expiry": 1},
             ).sort("pending_payment.date", DESCENDING)
             users = await cursor.to_list(None)
 
@@ -4627,6 +4627,19 @@ class Database:
                     continue
                 name = u.get("first_name") or u.get("username") or f"Kullanıcı {u.get('_id')}"
                 requested_at = pp.get("date")
+
+                # Talep anında kullanıcının önceden bir aboneliği olup olmadığını
+                # (ve varsa o abonelik bitmiş mi) belirle — bot mesajındaki
+                # "🔄 Yenileme: Evet — önceki abonelik ... tarihinde bitti" bilgisiyle
+                # aynı mantık: sadece önceki abonelik, talep sırasında ZATEN
+                # bitmişse "yenileme" sayılır (aktif abonelik üzerine uzatma değil).
+                previous_expiry = u.get("subscription_expiry")
+                is_renewal = False
+                if previous_expiry and isinstance(previous_expiry, datetime):
+                    compare_at = requested_at if isinstance(requested_at, datetime) else datetime.utcnow()
+                    if previous_expiry <= compare_at:
+                        is_renewal = True
+
                 result.append({
                     "user_id":      u.get("_id"),
                     "name":         name,
@@ -4636,6 +4649,8 @@ class Database:
                     "price":        pp.get("price", 0),
                     "currency":     pp.get("currency", "TRY"),
                     "requested_at": requested_at.isoformat() if isinstance(requested_at, datetime) else requested_at,
+                    "is_renewal":       is_renewal,
+                    "previous_expiry":  previous_expiry.isoformat() if is_renewal and isinstance(previous_expiry, datetime) else None,
                 })
             return result
         except Exception as e:

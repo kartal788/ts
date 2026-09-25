@@ -165,10 +165,21 @@ def parse_range_header(range_header: str, file_size: int):
     return start, end
 
 
-def select_best_client(target_dc: int) -> int:
+def select_best_client(target_dc: int, user_token: str = None) -> int:
     """Pick the best available client.
 
-    Score = work_loads + 3 × client_failures
+    Yeni davranış — her üye kendi (mümkünse ayrı) botunu kullanır:
+      1) Kullanıcının hâlihazırda aktif bir stream'i varsa, TUTARLILIK için
+         o stream'in kullandığı bot ile devam edilir (aynı üyenin farklı
+         parçaları/segmentleri farklı botlara dağılmasın).
+      2) Aksi halde, şu anda HİÇBİR aktif stream tarafından kullanılmayan
+         (tamamen boşta olan) bir bot varsa o seçilir — böylece her üye
+         mümkün olduğunca kendine ayrı bir bot kullanmış olur.
+      3) Boşta bot yoksa (yani 15+1 botun hepsi başka üyeler tarafından
+         kullanımdaysa) ortak/paylaşımlı moda geçilir: work_loads + 3×
+         client_failures skoruna göre en az yüklü bot paylaşılır — tıpkı
+         eski (kullanıcı bazsız) davranış gibi.
+
     Failures are weighted 3× so a bot that has been timing out / erroring
     is deprioritised even if its current workload is low.
     DC-aware selection is kept but currently commented out (uncomment to
@@ -188,15 +199,42 @@ def select_best_client(target_dc: int) -> int:
     #     return selected
     # ------------------------------------------------------------------------
 
-    if multi_clients:
-        selected = min(multi_clients.keys(), key=_score)
-        LOGGER.debug(
-            "Selected client %s (DC %s) score=%s",
-            selected, client_dc_map.get(selected, "?"), _score(selected),
-        )
-        return selected
+    if not multi_clients:
+        return 0
 
-    return 0
+    if user_token:
+        # Şu anda aktif olan stream'lerden hangi bot'un hangi üye(ler)
+        # tarafından kullanıldığını çıkar.
+        client_owners: Dict[int, set] = {}
+        for s in ACTIVE_STREAMS.values():
+            if s.get("status") != "active":
+                continue
+            idx = s.get("client_index")
+            if idx is None or idx not in multi_clients:
+                continue
+            owner = (s.get("meta") or {}).get("user_token") or ""
+            client_owners.setdefault(idx, set()).add(owner)
+
+        # 1) Üye zaten bir bot kullanıyorsa aynı bot ile devam et.
+        for idx, owners in client_owners.items():
+            if user_token in owners:
+                LOGGER.debug("Sticky client %s for user_token %s...", idx, user_token[:8])
+                return idx
+
+        # 2) Tamamen boşta (başka hiçbir üye tarafından kullanılmayan) bot var mı?
+        free = [i for i in multi_clients.keys() if i not in client_owners]
+        if free:
+            selected = min(free, key=_score)
+            LOGGER.debug("Dedicated free client %s for user_token %s...", selected, user_token[:8])
+            return selected
+
+    # 3) Boşta bot yok (ya da kullanıcı belirtilmedi) → ortak/en az yüklü bot.
+    selected = min(multi_clients.keys(), key=_score)
+    LOGGER.debug(
+        "Shared client %s (DC %s) score=%s",
+        selected, client_dc_map.get(selected, "?"), _score(selected),
+    )
+    return selected
 
 
 async def decay_client_failures() -> None:
@@ -668,7 +706,7 @@ async def virtual_media_streamer(
     from urllib.parse import unquote as _unquote
     from fastapi.responses import Response as _PlainResp
 
-    index = select_best_client(0)
+    index = select_best_client(0, token)
     tg_client = multi_clients[index]
     if tg_client not in _streamer_by_client:
         _streamer_by_client[tg_client] = ByteStreamer(tg_client, index)
@@ -1483,7 +1521,7 @@ async def media_streamer(
     target_dc = file_id.dc_id
     LOGGER.debug(f"File msg_id={msg_id} is in DC {target_dc}")
 
-    index = select_best_client(target_dc)
+    index = select_best_client(target_dc, token)
     tg_client = multi_clients[index]
 
     if tg_client not in _streamer_by_client:
