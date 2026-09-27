@@ -20,7 +20,7 @@ from Backend.helper.virtual_dl import resolve_virtual_parts, virtual_stream_gene
 from Backend.pyrofork.bot import StreamBot, work_loads, multi_clients, client_dc_map, client_failures, client_avg_mbps
 from Backend.config import Telegram
 from Backend.logger import LOGGER
-from Backend.fastapi.security.tokens import verify_token
+from Backend.fastapi.security.tokens import verify_token, check_ip_device_limits
 from Backend.fastapi.security.credentials import require_auth
 import asyncio
 
@@ -583,6 +583,25 @@ async def stream_handler(
                 )
             else:
                 raise HTTPException(status_code=429, detail="Günlük limit doldu. Yeni yayın başlatılamaz.")
+
+    # --- Cihaz / eşzamanlı bağlantı limiti kontrolü ---
+    # check_ip_device_limits() ACTIVE_STREAMS'i tokene göre sayar; IDM gibi
+    # segment tabanlı indiriciler her paralel bağlantıyı ayrı "cihaz" olarak
+    # açtığından, bu kontrol onları da otomatik olarak sınırlar.
+    token_data = await check_ip_device_limits(token, token_data, request)
+    if token_data.get("limit_exceeded") == "device":
+        _user_agent = (request.headers.get("User-Agent") or "")
+        _is_download_manager = any(
+            kw in _user_agent for kw in
+            ("Internet Download Manager", "IDM", "GetRight", "Free Download Manager", "FDM")
+        )
+        _detail = (
+            "Eşzamanlı bağlantı/cihaz limiti aşıldı."
+            + (" IDM/segment tabanlı bir indirici tespit edildi — bu tür araçlar aynı anda çok sayıda "
+               "bağlantı açtığı için limite hızlıca takılır; tek bağlantılı indirmeyi deneyin."
+               if _is_download_manager else "")
+        )
+        raise HTTPException(status_code=429, detail=_detail)
 
     try:
         decoded = await decode_string(id)
