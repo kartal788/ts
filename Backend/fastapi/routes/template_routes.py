@@ -493,6 +493,23 @@ async def link_ekle_page(request: Request, _: bool = Depends(require_auth)):
     })
 
 
+async def webdav_page(request: Request, _: bool = Depends(require_auth)):
+    theme_name = request.session.get("theme", "purple_gradient")
+    theme = get_theme(theme_name)
+    current_user = get_current_user(request)
+    owner_name = await _get_owner_name()
+
+    return templates.TemplateResponse("webdav.html", {
+        "request": request,
+        "theme": theme,
+        "themes": get_all_themes(),
+        "current_theme": theme_name,
+        "app_name": Telegram.ISIM,
+        "current_user": current_user,
+        "owner_name": owner_name,
+    })
+
+
 async def sunucu_page(request: Request, _: bool = Depends(require_auth)):
     theme_name = request.session.get("theme", "purple_gradient")
     theme = get_theme(theme_name)

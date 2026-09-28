@@ -677,6 +677,22 @@ async def stream_handler(
             )
         return await rclone_streamer(request, rclone_remote, rclone_path, token_data, token, force_download=bool(dl))
 
+    # ── WebDAV dosyası ────────────────────────────────────────────────────────
+    webdav_id   = decoded.get("webdav_id")
+    webdav_path = decoded.get("webdav_path")
+    if webdav_id and webdav_path and not msg_id:
+        from Backend.helper.stream_token import media_token_manager
+        if not media_token_manager.verify(gecicitoken, token, id):
+            LOGGER.warning(
+                f"[dl] WebDAV geçersiz gecici token — gecicitoken={gecicitoken[:10]}... "
+                f"token={token[:8]}... id={id[:20]}..."
+            )
+            raise HTTPException(
+                status_code=403,
+                detail="Geçersiz veya süresi dolmuş link. Tekrar izlemek/indirmek için sayfayı yenileyin.",
+            )
+        return await webdav_streamer(request, webdav_id, webdav_path, token_data, token, force_download=bool(dl), stream_id_hash=id)
+
     if not msg_id:
         raise HTTPException(status_code=400, detail="Missing id")
 
@@ -1249,6 +1265,221 @@ async def rclone_streamer(
         status_code=206 if range_header else 200,
         media_type=mime_type,
         headers=headers,
+    )
+
+
+async def webdav_streamer(
+    request: Request,
+    webdav_id: str,
+    webdav_path: str,
+    token_data: dict = None,
+    token: str = None,
+    force_download: bool = False,
+    stream_id_hash: str = None,
+):
+    """
+    WebDAV sunucusundaki dosyayı HTTP Range destekli stream eder.
+    WebDAV kimlik bilgileri sunucuda kalır; istemci yalnızca imzalı /dl/ linkini görür.
+    """
+    import mimetypes as _mt
+    from pathlib import PurePosixPath as _PP
+    from Backend.helper import webdav as _dav
+
+    server = await _dav.get_server(webdav_id)
+    if not server:
+        raise HTTPException(status_code=404, detail="WebDAV sunucusu bulunamadı (silinmiş olabilir)")
+
+    file_name = _PP(webdav_path).name
+    try:
+        file_size = await _dav.stat_size(server, webdav_path)
+    except _dav.WebDAVError:
+        raise HTTPException(status_code=502, detail="WebDAV sunucusuna ulaşılamadı")
+    except Exception:
+        _logger.error("WebDAV boyut hatası", exc_info=True)
+        raise HTTPException(status_code=502, detail="WebDAV sunucusuna ulaşılamadı")
+    if not file_size:
+        raise HTTPException(status_code=404, detail="WebDAV dosyası bulunamadı")
+
+    mime_type = _mt.guess_type(file_name)[0] or "video/x-matroska"
+
+    range_header = request.headers.get("Range", "")
+    start, end = parse_range_header(range_header, file_size)
+    req_length = end - start + 1
+
+    # ── Hız limiti ────────────────────────────────────────────────────────────
+    _global_rate = 0.0
+    try:
+        if (Telegram.HIZ_LIMITI or "").strip():
+            _global_rate = float(Telegram.HIZ_LIMITI)
+    except ValueError:
+        pass
+    _user_rate = 0.0
+    if token_data:
+        try:
+            _user_rate = float(token_data.get("limits", {}).get("speed_limit_mbps") or 0)
+        except (ValueError, TypeError):
+            pass
+    total_rate = _user_rate if _user_rate > 0 else _global_rate
+
+    common_headers = {
+        "Content-Type": mime_type,
+        "Content-Length": str(req_length),
+        "Accept-Ranges": "bytes",
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Expose-Headers": "Content-Length, Content-Range, Accept-Ranges",
+    }
+    if range_header:
+        common_headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
+
+    # HEAD isteği: aktif stream kaydı oluşturmadan yanıtla
+    if request.method == "HEAD":
+        from fastapi.responses import Response as _Resp
+        return _Resp(
+            status_code=206 if range_header else 200,
+            headers={
+                **common_headers,
+                "Content-Disposition": safe_content_disposition(file_name, "inline"),
+                "Cache-Control": "public, max-age=3600",
+            },
+        )
+
+    # ── İzleme geçmişi için imdb_id / sertifika / başlık ─────────────────────
+    # WebDAV kaydının telegram[].id alanı encoded_string'dir (= /dl id parametresi),
+    # bu yüzden Telegram akışındaki aynı arama burada da çalışır.
+    _db_title = None
+    _db_imdb = None
+    _db_cert_tr = _db_cert_de = _db_cert_us = None
+    if stream_id_hash:
+        try:
+            _db_title = await db.get_title_by_stream_id(stream_id_hash)
+            _doc = await db.get_document_by_stream_id(stream_id_hash)
+            if _doc:
+                _db_imdb = _doc.get("imdb_id")
+                _db_cert_tr = _doc.get("certification_tr")
+                _db_cert_de = _doc.get("certification_de")
+                _db_cert_us = _doc.get("certification_us")
+        except Exception:
+            _logger.warning("[webdav] imdb_id araması başarısız", exc_info=True)
+
+    stream_id = secrets.token_hex(8)
+    ACTIVE_STREAMS[stream_id] = {
+        "stream_id": stream_id,
+        "status": "active",
+        "total_bytes": 0,
+        "start_ts": time.time(),
+        "last_ts": time.time(),
+        "avg_mbps": 0.0,
+        "instant_mbps": 0.0,
+        "peak_mbps": 0.0,
+        "rate_limit_mbps": total_rate,
+        "meta": {
+            "title": _db_title or file_name,
+            "imdb_id": _db_imdb,
+            "certification_tr": _db_cert_tr,
+            "certification_de": _db_cert_de,
+            "certification_us": _db_cert_us,
+            "client_host": request.client.host if request.client else None,
+            "user_name": token_data.get("name", "Unknown") if token_data else "Unknown",
+            "user_token": token or "",
+        },
+    }
+    if token:
+        await db.add_device_session(token, stream_id)
+
+    async def _webdav_gen():
+        _sent = 0
+        _t0 = time.time()
+        _throttle_start = time.monotonic()
+        _throttle_sent = 0
+        _finished_ok = False
+        try:
+            async for data in _dav.stream_range(server, webdav_path, start, end):
+                _sent += len(data)
+
+                _info = ACTIVE_STREAMS.get(stream_id)
+                if _info is not None:
+                    _elapsed = (time.time() - _t0) or 0.001
+                    _info["total_bytes"] = _sent
+                    _info["last_ts"] = time.time()
+                    _info["avg_mbps"] = round((_sent / _elapsed) / (1024 * 1024), 2)
+
+                    _lim = _info.get("rate_limit_mbps", 0.0)
+                    if _lim > 0:
+                        _rate_bps = _lim * 1024 * 1024 / 8
+                        _throttle_sent += len(data)
+                        _exp = _throttle_sent / _rate_bps
+                        _slp = _exp - (time.monotonic() - _throttle_start)
+                        if _slp > 0.005:
+                            await asyncio.sleep(_slp)
+
+                if ACTIVE_STREAMS.get(stream_id, {}).get("force_stop"):
+                    LOGGER.info("force_stop set for stream %s — stopping generator", stream_id)
+                    _info = ACTIVE_STREAMS.get(stream_id)
+                    if _info:
+                        _info["status"] = "cancelled"
+                    raise asyncio.CancelledError("daily_limit_exceeded")
+                yield data
+            _finished_ok = True
+        except _dav.WebDAVError as e:
+            # Yanıt başlığı gönderildi; bağlantıyı keserek istemcinin yeniden denemesini sağla
+            LOGGER.error("[webdav] stream hatası (%s): %s", file_name, e)
+        finally:
+            _end_ts = time.time()
+            _dur = _end_ts - _t0
+            _avg = round((_sent / (1024 * 1024)) / max(_dur, 1e-6), 3)
+            _final_status = "finished" if _finished_ok else "cancelled"
+            _info = ACTIVE_STREAMS.get(stream_id)
+            if _info:
+                _info["status"] = _final_status
+                _info["end_ts"] = _end_ts
+                _info["total_bytes"] = _sent
+                _info["duration"] = _dur
+                _info["avg_mbps"] = _avg
+
+            # Telegram / yerel dosya akışlarındaki gibi stream_analytics'e yaz —
+            # "İzleme Geçmişi" ve "Sana Özel" önerileri bu koleksiyondan okunur.
+            # Sadece anlamlı boyuttaki istekleri kaydet (HEAD / küçük range'leri atla).
+            if _sent > 0:
+                _meta = (_info or {}).get("meta") or {}
+                asyncio.create_task(db.log_stream_stats({
+                    "stream_id":    stream_id,
+                    "msg_id":       None,
+                    "chat_id":      None,
+                    "dc_id":        None,
+                    "client_index": None,
+                    "total_bytes":  _sent,
+                    "duration":     _dur,
+                    "avg_mbps":     _avg,
+                    "peak_mbps":    _avg,
+                    "status":       _final_status,
+                    "parallelism":  1,
+                    "chunk_size":   None,
+                    "meta":         _meta,
+                }))
+
+            async def _pop():
+                await asyncio.sleep(3)
+                try:
+                    if stream_id in ACTIVE_STREAMS:
+                        RECENT_STREAMS.appendleft(ACTIVE_STREAMS.pop(stream_id))
+                except Exception:
+                    pass
+                if token:
+                    await db.remove_device_session(token, stream_id)
+            asyncio.create_task(_pop())
+
+    if token and token_data:
+        asyncio.create_task(track_usage_from_stats(stream_id, token, token_data))
+
+    return StreamingResponse(
+        _webdav_gen(),
+        status_code=206 if range_header else 200,
+        media_type=mime_type,
+        headers={
+            **common_headers,
+            "Content-Disposition": safe_content_disposition(file_name, "attachment" if force_download else "inline"),
+            "Cache-Control": "no-cache",
+        },
     )
 
 

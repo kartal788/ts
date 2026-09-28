@@ -13,13 +13,14 @@ from Backend.helper.db_scheduler import start_scheduler, stop_scheduler
 from Backend.fastapi.routes.yayin_routes import start_scheduler as start_yayin_scheduler, stop_scheduler as stop_yayin_scheduler
 from Backend.fastapi.routes.stremio_routes import router as stremio_router, admin_catalog_router
 from Backend.fastapi.routes.subtitle_routes import router as subtitle_router
+from Backend.fastapi.routes.webdav_routes import router as webdav_router
 from Backend.fastapi.routes.yayin_routes import router as yayin_router
 from Backend.fastapi.routes.template_routes import (
     login_page, login_post, logout, set_theme, dashboard_page,
     media_management_page, edit_media_page,
     admin_dashboard_page, admin_subscriptions_page, admin_access_page, canli_page,
     link_ekle_page, istatistik_page, sunucu_page, settings_page,
-    istekler_page, kataloglar_page, araclar_page
+    istekler_page, kataloglar_page, araclar_page, webdav_page
 )
 from Backend.fastapi.routes.arac_routes import (
     ayni_status_api, ayni_start_api,
@@ -471,6 +472,7 @@ app.include_router(stremio_router)
 app.include_router(admin_catalog_router)
 app.include_router(yayin_router)
 app.include_router(subtitle_router)
+app.include_router(webdav_router)
 
 # --- Public Routes (No Authentication Required) ---
 @app.get("/login", response_class=HTMLResponse)
@@ -1522,6 +1524,11 @@ async def canli(request: Request, _: bool = Depends(require_auth)):
 @app.get("/admin/sunucu", response_class=HTMLResponse)
 async def sunucu(request: Request, _: bool = Depends(require_auth)):
     return await sunucu_page(request, _)
+
+# --- WebDAV'dan İçerik Ekleme Sayfası ---
+@app.get("/admin/webdav", response_class=HTMLResponse)
+async def webdav(request: Request, _: bool = Depends(require_auth)):
+    return await webdav_page(request, _)
 
 @app.get("/api/sunucu/listele")
 async def sunucu_listele_route(request: Request, _: bool = Depends(require_auth)):

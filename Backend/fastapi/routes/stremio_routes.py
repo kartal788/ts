@@ -730,9 +730,15 @@ def format_bitrate(size_str: str, runtime_str: str) -> str:
     return f"{mbps:.1f} Mbps"
 
 
-def format_stream_details(filename: str, quality: str, size: str, file_id: str, certification: str = "", is_split: bool = False, runtime: str = "") -> tuple[str, str]:
-    # Kaynak: Link mi Telegram mı?
-    source_prefix = "Link" if file_id.startswith(("http://", "https://")) else Telegram.ISIM
+WEBDAV_SOURCE_LABEL = "⚡ Hızlı Sunucu"
+
+
+def format_stream_details(filename: str, quality: str, size: str, file_id: str, certification: str = "", is_split: bool = False, runtime: str = "", source_label: str = "") -> tuple[str, str]:
+    # Kaynak: WebDAV (Hızlı Sunucu) / Link / Telegram
+    if source_label:
+        source_prefix = source_label
+    else:
+        source_prefix = "Link" if file_id.startswith(("http://", "https://")) else Telegram.ISIM
 
     # Kesilmiş (parçalı/split) dosyalarda boyut emojisi 📦, normal dosyalarda 💾
     size_emoji = "📦" if is_split else "💾"
@@ -2889,6 +2895,20 @@ async def get_streams(
         quality_str = quality.get("quality", "")
         size = quality.get("size", "")
 
+        # WebDAV kaydı mı? (encoded_string içinde webdav_id var) → "Hızlı Sunucu"
+        _is_webdav = False
+        _pre_decoded = None
+        if not file_id.startswith(("http://", "https://")):
+            try:
+                from Backend.helper.encrypt import decode_string as _decode_pre
+                _pre_decoded = await _decode_pre(file_id)
+                _is_webdav = bool(
+                    isinstance(_pre_decoded, dict)
+                    and _pre_decoded.get("webdav_id") and _pre_decoded.get("webdav_path")
+                )
+            except Exception:
+                _pre_decoded = None  # aşağıdaki mevcut decode hatası yönetimi devam eder
+
         # Split dosya: tek parça file_id ile kaydedilmiş ama adı .mkv.001 ile bitiyor
         # Bu durumda dosya adındaki .001 suffix'ini temizleyerek format_stream_details'e gönder
         if _is_split and not quality.get("parts"):
@@ -2898,7 +2918,8 @@ async def get_streams(
             filename_for_display = filename
 
         stream_name, stream_title = format_stream_details(
-            filename_for_display, quality_str, size, file_id, certification=cert, is_split=_is_split, runtime=media_runtime
+            filename_for_display, quality_str, size, file_id, certification=cert, is_split=_is_split, runtime=media_runtime,
+            source_label=WEBDAV_SOURCE_LABEL if _is_webdav else "",
         )
 
         if file_id.startswith(("http://", "https://")) and "/api/sunucu/indir" in file_id:
@@ -2984,17 +3005,21 @@ async def get_streams(
             })
 
     # 2. Sıralama ve Düzenleme Bloğu
-    streams.sort(
-        key=lambda s: (
-            # 1. Kriter: İsimde "Link" geçiyorsa 1, geçmiyorsa 0 (Link olanlar üstte olur)
-            1 if s.get("name", "").startswith("Link") else 0,
-            # 2. Kriter: Çözünürlük değeri (2160, 1080 vb.)
-            get_resolution_priority(s.get("name", "")),
-            # 3. Kriter: Aynı çözünürlükteki videolarda dosya boyutu büyük olan üstte
+    # Sıra: ⚡ Hızlı Sunucu (WebDAV, yalnızca boyuta göre büyükten küçüğe)
+    #       → Link → Telegram (çözünürlük, sonra boyut)
+    def _stream_sort_key(s):
+        _name = s.get("name", "")
+        _webdav = _name.startswith(WEBDAV_SOURCE_LABEL)
+        return (
+            # 1. Kriter: grup — WebDAV 2, Link 1, Telegram 0
+            2 if _webdav else (1 if _name.startswith("Link") else 0),
+            # 2. Kriter: çözünürlük (WebDAV grubunda yok sayılır → salt boyut sıralaması)
+            0 if _webdav else get_resolution_priority(_name),
+            # 3. Kriter: dosya boyutu büyük olan üstte
             s.get("_size_bytes", 0),
-        ),
-        reverse=True  # Her üç kriter için de en yüksek değer en üstte görünür
-    )
+        )
+
+    streams.sort(key=_stream_sort_key, reverse=True)  # en yüksek değer en üstte
 
     name_count: dict = {}
     for s in streams:

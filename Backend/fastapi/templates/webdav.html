@@ -1,0 +1,370 @@
+{% extends "base.html" %}
+
+{% block title %}WebDAV'dan İçerik Ekle{% endblock %}
+
+{% block content %}
+<div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-8">
+
+    <div class="mb-6 sm:mb-8">
+        <a href="/" class="text-primary hover:underline text-sm">← Kontrol Paneli</a>
+        <h1 class="text-2xl sm:text-3xl font-bold flex items-center gap-3 mt-2">
+            <span class="inline-flex items-center justify-center w-10 h-10 rounded-full bg-primary text-white text-lg">☁️</span>
+            WebDAV'dan İçerik Ekle
+        </h1>
+        <p class="theme-text-secondary text-sm mt-1">
+            WebDAV sunucunuzdaki film ve dizileri kataloğa ekleyin. Dosyalar sizin sunucunuz üzerinden akıtılır; WebDAV şifreniz üyelere/Stremio'ya asla gösterilmez.
+        </p>
+    </div>
+
+    <div id="toast" class="fixed top-4 right-4 z-50 hidden px-5 py-3 rounded-lg shadow-xl text-white text-sm font-medium max-w-sm"></div>
+
+    <!-- 1) Sunucu profilleri -->
+    <div class="theme-card rounded-2xl shadow-lg p-6 mb-6">
+        <div class="flex items-center justify-between flex-wrap gap-2 mb-4">
+            <h2 class="text-lg font-semibold">1. WebDAV Sunucuları</h2>
+            <button onclick="dvNewServer()" class="px-4 py-2 bg-primary text-white rounded-lg text-sm hover:opacity-90">+ Yeni Sunucu</button>
+        </div>
+        <div id="dv-servers" class="space-y-2 mb-4"></div>
+
+        <div id="dv-form" class="hidden border-t border-white/10 pt-4">
+            <input type="hidden" id="dv-id">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <label class="text-xs theme-text-secondary">Ad
+                    <input id="dv-name" class="dv-input" placeholder="NAS">
+                </label>
+                <label class="text-xs theme-text-secondary">WebDAV URL
+                    <input id="dv-url" class="dv-input" placeholder="https://nas.example.com:5006/webdav">
+                </label>
+                <label class="text-xs theme-text-secondary">Kullanıcı adı
+                    <input id="dv-user" class="dv-input" autocomplete="off">
+                </label>
+                <label class="text-xs theme-text-secondary">Şifre <span id="dv-pass-hint"></span>
+                    <input id="dv-pass" type="password" class="dv-input" autocomplete="new-password">
+                </label>
+                <label class="text-xs theme-text-secondary">Kimlik doğrulama
+                    <select id="dv-auth" class="dv-input">
+                        <option value="basic">Basic</option>
+                        <option value="digest">Digest</option>
+                        <option value="none">Yok</option>
+                    </select>
+                </label>
+                <label class="text-xs theme-text-secondary">Kök klasör (isteğe bağlı)
+                    <input id="dv-root" class="dv-input" placeholder="Media">
+                </label>
+            </div>
+            <label class="flex items-center gap-2 text-sm mt-3">
+                <input type="checkbox" id="dv-ssl" checked> SSL sertifikasını doğrula
+                <span class="text-xs theme-text-secondary">(kendinden imzalı sertifikada kapatın)</span>
+            </label>
+            <div class="flex gap-2 mt-4">
+                <button onclick="dvTest()" class="px-4 py-2 border border-white/20 rounded-lg text-sm hover:bg-white/5">Bağlantıyı Test Et</button>
+                <button onclick="dvSave()" class="px-4 py-2 bg-primary text-white rounded-lg text-sm hover:opacity-90">Kaydet</button>
+                <button onclick="dvCancel()" class="px-4 py-2 border border-white/20 rounded-lg text-sm hover:bg-white/5">Vazgeç</button>
+            </div>
+            <div id="dv-form-msg" class="text-sm mt-3"></div>
+        </div>
+    </div>
+
+    <!-- 2) Gezin / tara -->
+    <div class="theme-card rounded-2xl shadow-lg p-6 mb-6">
+        <h2 class="text-lg font-semibold mb-3">2. Gezin ve Ekle</h2>
+        <div class="flex flex-wrap items-center gap-2 mb-3">
+            <select id="dv-browse-server" onchange="dvBrowse('')" class="dv-input" style="max-width:16rem"></select>
+            <button onclick="dvScan()" class="px-4 py-2 bg-primary text-white rounded-lg text-sm hover:opacity-90">
+                Bu klasörü alt klasörleriyle tara
+            </button>
+        </div>
+        <div id="dv-crumbs" class="text-xs theme-text-secondary flex flex-wrap gap-1 mb-2"></div>
+        <div id="dv-error" class="hidden text-sm text-red-400 mb-2"></div>
+        <div id="dv-list" class="space-y-1 max-h-96 overflow-y-auto"></div>
+
+        <div id="dv-scan-box" class="hidden mt-4 border-t border-white/10 pt-4">
+            <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+                <div id="dv-scan-title" class="text-sm font-medium"></div>
+                <div class="flex gap-2">
+                    <button onclick="dvSelectAll(true)" class="px-3 py-1.5 border border-white/20 rounded-lg text-xs hover:bg-white/5">Tümünü seç</button>
+                    <button onclick="dvSelectAll(false)" class="px-3 py-1.5 border border-white/20 rounded-lg text-xs hover:bg-white/5">Seçimi kaldır</button>
+                    <button id="dv-bulk-btn" onclick="dvBulkAdd()" class="px-4 py-1.5 bg-green-600 text-white rounded-lg text-xs hover:opacity-90">Seçilenleri ekle</button>
+                </div>
+            </div>
+            <label class="flex items-center gap-2 text-sm mb-2">
+                <input type="checkbox" id="dv-announce" checked> Yeni içerikleri gruba/kanala duyur
+                <span class="text-xs theme-text-secondary">(büyük arşivleri aktarırken kapatabilirsiniz)</span>
+            </label>
+            <p class="text-xs theme-text-secondary mb-2">
+                Metadata dosya adından (gerekirse klasör adlarından) otomatik bulunur. Bulunamayanlar atlanır ve raporlanır.
+            </p>
+            <div id="dv-scan-list" class="space-y-1 max-h-96 overflow-y-auto"></div>
+        </div>
+
+        <div id="dv-job" class="hidden mt-4 border-t border-white/10 pt-4">
+            <div class="flex items-center justify-between text-sm mb-2">
+                <span id="dv-job-text"></span>
+                <button id="dv-job-cancel" onclick="dvCancelJob()" class="px-3 py-1 border border-white/20 rounded-lg text-xs hover:bg-white/5">İptal</button>
+            </div>
+            <div class="w-full h-2 rounded bg-white/10 overflow-hidden"><div id="dv-job-bar" class="h-2 bg-primary" style="width:0%"></div></div>
+            <div id="dv-job-log" class="mt-3 text-xs space-y-0.5 max-h-48 overflow-y-auto"></div>
+        </div>
+    </div>
+
+    <!-- Tek dosya önizleme -->
+    <div id="dv-review" class="fixed inset-0 z-40 hidden flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+        <div class="theme-card rounded-2xl shadow-2xl p-6 w-full max-w-lg">
+            <h3 class="font-semibold mb-3">Metadata Önizleme</h3>
+            <div id="dv-review-body" class="text-sm"></div>
+            <div class="mt-3">
+                <input id="dv-review-custom" class="dv-input" placeholder="Bulunamadı / yanlış mı? Başlık ya da imdb id (tt1234567) yazıp yeniden sorgulayın">
+            </div>
+            <div class="flex gap-2 mt-4 justify-end">
+                <button onclick="dvReviewRequery()" class="px-3 py-2 border border-white/20 rounded-lg text-sm hover:bg-white/5">Yeniden sorgula</button>
+                <button onclick="dvReviewClose()" class="px-3 py-2 border border-white/20 rounded-lg text-sm hover:bg-white/5">Kapat</button>
+                <button id="dv-review-ok" onclick="dvReviewConfirm()" class="px-4 py-2 bg-green-600 text-white rounded-lg text-sm hover:opacity-90">Ekle</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 3) Eklenenler -->
+    <div class="theme-card rounded-2xl shadow-lg p-6 mb-6">
+        <div class="flex items-center justify-between mb-3">
+            <h2 class="text-lg font-semibold">3. Eklenen WebDAV İçerikleri <span id="dv-db-count" class="text-xs font-normal theme-text-secondary"></span></h2>
+            <button onclick="dvLoadAdded(0)" class="px-3 py-1.5 border border-white/20 rounded-lg text-xs hover:bg-white/5">Yenile</button>
+        </div>
+        <div id="dv-added" class="divide-y divide-white/5"></div>
+        <div class="flex justify-between mt-3">
+            <button id="dv-prev" onclick="dvLoadAdded(dvPage-1)" class="px-3 py-1.5 border border-white/20 rounded-lg text-xs hidden">← Önceki</button>
+            <button id="dv-next" onclick="dvLoadAdded(dvPage+1)" class="px-3 py-1.5 border border-white/20 rounded-lg text-xs hidden ml-auto">Sonraki →</button>
+        </div>
+    </div>
+</div>
+
+<style>
+.dv-input{width:100%;margin-top:.25rem;padding:.5rem .75rem;border-radius:.75rem;border:1px solid rgba(128,128,128,.35);background:rgba(128,128,128,.08);font-size:.875rem;color:inherit}
+.dv-input:focus{outline:2px solid var(--primary, #7c3aed)}
+.dv-row{display:flex;align-items:center;gap:.5rem;padding:.4rem .6rem;border-radius:.6rem}
+.dv-row:hover{background:rgba(128,128,128,.1)}
+</style>
+
+<script>
+// Uzak sunucudan gelen dosya adları güvenilmezdir: her zaman kaçışla yaz.
+function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function fmtSize(n){if(!n)return '';const u=['B','KB','MB','GB','TB'];let i=0;while(n>=1024&&i<4){n/=1024;i++;}return n.toFixed(1)+' '+u[i];}
+function toast(msg,type='success'){const t=document.getElementById('toast');t.textContent=msg;
+  t.className='fixed top-4 right-4 z-50 px-5 py-3 rounded-lg shadow-xl text-white text-sm font-medium max-w-sm '+(type==='success'?'bg-green-600':type==='error'?'bg-red-600':'bg-blue-600');
+  setTimeout(()=>t.classList.add('hidden'),3500);}
+async function api(url,opts){
+  const r=await fetch(url,opts);let d={};try{d=await r.json();}catch(e){}
+  if(!r.ok&&!d.error)d.error='Sunucu hatası ('+r.status+')';return d;
+}
+const J=(m,b)=>({method:m,headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
+
+let dvServers=[], dvPath='', dvScanFiles=[], dvJob=null, dvPoll=null, dvLogOff=0, dvPage=0, dvReview=null;
+
+// ── Sunucular ────────────────────────────────────────────────────────────────
+async function dvLoadServers(){
+  const d=await api('/api/sunucu/webdav/sunucular');
+  dvServers=d.servers||[];
+  const box=document.getElementById('dv-servers');
+  box.innerHTML=dvServers.length?'':'<p class="text-sm theme-text-secondary">Henüz sunucu eklenmedi.</p>';
+  dvServers.forEach(s=>{
+    const row=document.createElement('div');row.className='dv-row border border-white/10';
+    row.innerHTML=`<div class="flex-1 min-w-0"><div class="font-medium text-sm">${esc(s.name)}</div>
+      <div class="text-xs theme-text-secondary truncate">${esc(s.url)}${s.root?' / '+esc(s.root):''}</div></div>`;
+    const b=(txt,fn,cls='')=>{const x=document.createElement('button');x.textContent=txt;
+      x.className='px-3 py-1 border border-white/20 rounded-lg text-xs hover:bg-white/5 '+cls;x.onclick=fn;row.appendChild(x);};
+    b('Gözat',()=>{document.getElementById('dv-browse-server').value=s.id;dvBrowse('');
+      document.getElementById('dv-browse-server').scrollIntoView({behavior:'smooth'});});
+    b('Düzenle',()=>dvEdit(s));
+    b('Sil',()=>dvDelete(s),'text-red-400');
+    box.appendChild(row);
+  });
+  const sel=document.getElementById('dv-browse-server');const cur=sel.value;
+  sel.innerHTML=dvServers.map(s=>`<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('');
+  if(cur&&dvServers.some(s=>s.id===cur))sel.value=cur;
+  if(dvServers.length&&!document.getElementById('dv-list').children.length)dvBrowse('');
+}
+function dvFormShow(s){
+  document.getElementById('dv-form').classList.remove('hidden');
+  document.getElementById('dv-id').value=s?s.id:'';
+  document.getElementById('dv-name').value=s?s.name:'';
+  document.getElementById('dv-url').value=s?s.url:'';
+  document.getElementById('dv-user').value=s?s.username:'';
+  document.getElementById('dv-pass').value='';
+  document.getElementById('dv-pass-hint').textContent=s&&s.has_password?'(boş bırakırsanız değişmez)':'';
+  document.getElementById('dv-auth').value=s?s.auth_type:'basic';
+  document.getElementById('dv-root').value=s?s.root:'';
+  document.getElementById('dv-ssl').checked=s?s.verify_ssl:true;
+  document.getElementById('dv-form-msg').textContent='';
+}
+const dvNewServer=()=>dvFormShow(null);
+const dvEdit=s=>dvFormShow(s);
+const dvCancel=()=>document.getElementById('dv-form').classList.add('hidden');
+function dvFormData(){return{
+  id:document.getElementById('dv-id').value,name:document.getElementById('dv-name').value,
+  url:document.getElementById('dv-url').value,username:document.getElementById('dv-user').value,
+  password:document.getElementById('dv-pass').value,auth_type:document.getElementById('dv-auth').value,
+  root:document.getElementById('dv-root').value,verify_ssl:document.getElementById('dv-ssl').checked};}
+async function dvTest(){
+  const msg=document.getElementById('dv-form-msg');msg.className='text-sm mt-3';msg.textContent='Test ediliyor...';
+  const d=await api('/api/sunucu/webdav/test',J('POST',dvFormData()));
+  if(d.error){msg.className='text-sm mt-3 text-red-400';msg.textContent='✗ '+d.error;}
+  else{msg.className='text-sm mt-3 text-green-400';msg.textContent='✓ Bağlantı başarılı ('+d.items+' öğe görüldü)';}
+}
+async function dvSave(){
+  const d=await api('/api/sunucu/webdav/sunucu',J('POST',dvFormData()));
+  if(d.error){toast(d.error,'error');return;}
+  toast('Sunucu kaydedildi');dvCancel();await dvLoadServers();
+}
+async function dvDelete(s){
+  if(!confirm(`"${s.name}" silinsin mi?\nBu sunucudan eklenmiş TÜM içerikler katalogdan da kaldırılır (hiç içeriği kalmayan film/dizi kaydı da silinir). WebDAV'daki dosyalara dokunulmaz.`))return;
+  const d=await api('/api/sunucu/webdav/sunucu',J('DELETE',{id:s.id}));
+  if(d.error){toast(d.error,'error');return;}
+  toast(`Sunucu silindi, ${d.removed||0} içerik kaldırıldı`);
+  await dvLoadServers();dvLoadAdded(0);
+}
+
+// ── Gezinme ──────────────────────────────────────────────────────────────────
+const curServer=()=>document.getElementById('dv-browse-server').value;
+async function dvBrowse(path){
+  const sid=curServer();if(!sid)return;
+  dvPath=path;
+  const err=document.getElementById('dv-error'),list=document.getElementById('dv-list');
+  err.classList.add('hidden');list.innerHTML='<p class="text-sm theme-text-secondary p-2">Yükleniyor...</p>';
+  document.getElementById('dv-scan-box').classList.add('hidden');
+  const d=await api(`/api/sunucu/webdav/listele?server=${encodeURIComponent(sid)}&path=${encodeURIComponent(path)}`);
+  if(d.error){list.innerHTML='';err.textContent=d.error;err.classList.remove('hidden');return;}
+  // breadcrumb
+  const parts=path?path.split('/'):[];const cr=document.getElementById('dv-crumbs');cr.innerHTML='';
+  const mk=(label,p)=>{const a=document.createElement('a');a.href='#';a.className='text-primary hover:underline';a.textContent=label;a.onclick=e=>{e.preventDefault();dvBrowse(p);};return a;};
+  cr.appendChild(mk('Kök',''));
+  parts.forEach((seg,i)=>{cr.append(' / ');cr.appendChild(mk(seg,parts.slice(0,i+1).join('/')));});
+  list.innerHTML=d.items.length?'':'<p class="text-sm theme-text-secondary p-2">Bu klasörde klasör veya video yok.</p>';
+  d.items.forEach(it=>{
+    const row=document.createElement('div');row.className='dv-row';
+    if(it.is_dir){
+      row.innerHTML=`<span>📁</span><a href="#" class="flex-1 truncate hover:underline">${esc(it.name)}</a>`;
+      row.querySelector('a').onclick=e=>{e.preventDefault();dvBrowse(it.path);};
+    }else{
+      row.innerHTML=`<span>🎬</span><span class="flex-1 truncate">${esc(it.name)}</span>
+        <span class="text-xs theme-text-secondary">${fmtSize(it.size)}</span>`;
+      const b=document.createElement('button');
+      if(it.added){b.textContent='✓ Eklendi';b.disabled=true;b.className='px-3 py-1 text-xs text-green-400';}
+      else{b.textContent='Ekle';b.className='px-3 py-1 border border-white/20 rounded-lg text-xs hover:bg-white/5';b.onclick=()=>dvReviewOpen(it.path);}
+      row.appendChild(b);
+    }
+    list.appendChild(row);
+  });
+}
+
+// ── Tek dosya ────────────────────────────────────────────────────────────────
+async function dvReviewOpen(path,custom){
+  dvReview={path,meta:null};
+  const body=document.getElementById('dv-review-body');
+  document.getElementById('dv-review').classList.remove('hidden');
+  document.getElementById('dv-review-custom').value=custom||'';
+  document.getElementById('dv-review-ok').disabled=true;
+  body.innerHTML='<p class="theme-text-secondary">Metadata sorgulanıyor...</p>';
+  const d=await api('/api/sunucu/webdav/meta-sorgu',J('POST',{server:curServer(),path,custom_name:custom||''}));
+  if(d.error){body.innerHTML=`<p class="text-yellow-400">${esc(d.error)}</p><p class="text-xs theme-text-secondary mt-1">${esc(path)}</p>`;return;}
+  dvReview.meta=d.meta;
+  const m=d.meta,t=m.title_tr||m.title||d.file_name;
+  const se=m.media_type==='tv'?` · S${String(m.season_number||'').padStart(2,'0')}E${String(m.episode_number||'').padStart(2,'0')}`:'';
+  body.innerHTML=`<div class="flex gap-3">${m.poster?`<img src="${esc(m.poster)}" class="w-20 rounded-lg" referrerpolicy="no-referrer">`:''}
+    <div><div class="font-semibold">${esc(t)} ${m.year?`(${esc(m.year)})`:''}</div>
+    <div class="text-xs theme-text-secondary">${m.media_type==='tv'?'Dizi':'Film'}${se} · ${fmtSize(d.size)}</div>
+    <div class="text-xs theme-text-secondary mt-1 break-all">${esc(path)}</div></div></div>`;
+  document.getElementById('dv-review-ok').disabled=false;
+}
+const dvReviewClose=()=>{document.getElementById('dv-review').classList.add('hidden');dvReview=null;};
+function dvReviewRequery(){if(dvReview)dvReviewOpen(dvReview.path,document.getElementById('dv-review-custom').value.trim());}
+async function dvReviewConfirm(){
+  if(!dvReview||!dvReview.meta)return;
+  const d=await api('/api/sunucu/webdav/ekle',J('POST',{server:curServer(),path:dvReview.path,meta:dvReview.meta}));
+  if(d.error){toast(d.error,'error');return;}
+  toast('Eklendi: '+d.title);dvReviewClose();dvBrowse(dvPath);dvLoadAdded(0);
+}
+
+// ── Tarama + toplu ekleme ────────────────────────────────────────────────────
+async function dvScan(){
+  const sid=curServer();if(!sid)return;
+  const box=document.getElementById('dv-scan-box'),list=document.getElementById('dv-scan-list'),title=document.getElementById('dv-scan-title');
+  box.classList.remove('hidden');list.innerHTML='';title.textContent='Taranıyor... (büyük arşivlerde biraz sürebilir)';
+  const d=await api('/api/sunucu/webdav/tara',J('POST',{server:sid,path:dvPath}));
+  if(d.error){title.textContent='';toast(d.error,'error');return;}
+  dvScanFiles=d.files;
+  const fresh=d.files.filter(f=>!f.added).length;
+  title.textContent=`${d.count} video bulundu, ${fresh} tanesi henüz eklenmemiş`+(d.truncated?' (limit nedeniyle kesildi)':'');
+  d.files.forEach((f,i)=>{
+    const row=document.createElement('label');row.className='dv-row cursor-pointer';
+    row.innerHTML=`<input type="checkbox" data-i="${i}" ${f.added?'disabled':'checked'}>
+      <span class="flex-1 min-w-0"><span class="block truncate text-sm">${esc(f.path)}</span>
+      ${f.search_name!==f.name?`<span class="block text-xs theme-text-secondary truncate">arama: ${esc(f.search_name)}</span>`:''}</span>
+      <span class="text-xs theme-text-secondary">${f.added?'✓ eklendi':fmtSize(f.size)}</span>`;
+    list.appendChild(row);
+  });
+}
+function dvSelectAll(v){document.querySelectorAll('#dv-scan-list input[type=checkbox]:not(:disabled)').forEach(c=>c.checked=v);}
+async function dvBulkAdd(){
+  const paths=[...document.querySelectorAll('#dv-scan-list input:checked')].map(c=>dvScanFiles[+c.dataset.i].path);
+  if(!paths.length){toast('Dosya seçilmedi','info');return;}
+  if(!confirm(`${paths.length} dosya eklenecek. Devam edilsin mi?`))return;
+  const d=await api('/api/sunucu/webdav/toplu-ekle',J('POST',{server:curServer(),paths,announce:document.getElementById('dv-announce').checked}));
+  if(d.error){toast(d.error,'error');return;}
+  if(d.capped)toast('Tek seferde en fazla 500 dosya eklenir; kalanını sonra tekrar seçin','info');
+  dvJob=d.job_id;dvLogOff=0;
+  document.getElementById('dv-job').classList.remove('hidden');
+  document.getElementById('dv-job-log').innerHTML='';
+  document.getElementById('dv-bulk-btn').disabled=true;
+  dvPoll=setInterval(dvPollJob,1500);dvPollJob();
+}
+async function dvPollJob(){
+  if(!dvJob)return;
+  const j=await api(`/api/sunucu/webdav/is/${dvJob}?since=${dvLogOff}`);
+  if(j.error){clearInterval(dvPoll);return;}
+  document.getElementById('dv-job-bar').style.width=(j.total?j.done/j.total*100:0)+'%';
+  document.getElementById('dv-job-text').textContent=
+    `${j.done}/${j.total} · eklendi ${j.added} · atlandı ${j.skipped} · metadata yok ${j.no_meta} · hata ${j.failed}`+(j.current?` — ${j.current}`:'');
+  const log=document.getElementById('dv-job-log');
+  (j.log||[]).forEach(e=>{
+    const div=document.createElement('div');
+    const icon={ok:'✅',duplicate:'⏭️',no_meta:'⚠️ metadata bulunamadı',error:'❌'}[e.status]||'';
+    div.textContent=`${icon} ${e.title||e.path}${e.error?' — '+e.error:''}`;
+    if(e.status==='no_meta'||e.status==='error')div.className='text-yellow-400';
+    log.appendChild(div);
+  });
+  dvLogOff+=(j.log||[]).length;log.scrollTop=log.scrollHeight;
+  if(j.state!=='running'){
+    clearInterval(dvPoll);dvJob=null;document.getElementById('dv-bulk-btn').disabled=false;
+    document.getElementById('dv-job-cancel').classList.add('hidden');
+    toast(j.state==='cancelled'?'İş iptal edildi':'Toplu ekleme tamamlandı');
+    dvLoadAdded(0);
+  }else document.getElementById('dv-job-cancel').classList.remove('hidden');
+}
+async function dvCancelJob(){if(dvJob)await api('/api/sunucu/webdav/is-iptal',J('POST',{job_id:dvJob}));}
+
+// ── Eklenenler ───────────────────────────────────────────────────────────────
+async function dvLoadAdded(page){
+  if(page<0)page=0;dvPage=page;
+  const d=await api('/api/sunucu/webdav/db-listele?page='+page);
+  const box=document.getElementById('dv-added');
+  if(d.error){box.innerHTML=`<p class="text-sm text-red-400">${esc(d.error)}</p>`;return;}
+  document.getElementById('dv-db-count').textContent=`(${d.total})`;
+  box.innerHTML=d.items.length?'':'<p class="text-sm theme-text-secondary py-3">Henüz içerik eklenmedi.</p>';
+  d.items.forEach(it=>{
+    const row=document.createElement('div');row.className='dv-row';
+    row.innerHTML=`<span>${it.media_type==='tv'?'📺':'🎬'}</span>
+      <div class="flex-1 min-w-0"><div class="text-sm truncate">${esc(it.title)}</div>
+      <div class="text-xs theme-text-secondary truncate">${esc(it.server_name)}: ${esc(it.path)} · ${esc(it.size)}</div></div>`;
+    const b=document.createElement('button');b.textContent='Kaldır';
+    b.className='px-3 py-1 border border-white/20 rounded-lg text-xs text-red-400 hover:bg-white/5';
+    b.onclick=async()=>{if(!confirm('Katalogdan kaldırılsın mı? (WebDAV\'daki dosya silinmez)'))return;
+      const r=await api('/api/sunucu/webdav/db-sil',J('DELETE',{doc_id:it._id}));
+      if(r.error)toast(r.error,'error');else{toast(r.message);dvLoadAdded(dvPage);}};
+    row.appendChild(b);box.appendChild(row);
+  });
+  document.getElementById('dv-prev').classList.toggle('hidden',page<=0);
+  document.getElementById('dv-next').classList.toggle('hidden',(page+1)*d.page_size>=d.total);
+}
+
+dvLoadServers();dvLoadAdded(0);
+</script>
+{% endblock %}

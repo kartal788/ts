@@ -738,6 +738,8 @@ def _safe_qualities(telegram: list) -> list:
                     source = "gdrive"
                 elif decoded.get("rclone_remote"):
                     source = f"rclone:{decoded.get('rclone_remote', '')}"
+                elif decoded.get("webdav_id"):
+                    source = "webdav"
         except Exception:
             pass
         result.append({
@@ -989,6 +991,8 @@ async def member_stream_url_api(
             elif decoded.get("rclone_remote") and decoded.get("rclone_path"):
                 is_rclone    = True
                 source_label = f"rclone:{decoded['rclone_remote']}"
+            elif decoded.get("webdav_id") and decoded.get("webdav_path"):
+                source_label = "webdav"
     except Exception:
         pass
 
