@@ -27,6 +27,37 @@ tmdb_de = aioTMDb(key=Telegram.TMDB_API, language="de-DE", region="DE")
 tmdb_en = aioTMDb(key=Telegram.TMDB_API, language="en-US")
 tmdb = tmdb_tr  # geriye dönük uyumluluk
 
+# Japonca karakter tespiti (Hiragana, Katakana, yarım genişlikli Katakana ve
+# Kanji/CJK ideogramları). TMDB'de Türkçe/Almanca başlık yoksa orijinal (Japonca)
+# ada düşüldüğü için TR/DE başlıkta Japonca karakter görünebiliyor.
+_JAPANESE_CHARS_RE = re.compile(
+    r"[\u3040-\u309f\u30a0-\u30ff\u31f0-\u31ff\u3400-\u4dbf\u4e00-\u9fff\uff66-\uff9f]"
+)
+
+
+def has_japanese(text) -> bool:
+    return bool(text) and bool(_JAPANESE_CHARS_RE.search(str(text)))
+
+
+def fix_japanese_titles(en_title, tr_title, de_title, *fallbacks):
+    """TR/DE başlıkta Japonca karakter varsa İngilizce (orijinal uluslararası)
+    başlığı kullanır. İngilizce başlık da Japonca ise `fallbacks` içindeki ilk
+    Japonca içermeyen başlık denenir. Hiçbiri yoksa başlıklar olduğu gibi kalır.
+    (tr_title, de_title) döner."""
+    base = ""
+    for cand in (en_title, *fallbacks):
+        if cand and str(cand).strip() and not has_japanese(cand):
+            base = str(cand).strip()
+            break
+    if not base:
+        return tr_title, de_title
+    if has_japanese(tr_title):
+        tr_title = base
+    if has_japanese(de_title):
+        de_title = base
+    return tr_title, de_title
+
+
 # ── LRU Cache ─────────────────────────────────────────────────────────────────
 # Bellekte sabit boyut tutmak için OrderedDict tabanlı basit LRU.
 # Sınırsız dict yerine kullanılır; en uzun süredir erişilmeyen giriş otomatik düşer.
@@ -232,6 +263,10 @@ def extract_default_id(url: str) -> tuple[str | None, str | None]:
     plain = url.strip()
     if re.fullmatch(r'\d+', plain):
         return plain, None
+
+    # Plain IMDb id (tt1234567) — link yerine sadece ID yapıştırıldığında
+    if re.fullmatch(r'tt\d+', plain, flags=re.IGNORECASE):
+        return plain.lower(), None
 
     return None, None
 
@@ -487,8 +522,10 @@ async def _tmdb_movie_details(movie_id):
             async with API_SEMAPHORE:
                 details_en = await tmdb_en.movie(movie_id).details()
             details.title_en = getattr(details_en, "title", "") or ""
+            details.overview_en = getattr(details_en, "overview", "") or ""
         except Exception:
             details.title_en = ""
+            details.overview_en = ""
 
         # Türkçe ve Almanca dil bazlı görseller
         tr_imgs = get_lang_images(details.images, "tr")
@@ -565,8 +602,10 @@ async def _tmdb_tv_details(tv_id):
             async with API_SEMAPHORE:
                 details_en = await tmdb_en.tv(tv_id).details()
             details.name_en = getattr(details_en, "name", "") or ""
+            details.overview_en = getattr(details_en, "overview", "") or ""
         except Exception:
             details.name_en = ""
+            details.overview_en = ""
 
         # Türkçe ve Almanca dil bazlı görseller
         tr_imgs = get_lang_images(details.images, "tr")
@@ -728,36 +767,33 @@ def get_translate_engine_stats() -> Dict[str, Dict[str, int]]:
 #----- DÖNMÜYOR — sadece character_count / character_limit veriyor. Dönem
 #----- tarihleri (varsa) panelde kullanıcının kendi girdiği alanlardan gelir.
 async def get_deepl_usage() -> "dict | None":
-    api_key = (getattr(Telegram, "DEEPL_API", "") or "").strip()
-    if not api_key:
+    """
+    Panel/dashboard/monitor icin ozet kullanim. Birden fazla anahtar varsa
+    ILK KULLANILABILIR anahtarin kullanimini dondurur (limiti dolan atlanir);
+    hicbiri kullanilabilir degilse ilk hatasiz anahtari, o da yoksa ilk anahtarin hatasini.
+    Ek alanlar: keys_total, keys_ok.
+    """
+    from Backend.helper import deepl_keys
+    if not deepl_keys.get_keys():
         return None
-    base_url = (
-        "https://api-free.deepl.com/v2/usage"
-        if api_key.endswith(":fx")
-        else "https://api.deepl.com/v2/usage"
-    )
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.get(
-                base_url,
-                headers={"Authorization": f"DeepL-Auth-Key {api_key}"},
-            )
-        if resp.status_code != 200:
-            try:
-                msg = resp.json().get("message")
-            except Exception:
-                msg = None
-            return {"error": msg or f"HTTP {resp.status_code}"}
-        data = resp.json()
-        used = data.get("character_count")
-        limit = data.get("character_limit")
-        return {
-            "character_count": used,
-            "character_limit": limit,
-            "percent_used": round((used / limit) * 100, 1) if used is not None and limit else None,
-        }
+        items = await deepl_keys.keys_usage()
     except Exception as exc:
         return {"error": str(exc)}
+    if not items:
+        return None
+    usable = [i for i in items if i["status"] in ("ok", "low")]
+    base = usable[0] if usable else next((i for i in items if not i["error"] or i["status"] == "exhausted"), items[0])
+    out = {"keys_total": len(items), "keys_ok": len(usable)}
+    if base["status"] in ("error", "invalid") and not usable:
+        out["error"] = base["error"] or "bilinmeyen hata"
+        return out
+    out.update({
+        "character_count": base["used"],
+        "character_limit": base["limit"],
+        "percent_used": base["percent_used"],
+    })
+    return out
 
 
 def _google_translate_once(text: str, target: str) -> "str | None":
@@ -819,13 +855,15 @@ def _mymemory_translate_once(text: str, target: str) -> "str | None":
 #----- bir sonraki motora geçilir. Hiçbiri başarılı olamazsa orijinal metne
 #----- düşülür ve sonuç CACHE'LENMEZ (bir sonraki çağrıda baştan denensin diye).
 def _translate_with_retry(text: str, target: str, cache: "_LRUCache", log_lang_label: str) -> str:
-    deepl_key = (getattr(Telegram, "DEEPL_API", "") or "").strip()
+    from Backend.helper import deepl_keys
 
     engines = [
         ("google", lambda: _google_translate_once(text, target)),
     ]
-    if deepl_key:
-        engines.append(("deepl", lambda: _deepl_translate_once(text, target, deepl_key)))
+    #----- Birden fazla DeepL anahtari: sirayla denenir, limiti dolan atlanir.
+    #----- Hepsi kullanilamazsa DeepL adimi hic eklenmez (gereksiz bekleme olmaz).
+    if deepl_keys.has_usable_keys():
+        engines.append(("deepl", lambda: deepl_keys.translate(text, target)))
     engines.append(("mymemory", lambda: _mymemory_translate_once(text, target)))
 
     tried = []
@@ -1225,7 +1263,7 @@ async def build_manual_metadata(
     }
 
 
-async def metadata(filename: str, channel: int, msg_id, override_id: str = None) -> dict | None:
+async def metadata(filename: str, channel: int, msg_id, override_id: str = None, ignore_default_id: bool = False) -> dict | None:
     try:
         filename = re.sub(r'\bm(1080p|720p|2160p|480p)\b', r'\1', filename, flags=re.IGNORECASE)
         # Strip any embedded URLs before PTN parsing so season/episode are not lost
@@ -1304,7 +1342,10 @@ async def metadata(filename: str, channel: int, msg_id, override_id: str = None)
         except Exception:
             pass
 
-    if not default_id:
+    # ignore_default_id=True: "Yeniden Sorgula" (dosya bazlı) gibi çağrılarda, bot
+    # için açılmış global varsayılan ID (/default modu) tüm dosyaları aynı içeriğe
+    # bağlamasın diye atlanır.
+    if not default_id and not ignore_default_id:
         try:
             _id, _mt = extract_default_id(Backend.USE_DEFAULT_ID)
             if _id:
@@ -1536,19 +1577,32 @@ async def _fetch_tv_metadata_impl(title, season, episode, encoded_string, year=N
         final_ep_overview_de = ep_overview_de_tmdb if ep_overview_de_tmdb else (await asyncio.to_thread(translate_text_safe_de, ep_overview_source) if ep_overview_source else "")
 
         _tv_imdb_id = getattr(getattr(tv, "external_ids", None), "imdb_id", None)
+        # Başlıklar: Japonca karakter varsa İngilizce başlığa düş
+        _en_title = getattr(tv, "name_en", "") or tv.original_name or tv.name or title
+        _tr_title, _de_title = fix_japanese_titles(
+            _en_title,
+            tv.name or title,
+            getattr(tv, "name_de", "") or tv.original_name or title,
+            title,
+        )
+        # Açıklamalar: TR/DE boşsa İngilizce açıklamadan çevir
+        _en_desc = getattr(tv, "overview_en", "") or ""
+        _desc_tr = tv.overview or (await asyncio.to_thread(translate_text_safe, _en_desc) if _en_desc else "")
+        _desc_de = getattr(tv, "overview_de", "") or (await asyncio.to_thread(translate_text_safe_de, _en_desc) if _en_desc else "")
         return {
             "tmdb_id": tv.id,
             "imdb_id": _tv_imdb_id,
-            "title": getattr(tv, "name_en", "") or tv.original_name or tv.name or title,
-            "title_tr": tv.name or title,
-            "title_de": getattr(tv, "name_de", "") or tv.original_name or title,
+            "title": _en_title,
+            "title_tr": _tr_title,
+            "title_de": _de_title,
             "year": getattr(tv.first_air_date, "year", 0) if getattr(tv, "first_air_date", None) else 0,
             "rate": getattr(tv, "vote_average", 0) or 0,
-            "description": tv.overview or "",
+            # Orijinal (İngilizce) açıklama; en-US boşsa tmdb_tr overview'ına düşülür
+            "description": _en_desc or tv.overview or "",
             # tv zaten tmdb_tr (tr-TR) ile çekildiği için overview'ı doğrudan
             # Türkçe'dir — Google çeviriye sadece TMDB boş döndüyse düşülür.
-            "description_tr": tv.overview or await asyncio.to_thread(translate_text_safe, tv.overview),
-            "description_de": getattr(tv, "overview_de", "") or await asyncio.to_thread(translate_text_safe_de, tv.overview),
+            "description_tr": _desc_tr,
+            "description_de": _desc_de,
             "poster": format_tmdb_image(tv.poster_path),
             "backdrop": format_tmdb_image(tv.backdrop_path, "original"),
             "logo": get_tmdb_logo(getattr(tv, "images", None)),
@@ -1691,6 +1745,9 @@ async def _fetch_tv_metadata_impl(title, season, episode, encoded_string, year=N
     final_ep_title_de = ep_title_de_tmdb if ep_title_de_tmdb else await asyncio.to_thread(translate_text_safe_de, ep_title_source)
     final_ep_overview_tr = ep_overview_tr_tmdb if ep_overview_tr_tmdb else await asyncio.to_thread(translate_text_safe, ep_overview_source)
     final_ep_overview_de = ep_overview_de_tmdb if ep_overview_de_tmdb else await asyncio.to_thread(translate_text_safe_de, ep_overview_source)
+
+    # Japonca karakter içeren TR/DE başlık yerine İngilizce başlığı kullan
+    tr_title, de_title = fix_japanese_titles(en_title, tr_title, de_title)
 
     return {
         "tmdb_id": raw_tmdb_id or imdb_id.replace("tt", ""),
@@ -1895,19 +1952,32 @@ async def _fetch_movie_metadata_impl(title, encoded_string, year=None, quality=N
         runtime = f"{runtime_val} min" if runtime_val else ""
 
         _movie_imdb_id = getattr(movie.external_ids, "imdb_id", None)
+        # Başlıklar: Japonca karakter varsa İngilizce başlığa düş
+        _en_title = getattr(movie, "title_en", "") or movie.original_title or movie.title or title
+        _tr_title, _de_title = fix_japanese_titles(
+            _en_title,
+            movie.title or title,
+            getattr(movie, "title_de", "") or movie.original_title or title,
+            title,
+        )
+        # Açıklamalar: TR/DE boşsa İngilizce açıklamadan çevir
+        _en_desc = getattr(movie, "overview_en", "") or ""
+        _desc_tr = movie.overview or (await asyncio.to_thread(translate_text_safe, _en_desc) if _en_desc else "")
+        _desc_de = getattr(movie, "overview_de", "") or (await asyncio.to_thread(translate_text_safe_de, _en_desc) if _en_desc else "")
         return {
             "tmdb_id": movie.id,
             "imdb_id": _movie_imdb_id,
-            "title": getattr(movie, "title_en", "") or movie.original_title or movie.title or title,
-            "title_tr": movie.title or title,
-            "title_de": getattr(movie, "title_de", "") or movie.original_title or title,
+            "title": _en_title,
+            "title_tr": _tr_title,
+            "title_de": _de_title,
             "year": getattr(movie.release_date, "year", 0) if getattr(movie, "release_date", None) else 0,
             "rate": getattr(movie, "vote_average", 0) or 0,
-            "description": movie.overview or "",
+            # Orijinal (İngilizce) açıklama; en-US boşsa tmdb_tr overview'ına düşülür
+            "description": _en_desc or movie.overview or "",
             # movie zaten tmdb_tr (tr-TR) ile çekildiği için overview'ı doğrudan
             # Türkçe'dir — Google çeviriye sadece TMDB boş döndüyse düşülür.
-            "description_tr": movie.overview or await asyncio.to_thread(translate_text_safe, movie.overview),
-            "description_de": getattr(movie, "overview_de", "") or await asyncio.to_thread(translate_text_safe_de, movie.overview),
+            "description_tr": _desc_tr,
+            "description_de": _desc_de,
             "poster": format_tmdb_image(movie.poster_path),
             "backdrop": format_tmdb_image(movie.backdrop_path, "original"),
             "logo": get_tmdb_logo(getattr(movie, "images", None)),
@@ -2008,6 +2078,9 @@ async def _fetch_movie_metadata_impl(title, encoded_string, year=None, quality=N
     final_desc_tr = tr_desc_tmdb if tr_desc_tmdb else await asyncio.to_thread(translate_text_safe, imdb.get("plot", ""))
     # Almanca açıklama: TMDB'den Almanca geldiyse kullan, yoksa İngilizce plot'u çevir
     final_desc_de = de_desc if de_desc else await asyncio.to_thread(translate_text_safe_de, imdb.get("plot", ""))
+
+    # Japonca karakter içeren TR/DE başlık yerine İngilizce başlığı kullan
+    tr_title, de_title = fix_japanese_titles(en_title, tr_title, de_title)
 
     return {
         "tmdb_id": raw_tmdb_id or imdb_id.replace("tt", ""),

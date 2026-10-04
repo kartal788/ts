@@ -8,6 +8,7 @@ import os
 from Backend import __version__
 from Backend.fastapi.security.credentials import require_auth
 from Backend.fastapi.security.csrf import CSRFMiddleware, ensure_csrf_secret, get_csrf_token
+from Backend.fastapi.security.credentials import SESSION_MAX_AGE
 from Backend.fastapi.routes.stream_routes import router as stream_router, decay_client_failures
 from Backend.helper.db_scheduler import start_scheduler, stop_scheduler
 from Backend.fastapi.routes.yayin_routes import start_scheduler as start_yayin_scheduler, stop_scheduler as stop_yayin_scheduler
@@ -43,6 +44,7 @@ from Backend.fastapi.routes.sunucu_routes import (
     sunucu_yeniden_adlandir, sunucu_metadata, sunucu_klasor_olustur,
     sunucu_sistem_durumu, sunucu_metadata_sorgu, sunucu_metadata_kaydet,
     sunucu_metadata_sil, sunucu_indir, sunucu_indir_klasor,
+    sunucu_zamanli_silme_listele, sunucu_zamanli_silme_iptal, sunucu_zamanli_silme_ayarla,
     sunucu_klasor_zip_baslat, sunucu_klasor_zip_durum,
     sunucu_dosya_durumu,
     sunucu_gdrive_listele, sunucu_gdrive_ekle,
@@ -81,17 +83,18 @@ from Backend.fastapi.routes.api_routes import (
     get_media_visibility_api, update_media_visibility_api,
     delete_movie_quality_api, delete_tv_quality_api,
     delete_tv_episode_api, delete_tv_season_api,
+    requery_file_api,
     rename_movie_quality_api, rename_tv_quality_api,
     create_token_api, revoke_token_api, update_token_limits_api, regenerate_token_api,
     speed_test_api, speed_test_stream_api,
-    get_admin_stats_api, clear_cache_api, get_dead_links_api,
+    get_admin_stats_api, clear_cache_api, get_dead_links_api, bulk_delete_dead_links_api,
     get_stream_analytics_api, clear_analytics_api,
     get_subscription_plans_api, add_subscription_plan_api,
     update_subscription_plan_api, delete_subscription_plan_api,
     get_all_subscribers_api, manage_subscriber_api,
     get_all_tokens_api, assign_plan_api, link_token_user_api,
     get_pending_subscription_requests_api, admin_review_subscription_request_api,
-    get_settings_api, update_settings_api, get_translate_usage_api,
+    get_settings_api, update_settings_api, get_translate_usage_api, get_deepl_keys_usage_api,
     export_settings_backup_api, import_settings_backup_api,
     invalidate_admin_sessions_api,
     get_settings_files_api, upload_settings_file_api, delete_settings_file_api,
@@ -388,6 +391,45 @@ app.add_middleware(MemberApiRateLimiter)
 # böylece request.session'a erişebilir.
 app.add_middleware(CSRFMiddleware)
 
+# ── Oturum süresi: /start'tan 4 gün sonra cookie silinir ───────────────────────
+# Giriş sırasında session["otp_started_at"] = şifrenin üretildiği (/start) an olarak
+# yazılır. Süre dolunca session temizlenir → SessionMiddleware cookie'yi tarayıcıdan siler.
+class SessionExpiryMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        try:
+            sess = request.session
+            started = sess.get("otp_started_at")
+
+            # Eski oturumlar (bu özellik gelmeden açılmış): /start zamanını DB'den bul,
+            # oturuma yaz. Bulunamazsa şimdiden say → en geç 4 gün sonra düşer.
+            if not started and (sess.get("authenticated") or sess.get("member")):
+                from Backend import db as _db
+                created = None
+                try:
+                    if sess.get("authenticated"):
+                        created = await _db.get_admin_created_at(sess.get("admin_key", "admin"))
+                    else:
+                        uid = (sess.get("member") or {}).get("user_id")
+                        if uid is not None and str(uid) != "admin":
+                            created = await _db.get_member_created_at(uid)
+                except Exception:
+                    created = None
+                if created is not None:
+                    from Backend.fastapi.security.credentials import otp_started_ts
+                    started = otp_started_ts({"created_at": created})
+                else:
+                    started = _time.time()
+                sess["otp_started_at"] = started
+
+            if started and (_time.time() - float(started)) > SESSION_MAX_AGE:
+                sess.clear()
+        except Exception:
+            pass
+        return await call_next(request)
+
+# SessionMiddleware'in hemen İÇİNDE çalışmalı (request.session'a erişebilsin)
+app.add_middleware(SessionExpiryMiddleware)
+
 # ── SessionMiddleware — en dışta çalışması için en son ekleniyor ──────────────
 # Starlette/FastAPI'de add_middleware çağrıları TERS sırada yürütülür:
 # en son eklenen middleware isteği en önce görür (en dış katman).
@@ -399,7 +441,7 @@ app.add_middleware(
     secret_key=_session_key,
     https_only=_https_only,
     same_site="lax",
-    max_age=259200,     # 72 saatlik oturum
+    max_age=SESSION_MAX_AGE,  # 4 gün (asıl kontrol: SessionExpiryMiddleware, /start anından sayar)
 )
 
 try:
@@ -451,6 +493,10 @@ async def _startup():
     # ── Sunucu dosyası kontrolü: fiziksel dosya yoksa DB'den sil ──
     from Backend.helper.sunucu_file_checker import check_and_clean_missing_sunucu_files
     asyncio.create_task(check_and_clean_missing_sunucu_files())
+
+    # ── Zamanlanmış silme (sunucu + Stremio/DB): süresi gelen kayıtları işler ──
+    from Backend.helper.scheduled_delete import start_scheduler as _start_sched_delete
+    _start_sched_delete()
 
     # ── Yayın zamanlayıcısı (zamanlanmış yayınları otomatik başlat/durdur) ──
     start_yayin_scheduler()
@@ -1021,6 +1067,14 @@ async def get_settings(_: bool = Depends(require_auth)):
 async def get_translate_usage(_: bool = Depends(require_auth)):
     return await get_translate_usage_api()
 
+@app.post("/api/admin/settings/deepl-keys-usage")
+async def post_deepl_keys_usage(request: Request, _: bool = Depends(require_auth)):
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = None
+    return await get_deepl_keys_usage_api(payload)
+
 @app.put("/api/admin/settings")
 async def update_settings(payload: dict, _: bool = Depends(require_auth)):
     return await update_settings_api(payload)
@@ -1034,8 +1088,8 @@ async def import_settings_backup(payload: dict, _: bool = Depends(require_auth))
     return await import_settings_backup_api(payload)
 
 @app.post("/api/admin/settings/invalidate-sessions")
-async def invalidate_admin_sessions(_: bool = Depends(require_auth)):
-    return await invalidate_admin_sessions_api()
+async def invalidate_admin_sessions(request: Request, _: bool = Depends(require_auth)):
+    return await invalidate_admin_sessions_api(request)
 
 @app.get("/api/admin/settings/files")
 async def admin_settings_files(_: bool = Depends(require_auth)):
@@ -1179,6 +1233,15 @@ async def delete_tv_episode(tmdb_id: int, db_index: int, season: int, episode: i
 async def delete_tv_season(tmdb_id: int, db_index: int, season: int, _: bool = Depends(require_auth)):
     return await delete_tv_season_api(tmdb_id, db_index, season)
 
+@app.post("/api/media/requery-file")
+async def requery_file(
+    tmdb_id: int, db_index: int, id: str,
+    media_type: str = Query(regex="^(movie|tv)$"),
+    season: int = None, episode: int = None, query: str = "",
+    _: bool = Depends(require_auth),
+):
+    return await requery_file_api(tmdb_id, db_index, media_type, id, season, episode, query)
+
 @app.put("/api/media/rename-quality")
 async def rename_movie_quality(request: Request, tmdb_id: int, db_index: int, id: str, _: bool = Depends(require_auth)):
     return await rename_movie_quality_api(request, tmdb_id, db_index, id)
@@ -1234,6 +1297,10 @@ async def clear_cache(_: bool = Depends(require_auth)):
 @app.get("/api/admin/dead-links")
 async def get_dead_links(_: bool = Depends(require_auth)):
     return await get_dead_links_api()
+
+@app.post("/api/admin/dead-links/bulk-delete")
+async def bulk_delete_dead_links(payload: dict, _: bool = Depends(require_auth)):
+    return await bulk_delete_dead_links_api(payload)
 
 @app.get("/api/admin/stream-analytics")
 async def get_stream_analytics(_: bool = Depends(require_auth)):
@@ -1579,6 +1646,18 @@ async def sunucu_metadata_kaydet_route(request: Request, _: bool = Depends(requi
 async def sunucu_metadata_sil_route(request: Request, _: bool = Depends(require_auth)):
     return await sunucu_metadata_sil(request, _)
 
+@app.get("/api/sunucu/zamanli-silme")
+async def sunucu_zamanli_silme_listele_route(request: Request, _: bool = Depends(require_auth)):
+    return await sunucu_zamanli_silme_listele(request, _)
+
+@app.put("/api/sunucu/zamanli-silme")
+async def sunucu_zamanli_silme_ayarla_route(request: Request, _: bool = Depends(require_auth)):
+    return await sunucu_zamanli_silme_ayarla(request, _)
+
+@app.delete("/api/sunucu/zamanli-silme")
+async def sunucu_zamanli_silme_iptal_route(request: Request, _: bool = Depends(require_auth)):
+    return await sunucu_zamanli_silme_iptal(request, _)
+
 @app.get("/api/sunucu/indir")
 async def sunucu_indir_route(request: Request, _: bool = Depends(require_auth)):
     return await sunucu_indir(request, _)
@@ -1656,6 +1735,32 @@ async def sunucu_rclone_db_sil_route(request: Request, _: bool = Depends(require
 @app.post("/api/sunucu/rclone-migrate")
 async def sunucu_rclone_migrate_route(request: Request, _: bool = Depends(require_auth)):
     return await sunucu_rclone_migrate(request, _)
+
+@app.post("/api/sunucu/cloud-sync")
+async def sunucu_cloud_sync_route(request: Request, _: bool = Depends(require_auth)):
+    """body: { source?: "rclone"|"gdrive", dry_run?: bool, force?: bool }"""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    body = body if isinstance(body, dict) else {}
+    source = (body.get("source") or "").strip() or None
+    if source not in (None, "rclone", "gdrive"):
+        return JSONResponse({"error": "source 'rclone' veya 'gdrive' olmalı"}, status_code=400)
+    from Backend.helper.cloud_sync import sync_cloud
+    from Backend.logger import LOGGER
+    try:
+        report = await sync_cloud(source=source, dry_run=bool(body.get("dry_run", False)),
+                                  force=bool(body.get("force", False)))
+    except Exception:
+        LOGGER.error("cloud-sync hatası", exc_info=True)
+        return JSONResponse({"error": "Sunucu hatası"}, status_code=500)
+    if report.get("error"):
+        return JSONResponse({"error": report["error"]}, status_code=409)
+    for g in report["groups"]:
+        g["missing_count"] = len(g["missing"]); g["missing"] = g["missing"][:50]
+        g["unknown_count"] = len(g["unknown"]); g["unknown"] = g["unknown"][:50]
+    return report
 
 @app.get("/link-ekle", response_class=HTMLResponse)
 async def link_ekle(request: Request, _: bool = Depends(require_auth)):

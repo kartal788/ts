@@ -1,6 +1,6 @@
 from pyrogram import filters, Client, enums
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
-from Backend.helper.custom_filter import CustomFilters
+from Backend.helper.custom_filter import CustomFilters, is_admin_id
 from Backend.config import Telegram
 from Backend.helper.settings_manager import SettingsManager
 from Backend import db
@@ -8,18 +8,49 @@ from datetime import datetime
 
 print("DEBUG: start.py PLUGIN LOADED SUCCESSFULLY!")
 
+
+def _admin_display_name(message, user_id) -> str:
+    """Panelde gösterilecek ad: OWNER için eski davranış ("Yönetici"), diğer yöneticiler için Telegram adı."""
+    if user_id == Telegram.OWNER_ID:
+        return "Yönetici"
+    try:
+        u = message.from_user
+        return (u.first_name or u.username or "Yönetici") if u else "Yönetici"
+    except Exception:
+        return "Yönetici"
+
+
+async def _send_admin_panel_login(message: Message, user_id: int, base_url: str) -> None:
+    """Aktif aboneliği olmayan bir yöneticiye de panel giriş bilgisini ayrı mesajla gönderir."""
+    try:
+        photo_url = message.from_user.photo.big_file_id if (message.from_user and message.from_user.photo) else ""
+        admin_otp = await db.create_admin_otp(photo_url=photo_url, display_name=_admin_display_name(message, user_id), admin_id=user_id)
+        await message.reply_text(
+            f"🛡️ <b>Yönetici Paneli Girişi:</b>\n"
+            f"🔗 {base_url}/login\n"
+            f"👤 <b>Kullanıcı Adı:</b> <code>{admin_otp['username']}</code>\n"
+            f"🔑 <b>Şifre:</b> <code>{admin_otp['password']}</code>\n"
+            f"<i>⚠️ Bu bilgiler her /start'ta yenilenir.</i>",
+            quote=True,
+            parse_mode=enums.ParseMode.HTML,
+        )
+    except Exception as e:
+        print(f"DEBUG: Admin OTP generation error (plans branch): {e}")
+
+
 @Client.on_message(filters.command('start') & filters.private, group=10)
 async def send_start_message(client: Client, message: Message):
     try:
         user_id = (message.from_user.id if message.from_user else None) or (message.sender_chat.id if message.sender_chat else None) or message.chat.id
         print(f"DEBUG: Received /start command from {user_id}")
 
-        # ── Admin oturumu yalnızca OWNER /start attığında geçersiz kılınır ──
-        # Diğer kullanıcıların /start komutu admin şifresini etkilemez.
-        if user_id == Telegram.OWNER_ID:
+        # ── Admin oturumu yalnızca o yönetici (OWNER veya eklenen yönetici) /start attığında
+        # geçersiz kılınır. Başka yöneticilerin ve normal kullanıcıların /start komutu
+        # bu yöneticinin şifresini/oturumunu etkilemez.
+        if is_admin_id(user_id):
             try:
                 from Backend import db as _db
-                await _db.invalidate_admin_session()
+                await _db.invalidate_admin_session(user_id)
             except Exception as _inv_err:
                 print(f"DEBUG: invalidate_admin_session error: {_inv_err}")
         # ────────────────────────────────────────────────────────────────────
@@ -76,17 +107,17 @@ async def send_start_message(client: Client, message: Message):
             if not plans:
                 # OWNER ise admin paneli giriş bilgilerini de mesaja ekle
                 admin_otp_text = ""
-                if user_id == Telegram.OWNER_ID:
+                if is_admin_id(user_id):
                     try:
                         photo_url = message.from_user.photo.big_file_id if (message.from_user and message.from_user.photo) else ""
-                        admin_otp = await db.create_admin_otp(photo_url=photo_url)
+                        admin_otp = await db.create_admin_otp(photo_url=photo_url, display_name=_admin_display_name(message, user_id), admin_id=user_id)
                         admin_url = f"{base_url}/login"
                         admin_otp_text = (
                             f"\n\n🛡️ <b>Yönetici Paneli Girişi:</b>\n"
                             f"🔗 {admin_url}\n"
                             f"👤 <b>Kullanıcı Adı:</b> <code>{admin_otp['username']}</code>\n"
                             f"🔑 <b>Şifre:</b> <code>{admin_otp['password']}</code>\n"
-                            f"<i>⚠️ Bu bilgiler her /start'ta yenilenir, yalnızca tek kullanımlıktır.</i>"
+                            f"<i>⚠️ Bu bilgiler her /start'ta yenilenir.</i>"
                         )
                     except Exception as e:
                         print(f"DEBUG: Admin OTP generation error (no-plan branch): {e}")
@@ -125,6 +156,9 @@ async def send_start_message(client: Client, message: Message):
                 '🚀 Hemen başlamak için bir plan seç:'
             )
             plan_caption = message_template.replace("{isim}", Telegram.ISIM)
+
+            if is_admin_id(user_id):
+                await _send_admin_panel_login(message, user_id, base_url)
 
             plan_image_id = await db.get_plan_image()
             if plan_image_id:
@@ -171,17 +205,17 @@ async def send_start_message(client: Client, message: Message):
             otp_text = ""
 
         # ── OWNER ise admin paneli OTP'sini de ekle ─────────────────────────
-        if user_id == Telegram.OWNER_ID:
+        if is_admin_id(user_id):
             try:
                 photo_url = message.from_user.photo.big_file_id if (message.from_user and message.from_user.photo) else ""
-                admin_otp = await db.create_admin_otp(photo_url=photo_url)
+                admin_otp = await db.create_admin_otp(photo_url=photo_url, display_name=_admin_display_name(message, user_id), admin_id=user_id)
                 admin_url = f"{base_url}/login"
                 otp_text += (
                     f"\n\n🛡️ <b>Yönetici Paneli Girişi:</b>\n"
                     f"🔗 {admin_url}\n"
                     f"👤 <b>Kullanıcı Adı:</b> <code>{admin_otp['username']}</code>\n"
                     f"🔑 <b>Şifre:</b> <code>{admin_otp['password']}</code>\n"
-                    f"<i>⚠️ Bu bilgiler her /start'ta yenilenir, yalnızca tek kullanımlıktır.</i>"
+                    f"<i>⚠️ Bu bilgiler her /start'ta yenilenir.</i>"
                 )
             except Exception as e:
                 print(f"DEBUG: Admin OTP generation error: {e}")

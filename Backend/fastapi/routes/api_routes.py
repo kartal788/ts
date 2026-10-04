@@ -6,7 +6,9 @@ from typing import Optional
 from fastapi import Request, Query, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse, JSONResponse
 from Backend import db, StartTime, __version__
+from Backend.config import Telegram
 from Backend.helper.pyro import get_readable_time
+from Backend.helper.settings_manager import admin_contact_ref
 from Backend.pyrofork.bot import multi_clients, StreamBot
 from Backend.helper.custom_dl import run_speed_test, _speed_test_single_client
 from time import time
@@ -848,6 +850,20 @@ async def get_dead_links_api() -> dict:
 
         return {"status": "error", "message": "Sunucu hatası"}
 
+async def bulk_delete_dead_links_api(payload: dict) -> dict:
+    from Backend import db
+    items = (payload or {}).get("items")
+    if not isinstance(items, list) or not items:
+        raise HTTPException(status_code=400, detail="Silinecek link seçilmedi.")
+    if len(items) > 5000:
+        raise HTTPException(status_code=400, detail="Tek seferde en fazla 5000 link silinebilir.")
+    try:
+        summary = await db.bulk_delete_dead_links(items)
+        return {"status": "success", "data": summary}
+    except Exception:
+        _logger.error("Internal error", exc_info=True)
+        raise HTTPException(status_code=500, detail="Sunucu hatası")
+
 async def get_stream_analytics_api() -> dict:
     from Backend import db
     try:
@@ -1173,7 +1189,7 @@ async def admin_review_subscription_request_api(user_id: int, payload: dict) -> 
             await StreamBot.send_message(
                 user_id,
                 "❌ <b>Talebiniz Reddedildi</b>\n\nAbonelik talebiniz yönetici tarafından reddedildi. "
-                "Daha fazla bilgi için yönetici ile iletişime geçin.",
+                f"Daha fazla bilgi için {admin_contact_ref()} ile iletişime geçin.",
                 parse_mode=_enums.ParseMode.HTML
             )
         except Exception as e:
@@ -1183,6 +1199,8 @@ async def admin_review_subscription_request_api(user_id: int, payload: dict) -> 
         return {"status": "success", "message": "Talep reddedildi ve kullanıcıya bildirildi."}
 
     else:  # ban
+        if int(user_id) == Telegram.OWNER_ID:
+            raise HTTPException(status_code=403, detail="Ana yönetici engellenemez.")
         await db.ban_user(user_id)
         try:
             await StreamBot.send_message(
@@ -1411,6 +1429,55 @@ async def rename_tv_quality_api(request: Request, tmdb_id: int, db_index: int, s
         _logger.error("Internal error", exc_info=True)
 
         raise HTTPException(status_code=500, detail="Sunucu hatası")
+
+
+async def requery_file_api(
+    tmdb_id: int,
+    db_index: int,
+    media_type: str,
+    quality_id: str,
+    season: Optional[int] = None,
+    episode: Optional[int] = None,
+    query: str = "",
+):
+    """
+    media_edit.html → her dosya satırındaki "Yeniden Sorgula" butonu.
+
+    Sadece o dosyayı, dosya adından (veya verilen TMDB/IMDb linkinden) yeniden
+    sorgular. Sonuçtaki içerik veritabanında varsa dosya ona eklenir, yoksa yeni
+    içerik açılır. Dosya bulunduğu içerikten çıkarılır; diğer dosyalara ve
+    Telegram mesajına dokunulmaz.
+    """
+    if media_type not in ("movie", "tv"):
+        raise HTTPException(status_code=400, detail="Geçersiz içerik türü.")
+    if media_type == "tv" and (season is None or episode is None):
+        raise HTTPException(status_code=400, detail="Dizi için sezon ve bölüm gerekli.")
+    try:
+        result = await db.requery_move_quality(
+            tmdb_id, db_index, media_type, quality_id,
+            season_number=season, episode_number=episode,
+            override_id=(query or "").strip() or None,
+        )
+    except Exception:
+        _logger.error("Internal error", exc_info=True)
+        raise HTTPException(status_code=500, detail="Sunucu hatası")
+
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("error") or "Yeniden sorgulama başarısız.")
+    return result
+
+
+# Japonca karakter tespiti (Hiragana, Katakana, yarım genişlikli Katakana ve
+# Kanji/CJK ideogramları). "Yeniden Sorgula" sırasında TMDB'de Türkçe/Almanca
+# karşılığı olmayan başlıklar orijinal (Japonca) ada düştüğü için kullanılır.
+import re as _re_jp
+_JAPANESE_CHARS_RE = _re_jp.compile(
+    r"[\u3040-\u309f\u30a0-\u30ff\u31f0-\u31ff\u3400-\u4dbf\u4e00-\u9fff\uff66-\uff9f]"
+)
+
+
+def _has_japanese(text) -> bool:
+    return bool(text) and bool(_JAPANESE_CHARS_RE.search(str(text)))
 
 
 async def requery_media_api(
@@ -1741,6 +1808,47 @@ async def requery_media_api(
                 "cast":           cast_names,
             }
 
+        # ------------------------------------------------------------------
+        # Son düzeltmeler (TR/DE başlık + açıklama)
+        # ------------------------------------------------------------------
+        # 1) Başlıklar: TMDB'de Türkçe/Almanca başlık yoksa orijinal ada (ör.
+        #    Japonca) düşüyor. Japonca karakter içeren TR/DE başlık yerine
+        #    İngilizce (orijinal uluslararası) başlık kullanılır.
+        en_title = (preview.get("title") or "").strip()
+        if _has_japanese(en_title):
+            # İngilizce başlık da Japonca ise: kayıtta (Japonca içermeyen)
+            # mevcut başlık ya da dosya adından çıkarılan başlık denenir.
+            for cand in (doc.get("title"), title):
+                if cand and not _has_japanese(cand):
+                    en_title = str(cand).strip()
+                    break
+        if en_title and not _has_japanese(en_title):
+            for key in ("title_tr", "title_de"):
+                if _has_japanese(preview.get(key)):
+                    preview[key] = en_title
+
+        # 2) Açıklamalar: TR/DE açıklama boşsa İngilizce açıklamadan çevir.
+        #    Çeviri fonksiyonları senkron (ağ + sleep) olduğu için thread'de
+        #    çalıştırılır; böylece event loop bloklanmaz. Çeviri başarısız olursa
+        #    (fonksiyon orijinal metni geri döner) alan boş bırakılır.
+        en_desc = (preview.get("description") or "").strip()
+        if en_desc:
+            from Backend.helper.metadata import translate_text_safe, translate_text_safe_de
+
+            if not (preview.get("description_tr") or "").strip():
+                translated = await asyncio.to_thread(translate_text_safe, en_desc)
+                if translated and translated.strip() != en_desc:
+                    preview["description_tr"] = translated
+                else:
+                    _logger.warning(f"Requery: TR açıklama çevrilemedi [{new_tmdb_id}]")
+
+            if not (preview.get("description_de") or "").strip():
+                translated = await asyncio.to_thread(translate_text_safe_de, en_desc)
+                if translated and translated.strip() != en_desc:
+                    preview["description_de"] = translated
+                else:
+                    _logger.warning(f"Requery: DE açıklama çevrilemedi [{new_tmdb_id}]")
+
         return {"preview": preview}
 
     except HTTPException:
@@ -1772,6 +1880,32 @@ async def get_translate_usage_api():
         raise HTTPException(status_code=500, detail="Çeviri kullanım bilgisi alınamadı")
 
 
+async def get_deepl_keys_usage_api(payload: dict = None):
+    """Her DeepL anahtarinin durumunu ve karakter kullanimini dondurur.
+    Govde: { "keys": [...] } -> panelde henuz kaydedilmemis anahtarlar da sorgulanir
+    (liste sirasi korunur). "keys" verilmezse kayitli anahtarlar kullanilir.
+    Anahtarlar yanitta yalnizca maskelenmis olarak doner."""
+    try:
+        from Backend.helper import deepl_keys
+        keys = None
+        if isinstance(payload, dict) and "keys" in payload:
+            raw = payload.get("keys")
+            if not isinstance(raw, list):
+                raise HTTPException(status_code=400, detail="keys bir liste olmali")
+            keys = [str(k or "").strip() for k in raw]
+            if len(keys) > 20:
+                raise HTTPException(status_code=400, detail="En fazla 20 anahtar")
+        # Bos satirlar da sirayi bozmasin diye bos olanlari atla, index'i istemci eslestirir
+        order = [k for k in (keys or []) if k] if keys is not None else None
+        items = await deepl_keys.keys_usage(order, use_cache=False)
+        return {"success": True, "keys": items}
+    except HTTPException:
+        raise
+    except Exception:
+        _logger.error("get_deepl_keys_usage_api hatasi", exc_info=True)
+        raise HTTPException(status_code=500, detail="DeepL kullanim bilgisi alinamadi")
+
+
 async def get_settings_api():
     """Panelde gösterilecek güncel ayarları döner (hassas alanlar maskelenmez,
     çünkü bu uygulamada statik admin şifresi yok — kimlik doğrulama OTP tabanlı)."""
@@ -1791,6 +1925,7 @@ async def get_settings_api():
         except Exception:
             data["env_multi_tokens"] = []
 
+        data["owner_id"] = Telegram.OWNER_ID
         return {"success": True, "settings": data}
     except Exception as e:
         _logger.error("get_settings_api hatası", exc_info=True)
@@ -1807,7 +1942,7 @@ async def update_settings_api(payload: dict):
             "success": True,
             "message": "Ayarlar kaydedildi.",
             "details": results,
-            "settings": SettingsManager.current().to_dict(),
+            "settings": {**SettingsManager.current().to_dict(), "owner_id": Telegram.OWNER_ID},
         }
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -1849,7 +1984,7 @@ async def import_settings_backup_api(payload: dict):
             "success": True,
             "message": "Yedek geri yüklendi.",
             "details": results,
-            "settings": SettingsManager.current().to_dict(),
+            "settings": {**SettingsManager.current().to_dict(), "owner_id": Telegram.OWNER_ID},
         }
     except HTTPException:
         raise
@@ -1860,11 +1995,16 @@ async def import_settings_backup_api(payload: dict):
         raise HTTPException(status_code=500, detail=f"Yedek geri yüklenemedi: {e}")
 
 
-async def invalidate_admin_sessions_api():
-    """Tüm aktif yönetici oturumlarını geçersiz kılar (herkes yeniden /start ile giriş yapmalı)."""
+async def invalidate_admin_sessions_api(request: Request = None):
+    """Yönetici oturumlarını geçersiz kılar (herkes yeniden /start ile giriş yapmalı).
+    Ana yöneticinin (OWNER_ID) oturumunu yalnızca ana yönetici sonlandırabilir;
+    diğer yöneticiler bu butonla sahibin oturumunu düşüremez."""
     try:
-        await db.invalidate_admin_session()
-        return {"success": True, "message": "Tüm yönetici oturumları sonlandırıldı."}
+        caller_is_owner = (request is None) or (request.session.get("admin_key", "admin") == "admin")
+        await db.invalidate_all_admin_sessions(include_owner=caller_is_owner)
+        if caller_is_owner:
+            return {"success": True, "message": "Tüm yönetici oturumları sonlandırıldı."}
+        return {"success": True, "message": "Diğer yöneticilerin oturumları sonlandırıldı (ana yöneticinin oturumu korunur)."}
     except Exception as e:
         _logger.error("invalidate_admin_sessions_api hatası", exc_info=True)
         raise HTTPException(status_code=500, detail="Oturumlar sonlandırılamadı")

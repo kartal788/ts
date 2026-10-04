@@ -285,6 +285,8 @@ async def member_login_post(
         "is_admin":         False,
         "session_id":       session_doc.get("session_id", ""),  # /start'ta yenilenir → eski cookie geçersiz
     }
+    from Backend.fastapi.security.credentials import otp_started_ts
+    request.session["otp_started_at"] = otp_started_ts(session_doc)  # /start anı → 4 gün sonra cookie silinir
     # Login başarılı → CSRF secret üret/yenile
     ensure_csrf_secret(request)
     return RedirectResponse(url=f"/uye/katalog?lang={lang}", status_code=302)

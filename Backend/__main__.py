@@ -104,6 +104,16 @@ async def start_services():
         link_checker_task = DeadLinkChecker(db, app, check_interval_hours=24)
         loop.create_task(link_checker_task.start())
 
+        # WebDAV sunucusundan silinen dosyaların kataloğdan da kaldırılması.
+        # Aralık (saat) panelden (Ayarlar > WebDAV Senkronizasyonu) değiştirilebilir;
+        # 0 = kapalı. İlk değer config.env'deki WEBDAV_SYNC_INTERVAL_HOURS'tan gelir.
+        from Backend.helper.webdav_sync import configure_sync_interval
+        LOGGER.info(configure_sync_interval(Telegram.WEBDAV_SYNC_INTERVAL_HOURS, startup=True))
+
+        # rclone / Google Drive'dan silinen dosyaların katalogdan da kaldırılması (aralık panelden değiştirilebilir).
+        from Backend.helper.cloud_sync import configure_cloud_sync_interval
+        LOGGER.info(configure_cloud_sync_interval(Telegram.CLOUD_SYNC_INTERVAL_HOURS, startup=True))
+
         # Başlangıç: yerel dosya yolu olan ama artık mevcut olmayan DB kayıtlarını temizle
         from Backend.pyrofork.plugins.sunucuyayukle import cleanup_local_path_records
         loop.create_task(cleanup_local_path_records())
@@ -135,6 +145,17 @@ async def start_services():
                 media_token_manager._purge_expired()
                 LOGGER.debug("stream_token: süresi dolmuş tokenlar temizlendi.")
         loop.create_task(_purge_tokens_loop())
+
+        # DeepL kota/süre izleyici: kalan karakter <= 5.000 veya bitişe <= 2 gün
+        # kalınca tüm yöneticilere (OWNER + APPROVER_IDS) uyarı gönderir.
+        from Backend.helper.deepl_monitor import deepl_monitor_loop
+        loop.create_task(deepl_monitor_loop(StreamBot))
+        LOGGER.info("DeepL Monitor Task Started.")
+
+        # Üye ve yönetici şifreleri 7 gün sonra geçersiz olur; yenisi /start ile alınır (CREDENTIAL_ROTATE_DAYS)
+        from Backend.helper.credential_rotator import credential_rotator_loop
+        loop.create_task(credential_rotator_loop())
+        LOGGER.info("Credential Rotator Task Started.")
 
         if Telegram.SUBSCRIPTION:
             from Backend.helper.subscription_checker import subscription_checker_loop

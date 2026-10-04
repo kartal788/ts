@@ -21,15 +21,15 @@ from pyrogram.types import (
 )
 from Backend.config import Telegram
 from Backend import db
-from Backend.helper.custom_filter import CustomFilters
+from Backend.helper.custom_filter import CustomFilters, is_admin_id
 
 print("DEBUG: plan_image.py PLUGIN LOADED SUCCESSFULLY!")
 
 
-# ─── Sadece owner kullanabilir (callback handler'lar için) ───────────────────
+# ─── Sadece owner / yöneticiler kullanabilir (callback handler'lar için) ───────────────────
 def _is_owner(message_or_query) -> bool:
     if hasattr(message_or_query, "from_user") and message_or_query.from_user:
-        return message_or_query.from_user.id == Telegram.OWNER_ID
+        return is_admin_id(message_or_query.from_user.id)
     return False
 
 

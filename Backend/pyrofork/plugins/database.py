@@ -1879,7 +1879,7 @@ class Database:
         """Bu ayki kullanıcının istek sayısını döndürür."""
         month_str = datetime.utcnow().strftime("%Y-%m")
         return await self.dbs["tracking"]["content_requests"].count_documents(
-            {"user_id": user_id, "month": month_str}
+            {"user_id": user_id, "month": month_str, "refunded": {"$ne": True}}
         )
 
     async def get_user_request_limit(self, user_id: int) -> int:

@@ -58,7 +58,7 @@
   <div class="relative mb-6 max-w-md">
     <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-xs theme-text-secondary"></i>
     <input id="search-input" type="text"
-      placeholder="Başlık, link veya kullanıcı adına göre ara..."
+      placeholder="Link veya kullanıcı adına göre ara..."
       oninput="renderRequests()"
       class="w-full pl-9 pr-4 py-2.5 rounded-xl border text-sm focus:outline-none focus:border-primary transition">
   </div>
@@ -151,10 +151,9 @@
 
     if (q) {
       groups = groups.filter(g => {
-        const inTitle = (g.title || '').toLowerCase().includes(q);
         const inLink  = (g.link || '').toLowerCase().includes(q);
         const inNames = (g.requesters || []).some(r => (r.name || '').toLowerCase().includes(q) || (r.username || '').toLowerCase().includes(q));
-        return inTitle || inLink || inNames;
+        return inLink || inNames;
       });
     }
 
@@ -167,14 +166,12 @@
     }
 
     listEl.innerHTML = groups.map(g => {
-      const t = typeLabel(g.media_type);
-      const displayTitle = g.title || g.link || 'Bilinmeyen içerik';
       const requesterCount = (g.requesters || []).length;
       const multiRequester = requesterCount > 1;
 
       const posterHtml = g.poster
         ? `<img src="${escHtml(g.poster)}" alt="" class="w-24 h-36 sm:w-32 sm:h-48 object-cover rounded-lg flex-shrink-0 border" style="border-color:var(--hairline)" onerror="this.style.display='none'">`
-        : `<div class="w-24 h-36 sm:w-32 sm:h-48 rounded-lg flex-shrink-0 flex items-center justify-center bg-primary/10 text-primary"><i class="fas ${t.icon} text-3xl"></i></div>`;
+        : `<div class="w-24 h-36 sm:w-32 sm:h-48 rounded-lg flex-shrink-0 flex items-center justify-center bg-primary/10 text-primary"><i class="fas fa-film text-3xl"></i></div>`;
 
       const requesterChips = (g.requesters || []).map(r => {
         const uname = (r.username || '').replace(/^@/, '');
@@ -206,15 +203,11 @@
           ${posterHtml}
           <div class="flex-1 min-w-0">
             <div class="flex flex-wrap items-center gap-2 mb-1">
-              <span class="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-primary/15 text-primary font-bold uppercase tracking-wide">
-                <i class="fas ${t.icon}"></i> ${t.text}
-              </span>
               ${statusBadge(g.status)}
               ${multiRequester ? `<span class="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-400 font-bold">
                 <i class="fas fa-users"></i> ${requesterCount} kişi istedi
               </span>` : ''}
             </div>
-            <h3 class="font-semibold text-text truncate" title="${escHtml(displayTitle)}">${escHtml(displayTitle)}</h3>
             ${g.link ? `<a href="${escHtml(g.link)}" target="_blank" rel="noopener" class="text-xs text-primary hover:underline break-all">${escHtml(g.link)}</a>` : ''}
 
             <div class="mt-2">

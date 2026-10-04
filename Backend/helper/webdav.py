@@ -11,6 +11,7 @@ WebDAV istemcisi (rclone binary'sine ihtiyaç duymaz).
 
 import asyncio
 import time
+import unicodedata
 import uuid
 import xml.etree.ElementTree as ET
 from typing import AsyncIterator, Dict, List, Optional
@@ -39,6 +40,12 @@ _PROPFIND_BODY = (
 
 class WebDAVError(Exception):
     pass
+
+
+class WebDAVNotFound(WebDAVError):
+    """Sunucu yolun YOK olduğunu açıkça bildirdi (404/410).
+    Bağlantı hatası, 401, 5xx gibi belirsiz durumlardan ayırt edilmelidir;
+    senkronizasyon yalnızca bu istisnada içerik silebilir."""
 
 
 # ── Profil yönetimi ───────────────────────────────────────────────────────────
@@ -214,8 +221,8 @@ async def _propfind(server: dict, path: str, depth: int) -> List[dict]:
 
     if resp.status_code == 401:
         raise WebDAVError("Kimlik doğrulama başarısız (401)")
-    if resp.status_code == 404:
-        raise WebDAVError("Yol bulunamadı (404)")
+    if resp.status_code in (404, 410):
+        raise WebDAVNotFound(f"Yol bulunamadı ({resp.status_code})")
     if resp.status_code not in (200, 207):
         raise WebDAVError(f"Sunucu beklenmeyen yanıt verdi ({resp.status_code})")
 
@@ -228,6 +235,11 @@ async def _propfind(server: dict, path: str, depth: int) -> List[dict]:
     for r in root.findall(f"{_DAV}response"):
         href_el = r.find(f"{_DAV}href")
         if href_el is None or not href_el.text:
+            continue
+        # Bazı sunucular 207 gövdesinde <d:response><d:status>404</d:status> döner:
+        # bu, kaynağın YOK olduğu anlamına gelir (RFC 4918 §9.2.1 / §14.24).
+        resp_status = r.findtext(f"{_DAV}status") or ""
+        if " 404" in resp_status or " 410" in resp_status:
             continue
         rel = _rel_from_href(server, href_el.text)
 
@@ -254,6 +266,8 @@ async def _propfind(server: dict, path: str, depth: int) -> List[dict]:
             "size": size,
             "modified": modified,
         })
+    if depth == 0 and not entries and root.findall(f"{_DAV}response"):
+        raise WebDAVNotFound("Yol bulunamadı (207 içinde 404)")
     return entries
 
 
@@ -276,6 +290,102 @@ async def list_dir(server: dict, path: str = "") -> dict:
     folders.sort(key=lambda x: x["name"].lower())
     files.sort(key=lambda x: x["name"].lower())
     return {"path": path, "items": folders + files}
+
+
+def _nfc(s: str) -> str:
+    """Bazı sunucular (macOS/NAS) Unicode'u NFD döndürür; karşılaştırmayı NFC ile yap."""
+    return unicodedata.normalize("NFC", s or "")
+
+
+async def list_files_in_dir(server: dict, dir_path: str) -> set:
+    """
+    Bir dizindeki (Depth:1) dosya yollarını NFC-normalize küme olarak döndürür.
+    Dizin yoksa WebDAVNotFound, diğer sorunlarda WebDAVError fırlatır.
+    """
+    dir_path = _norm_path(dir_path)
+    entries = await _propfind(server, dir_path, 1)
+    out = set()
+    for e in entries:
+        if not e["name"] or e["path"] == dir_path or e["is_dir"]:
+            continue
+        out.add(_nfc(e["path"]))
+    return out
+
+
+async def list_children(server: dict, dir_path: str) -> set:
+    """Dizindeki TÜM alt öğelerin (dosya + klasör) NFC-normalize göreli yolları.
+    Hata durumunda WebDAVError/WebDAVNotFound fırlatır."""
+    dir_path = _norm_path(dir_path)
+    entries = await _propfind(server, dir_path, 1)
+    return {_nfc(e["path"]) for e in entries if e["name"] and e["path"] != dir_path}
+
+
+async def missing_via_ancestors(server: dict, path: str, cache: Optional[dict] = None) -> Optional[bool]:
+    """
+    Sunucu eksik yola 404 yerine garip yanıt veriyorsa: yolu KÖKTEN başlayarak
+    her seviyedeki (başarılı) dizin listesiyle doğrular.
+    True  → bir üst seviye listesinde ilgili öğe yok → kesin silinmiş
+    False → tüm seviyelerde listelendi → var
+    None  → bir seviye listelenemedi → belirsiz (silme!)
+    """
+    cache = cache if cache is not None else {}
+    cur = ""
+    for part in _norm_path(path).split("/"):
+        if cur not in cache:
+            try:
+                cache[cur] = await list_children(server, cur)
+            except WebDAVError:
+                return None
+        child = _nfc(f"{cur}/{part}" if cur else part)
+        if child not in cache[cur]:
+            return True
+        cur = child
+    return False
+
+
+async def check_file(server: dict, path: str) -> tuple:
+    """
+    (durum, neden) döndürür. durum: True=var, False=sunucu 'yok' dedi, None=belirsiz.
+    `neden` belirsiz/yok durumlarında sunucunun verdiği yanıtı özetler (teşhis için).
+    """
+    try:
+        entries = await _propfind(server, path, 0)
+    except WebDAVNotFound as e:
+        return False, str(e)
+    except WebDAVError as e:
+        return None, str(e)
+    if not entries:
+        return False, "Boş yanıt (kayıt yok)"
+    if entries[0]["is_dir"]:
+        return False, "Yol artık bir klasör, video dosyası değil"
+
+    # Bazı sunucular (ör. TorBox) silinmiş dosya için de 207 + boş/boyutsuz bir
+    # girdi döndürür. Oynatma (stat_size) bu durumda "WebDAV dosyası bulunamadı"
+    # der; senkronizasyon da aynı ölçütü kullanmalı: gerçek bir video 0 bayt olamaz.
+    if not entries[0]["size"]:
+        try:
+            r = await _client_for(server).head(_url(server, path))
+        except httpx.HTTPError as e:
+            return None, f"Bağlantı hatası: {type(e).__name__}"
+        if r.status_code in (404, 410):
+            return False, f"HEAD {r.status_code}"
+        if r.status_code == 200 and int(r.headers.get("Content-Length", 0) or 0) > 0:
+            return True, ""
+        if r.status_code in (200, 206, 405, 501):
+            # Sunucu girdi veriyor ama boyut/erişim yok → oynatılamaz, silinmiş say
+            return False, "Girdi var ama boyut 0 / erişilemiyor (silinmiş olabilir)"
+        return None, f"Beklenmeyen HEAD yanıtı ({r.status_code})"
+    return True, ""
+
+
+async def file_exists(server: dict, path: str) -> Optional[bool]:
+    """
+    True  → dosya var
+    False → sunucu açıkça 'yok' dedi (404/410)
+    None  → belirsiz (bağlantı/kimlik/sunucu hatası) — bu durumda ASLA silme
+    """
+    state, _ = await check_file(server, path)
+    return state
 
 
 async def walk_videos(server: dict, path: str = "", max_depth: int = 6,

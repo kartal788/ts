@@ -152,9 +152,13 @@ async def login_post(
         request.session["authenticated"]   = True
         request.session["username"]        = username
         request.session["login_at"]        = _time.time()
+        from Backend.fastapi.security.credentials import otp_started_ts
+        request.session["otp_started_at"]  = otp_started_ts(admin_doc)  # /start anı → 4 gün sonra cookie silinir
         # session_version: bot restart veya /start ile artırılan DB değerini sakla
         from Backend import db as _db
-        request.session["session_version"] = await _db.get_admin_session_version()
+        _admin_key = admin_doc.get("_id", "admin")
+        request.session["admin_key"]       = _admin_key
+        request.session["session_version"] = await _db.get_admin_session_version(_admin_key)
         # Katalog için member session da aç (photo_url ve display_name ile)
         if not request.session.get("member"):
             request.session["member"] = {
@@ -445,6 +449,7 @@ async def settings_page(request: Request, _: bool = Depends(require_auth)):
         settings["env_multi_tokens"] = get_env_multi_tokens()
     except Exception:
         settings["env_multi_tokens"] = []
+    settings["owner_id"] = Telegram.OWNER_ID
 
     return templates.TemplateResponse("settings.html", {
         "request": request,

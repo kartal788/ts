@@ -200,13 +200,10 @@ async def istek_command(client: Client, message: Message):
     # Yöneticinin tarayıcısına Web Push bildirimi gönder (Telegram'dan bağımsız)
     try:
         from Backend.helper.webpush import notify_admins as _notify_admins_push
-        _push_type_label = {"movie": "🎬 Film", "tv": "📺 Dizi", "unknown": "🎥 İçerik"}.get(
-            resolved_media_type, "🎥 İçerik"
-        )
         import asyncio as _asyncio
         _asyncio.create_task(_notify_admins_push(
             title="Yeni İçerik Talebi",
-            body=f"{_push_type_label} talebi: {first_name or username or user_id}",
+            body=f"İçerik talebi: {first_name or username or user_id}",
             url="/istekler",
             tag="istek-icerik",
         ))
@@ -249,10 +246,9 @@ async def istek_command(client: Client, message: Message):
         limit_info = f"\n📊 Bu ay kalan istek hakkınız: <b>{remaining}</b>"
 
     reminder_info = "\n🔔 İçerik eklenince otomatik bildirim alacaksınız." if reminder_set else ""
-    title_info = f"\n🎬 <b>Başlık:</b> {resolved_title}" if resolved_title else ""
     await message.reply_text(
         f"✅ <b>İsteğiniz alındı!</b>\n\n"
-        f"🔗 <b>Link:</b> {link}{title_info}\n"
+        f"🔗 <b>Link:</b> {link}\n"
         f"📋 <b>Durum:</b> Yönetici incelemesi bekleniyor{limit_info}{reminder_info}",
         parse_mode=enums.ParseMode.HTML,
         disable_web_page_preview=True
@@ -261,7 +257,6 @@ async def istek_command(client: Client, message: Message):
     # Yöneticiye bildirim gönder
     user_mention   = message.from_user.mention
     username_str   = f"@{username}" if username else "N/A"
-    type_label     = {"movie": "🎬 Film", "tv": "📺 Dizi", "unknown": "🎥 Bilinmiyor"}.get(resolved_media_type, "?")
 
     if request_limit > 0:
         used_now = await db.count_user_requests_this_month(user_id)
@@ -269,14 +264,11 @@ async def istek_command(client: Client, message: Message):
     else:
         limit_admin_info = ""
 
-    title_admin_info = f"\n<b>📌 Başlık:</b> {resolved_title}" if resolved_title else ""
-
     admin_text = (
         f"<b>🎬 Yeni İçerik Talebi</b>\n\n"
         f"<b>👤 Kullanıcı:</b> {user_mention}\n"
         f"<b>🆔 ID:</b> <code>{user_id}</code>\n"
         f"<b>🔗 Kullanıcı Adı:</b> {username_str}\n"
-        f"<b>📂 Tür:</b> {type_label}{title_admin_info}\n"
         f"<b>🔗 Link:</b> {link}{limit_admin_info}\n\n"
         f"Talebi onaylayın veya reddedin."
     )
@@ -288,7 +280,9 @@ async def istek_command(client: Client, message: Message):
         ]
     ])
 
-    approver_ids = Telegram.APPROVER_IDS if Telegram.APPROVER_IDS else [Telegram.OWNER_ID]
+    #----- Bota gelen onay mesajı SADECE ana yöneticiye (OWNER_ID) gider.
+    #----- Diğer yöneticiler talebi web panelinden (/istekler) onaylar.
+    approver_ids = [Telegram.OWNER_ID]
     admin_messages = []
     for approver_id in approver_ids:
         try:
@@ -385,9 +379,10 @@ async def open_yukselt_callback(client: Client, callback_query: CallbackQuery):
 @Client.on_callback_query(filters.regex(r"^req_(approve|reject)_([a-fA-F0-9]{24})_(\d+)$"))
 async def istek_review(client: Client, callback_query: CallbackQuery):
     """Yönetici isteği onaylar veya reddeder."""
-    approver_ids = Telegram.APPROVER_IDS if Telegram.APPROVER_IDS else [Telegram.OWNER_ID]
-    if callback_query.from_user.id not in approver_ids:
-        return await callback_query.answer("⛔ Bu işlem için yetkiniz yok.", show_alert=True)
+    #----- Bot üzerinden onay/red yalnızca ana yönetici içindir;
+    #----- diğer yöneticiler web panelini kullanır.
+    if callback_query.from_user.id != Telegram.OWNER_ID:
+        return await callback_query.answer("⛔ Bu işlemi yalnızca ana yönetici bottan yapabilir. Web panelini kullanın.", show_alert=True)
 
     action     = callback_query.matches[0].group(1)   # "approve" | "reject"
     request_id = callback_query.matches[0].group(2)
@@ -398,18 +393,17 @@ async def istek_review(client: Client, callback_query: CallbackQuery):
     # DB'den talep bilgisini çek (link, tür, başlık vs.)
     req_doc = await db.get_content_request(request_id)
     req_link = req_doc.get("link", "") if req_doc else ""
-    req_type = req_doc.get("media_type", "unknown") if req_doc else "unknown"
-    req_title = req_doc.get("title", "") if req_doc else ""
-    type_label = {"movie": "🎬 Film", "tv": "📺 Dizi", "unknown": "🎥 Bilinmiyor"}.get(req_type, "?")
-    title_str = f"\n📌 <b>Başlık:</b> {req_title}" if req_title else ""
 
     await db.update_content_request_status(request_id, new_status)
+
+    # Reddedilen talebin istek hakkını kullanıcıya iade et
+    if new_status == "rejected":
+        await db.refund_content_request(request_id)
 
     if action == "approve":
         label = "✅ Onaylandı"
         user_msg = (
             f"✅ <b>İçerik Talebiniz Onaylandı!</b>\n\n"
-            f"<b>📂 Tür:</b> {type_label}{title_str}\n"
             f"<b>🔗 Link:</b> {req_link}\n\n"
             "Talebiniz yönetici tarafından onaylandı. "
             "İçerik en kısa sürede platforma eklenecektir."
@@ -418,9 +412,9 @@ async def istek_review(client: Client, callback_query: CallbackQuery):
         label = "❌ Reddedildi"
         user_msg = (
             f"❌ <b>İçerik Talebiniz Reddedildi</b>\n\n"
-            f"<b>📂 Tür:</b> {type_label}{title_str}\n"
             f"<b>🔗 Link:</b> {req_link}\n\n"
-            "Maalesef talebiniz yönetici tarafından reddedildi."
+            "İstediğiniz içeriğin dublajı olmadığı için talebiniz reddedildi."
+            "İstek hakkınız hesabınıza iade edilmiştir."
         )
 
     await callback_query.answer(f"İstek {label.lower()}.", show_alert=False)
@@ -442,17 +436,10 @@ async def istek_review(client: Client, callback_query: CallbackQuery):
             if "👤 Kullanıcı:" in line:
                 user_line = line.strip()
                 break
-        type_line = ""
-        for line in original.splitlines():
-            if "📂 Tür:" in line:
-                type_line = line.strip()
-                break
-
         status_section = (
             f"\n\n{'─' * 30}\n"
             f"<b>{label}</b> — {reviewer}\n"
             f"{user_line}\n"
-            f"{type_line}\n"
             f"{link_line}"
         )
 

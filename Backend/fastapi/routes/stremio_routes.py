@@ -8,6 +8,7 @@ from Backend import db, __version__
 from Backend.helper.database import is_media_visible_to_member, is_proxy_scope_member
 from Backend.helper.platform_catalog import platform_catalog, PLATFORM_LABELS
 from Backend.helper.settings_manager import SettingsManager
+from os.path import exists as _os_exists
 import PTN
 from datetime import datetime, timezone, timedelta
 from Backend.fastapi.security.tokens import verify_token
@@ -19,7 +20,6 @@ import httpx
 
 # --- Configuration ---
 BASE_URL = Telegram.BASE_URL
-ADDON_NAME = Telegram.ISIM
 ADDON_VERSION = __version__
 PAGE_SIZE = 15
 
@@ -730,11 +730,12 @@ def format_bitrate(size_str: str, runtime_str: str) -> str:
     return f"{mbps:.1f} Mbps"
 
 
+# WebDAV, Google Drive ve Rclone kaynaklı içerikler Stremio'da bu etiketle listelenir.
 WEBDAV_SOURCE_LABEL = "⚡ Hızlı Sunucu"
 
 
 def format_stream_details(filename: str, quality: str, size: str, file_id: str, certification: str = "", is_split: bool = False, runtime: str = "", source_label: str = "") -> tuple[str, str]:
-    # Kaynak: WebDAV (Hızlı Sunucu) / Link / Telegram
+    # Kaynak: Hızlı Sunucu (WebDAV/Drive/Rclone) / Link / Telegram
     if source_label:
         source_prefix = source_label
     else:
@@ -1292,7 +1293,9 @@ async def get_manifest(token: str, lang: str = "en", token_data: dict = Depends(
             catalogs = filtered
 
     # Build dynamic name/description/version with subscription info
-    addon_name = ADDON_NAME
+    # İsim her istekte canlı okunur (ayarlar sayfasından değişince hemen yansısın)
+    base_addon_name = (Telegram.ISIM or "").strip() or "KARTAL"
+    addon_name = base_addon_name
     addon_desc = Telegram.EKLENTI_ACIKLAMASI
     addon_version = ADDON_VERSION
     expiry_obj = None
@@ -1353,13 +1356,13 @@ async def get_manifest(token: str, lang: str = "en", token_data: dict = Depends(
 
                     if expiry_obj:
                         date_str = _format_expiry_date(expiry_obj, lang)
-                        addon_name = f"{ADDON_NAME}{name_suffix}: {date_str}"
+                        addon_name = f"{base_addon_name}{name_suffix}: {date_str}"
                         addon_desc = f"📅 {i18n['expires_on'].format(date=date_str)}"
                         epoch_tag = format(int(expiry_obj.timestamp()) & 0xFFFF, "x")
                         addon_version = f"{ADDON_VERSION}-{epoch_tag}"
                     else:
                         # Sınırsız abonelik (expiry_obj yok)
-                        addon_name = f"{ADDON_NAME}{name_suffix}"
+                        addon_name = f"{base_addon_name}{name_suffix}"
                         addon_desc = f"♾️ {i18n['unlimited']}"
             except Exception:
                 pass  # Fallback to defaults on error
@@ -2812,6 +2815,40 @@ async def get_streams(
     else:
         cert = media_details.get("certification_us") or ""
     
+    # Zamanlanmış silmesi olan sunucu dosyaları → Stremio'da "ne zaman silinecek" gösterimi
+    _sched_map: dict = {}
+    try:
+        from Backend.helper.scheduled_delete import pending_by_abs_path as _pending_abs
+        _sched_map = await _pending_abs()
+    except Exception:
+        _sched_map = {}
+
+    def _delete_line(local_path: str, _lang: str) -> str:
+        """Dosyanın zamanlanmış silinme bilgisini tek satır metin olarak döner ('' = yok)."""
+        if not _sched_map or not local_path:
+            return ""
+        import os as _os
+        dt = _sched_map.get(local_path) or _sched_map.get(_os.path.normpath(local_path))
+        if not dt:
+            return ""
+        from datetime import datetime as _dt, timezone as _tz
+        from zoneinfo import ZoneInfo as _ZI
+        now = _dt.now(_tz.utc)
+        end = dt.replace(tzinfo=_tz.utc)
+        local = end.astimezone(_ZI("Europe/Istanbul"))
+        secs = int((end - now).total_seconds())
+        days, rem = divmod(max(secs, 0), 86400)
+        hours, rem = divmod(rem, 3600)
+        mins = rem // 60
+        if _lang == "de":
+            left = f"{days} T. {hours} Std." if days else (f"{hours} Std. {mins} Min." if hours else f"{mins} Min.")
+            return f"⏰ Wird gelöscht: {local.strftime('%d.%m.%Y %H:%M')} (noch {left})"
+        if _lang == "en":
+            left = f"{days}d {hours}h" if days else (f"{hours}h {mins}m" if hours else f"{mins}m")
+            return f"⏰ Will be removed: {local.strftime('%d.%m.%Y %H:%M')} ({left} left)"
+        left = f"{days} gün {hours} sa" if days else (f"{hours} sa {mins} dk" if hours else f"{mins} dk")
+        return f"⏰ Silinecek: {local.strftime('%d.%m.%Y %H:%M')} ({left} kaldı)"
+
     # 1. Döngü Bloğu (4 boşluk girinti)
     import re as _re_stremio
     _ARCHIVE_EXTS = (".zip", ".7z", ".rar")
@@ -2895,19 +2932,40 @@ async def get_streams(
         quality_str = quality.get("quality", "")
         size = quality.get("size", "")
 
-        # WebDAV kaydı mı? (encoded_string içinde webdav_id var) → "Hızlı Sunucu"
+        # WebDAV / Google Drive / Rclone kaydı mı? (encoded_string içinde
+        # webdav_id+webdav_path, gdrive_file_id veya rclone_remote+rclone_path var)
+        # → "Hızlı Sunucu"
         _is_webdav = False
         _pre_decoded = None
+        if file_id.startswith(("http://", "https://")) and "/api/sunucu/indir" in file_id:
+            _is_webdav = True   # eski tip sunucu linkleri de "Hızlı Sunucu"
         if not file_id.startswith(("http://", "https://")):
             try:
                 from Backend.helper.encrypt import decode_string as _decode_pre
                 _pre_decoded = await _decode_pre(file_id)
                 _is_webdav = bool(
                     isinstance(_pre_decoded, dict)
-                    and _pre_decoded.get("webdav_id") and _pre_decoded.get("webdav_path")
+                    and (
+                        (_pre_decoded.get("webdav_id") and _pre_decoded.get("webdav_path"))
+                        or _pre_decoded.get("gdrive_file_id")
+                        or (_pre_decoded.get("rclone_remote") and _pre_decoded.get("rclone_path"))
+                        # HTTPS indir / sunucu paneli ile eklenen yerel dosyalar da hızlı sunucu
+                        or _pre_decoded.get("local_path")
+                    )
                 )
             except Exception:
                 _pre_decoded = None  # aşağıdaki mevcut decode hatası yönetimi devam eder
+
+        # Sunucuda (yerel) duran dosya fiziksel olarak silinmişse akışı gösterme
+        # ve kaydı DB'den temizlemek için arka plan taramasını tetikle.
+        try:
+            from Backend.helper.sunucu_file_checker import resolve_local_path as _rlp, request_purge_soon as _rps
+            _lp_chk = await _rlp(file_id)
+            if _lp_chk is not None and not _os_exists(_lp_chk):
+                _rps()
+                continue
+        except Exception:
+            pass
 
         # Split dosya: tek parça file_id ile kaydedilmiş ama adı .mkv.001 ile bitiyor
         # Bu durumda dosya adındaki .001 suffix'ini temizleyerek format_stream_details'e gönder
@@ -2921,6 +2979,24 @@ async def get_streams(
             filename_for_display, quality_str, size, file_id, certification=cert, is_split=_is_split, runtime=media_runtime,
             source_label=WEBDAV_SOURCE_LABEL if _is_webdav else "",
         )
+
+        # ⏰ Zamanlanmış silme bilgisi (yalnızca sunucu/yerel dosyalar)
+        if _sched_map:
+            _local_p = ""
+            if isinstance(_pre_decoded, dict):
+                _local_p = _pre_decoded.get("local_path") or ""
+            elif file_id.startswith(("http://", "https://")) and "/api/sunucu/indir" in file_id:
+                try:
+                    from urllib.parse import urlparse as _up2, parse_qs as _pq2
+                    from Backend.fastapi.routes.sunucu_routes import SUNUCU_DIR as _SD2
+                    _r2 = _pq2(_up2(file_id).query).get("path", [""])[0]
+                    if _r2:
+                        _local_p = str((_SD2 / _r2.lstrip("/\\")).resolve())
+                except Exception:
+                    _local_p = ""
+            _dl = _delete_line(_local_p, lang)
+            if _dl:
+                stream_title = f"{stream_title}\n{_dl}"
 
         if file_id.startswith(("http://", "https://")) and "/api/sunucu/indir" in file_id:
             # Sunucu panelinden eklenen yerel dosya — auth gerektiren URL'yi
@@ -3005,7 +3081,7 @@ async def get_streams(
             })
 
     # 2. Sıralama ve Düzenleme Bloğu
-    # Sıra: ⚡ Hızlı Sunucu (WebDAV, yalnızca boyuta göre büyükten küçüğe)
+    # Sıra: ⚡ Hızlı Sunucu (WebDAV/Drive/Rclone, yalnızca boyuta göre büyükten küçüğe)
     #       → Link → Telegram (çözünürlük, sonra boyut)
     def _stream_sort_key(s):
         _name = s.get("name", "")

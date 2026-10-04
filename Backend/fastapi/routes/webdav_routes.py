@@ -12,6 +12,8 @@ Tüm uç noktalar /api/sunucu/webdav/* altındadır (CSRF middleware'i bu öneki
   POST   /api/sunucu/webdav/meta-sorgu       → tek dosya için metadata sorgula
   POST   /api/sunucu/webdav/ekle             → onaylanan metadata ile tek dosya ekle
   POST   /api/sunucu/webdav/toplu-ekle       → seçilen dosyaları otomatik metadata ile ekle
+  POST   /api/sunucu/webdav/klasor-ekle      → bir klasörü (alt klasörleriyle) tek tıkla topluca ekle
+  POST   /api/sunucu/webdav/sync             → WebDAV'dan silinen dosyaları katalogdan kaldır (dry_run destekli)
   GET    /api/sunucu/webdav/is/{job_id}      → toplu ekleme ilerlemesi
   GET    /api/sunucu/webdav/db-listele       → eklenmiş WebDAV içerikleri
   DELETE /api/sunucu/webdav/db-sil           → kaydı ve katalog girdisini kaldır
@@ -42,6 +44,8 @@ router = APIRouter(prefix="/api/sunucu/webdav", dependencies=[Depends(require_au
 APPROVED_COLLECTION = "webdav_approved"
 PAGE_SIZE = 20
 MAX_BULK = 500
+MAX_FOLDER = 3000          # tek klasör ekleme işinde işlenecek en fazla video
+SYNC_PREVIEW_LIMIT = 200   # sync yanıtında sunucu başına gösterilecek en fazla kayıt
 
 
 def _err(msg: str, status: int = 400) -> JSONResponse:
@@ -119,11 +123,98 @@ def _meta_name(path: str) -> str:
     return f"{show} {fname}"
 
 
-async def _query_meta(path: str):
-    name = _meta_name(path)
+async def _query_meta(path: str, name: str = None, override_id: str = None):
+    """
+    name        → metadata aramasında kullanılacak ad (None ise _meta_name(path))
+    override_id → TMDB/IMDb id ya da linki (verilirse dosya adındaki id'nin yerine geçer)
+    """
+    name = name or _meta_name(path)
     clean = clean_filename(name)
-    override_id, _ = extract_default_id(name)
-    return await fetch_metadata(clean, 0, 0, override_id=override_id)
+    if override_id:
+        found_id = override_id
+    else:
+        found_id, _ = extract_default_id(name)
+    return await fetch_metadata(clean, 0, 0, override_id=found_id)
+
+
+# ── Klasör ekleme için isim üretimi ──────────────────────────────────────────
+
+_SEASON_DIR2 = re.compile(
+    r"^(?:(?:season|sezon|staffel|s)[\s._-]*(\d{1,2})|(\d{1,2})\.?[\s._-]*(?:sezon|season))$",
+    re.IGNORECASE,
+)
+_SXXEYY = re.compile(r"[Ss](\d{1,2})[\s._-]*[Ee](\d{1,3})")
+_NXNN = re.compile(r"(?<!\d)(\d{1,2})[xX](\d{1,3})(?!\d)")
+_EP_ONLY = (
+    re.compile(r"(?:^|[\s._-])(?:e|ep|episode|bölüm|bolum|folge)[\s._-]*(\d{1,3})(?!\d)", re.IGNORECASE),
+    re.compile(r"^(\d{1,3})(?!\d|[pP]\b)"),   # "01 - Başlık" (ama "720p" değil)
+)
+_RES = re.compile(r"(?<!\d)(2160|1080|720|576|480)p", re.IGNORECASE)
+_YEAR = re.compile(r"(?<!\d)(?:19|20)\d{2}(?!\d)")
+_KINDS = ("auto", "tv", "movie")
+
+
+def _res_token(fname: str) -> str:
+    m = _RES.search(fname)
+    return f" {m.group(1)}p" if m else ""
+
+
+def _tv_search_name(path: str, show_override: str = ""):
+    """
+    Dizi klasörü için arama adı. Dizi adı: elle girilen > dosyanın ait olduğu ilk
+    (sezon olmayan) klasör. Sezon: dosya adı > sezon klasörü > 1.
+    Dosya adı başlık + SxxEyy içeriyor ve dizi adı elle verilmediyse dosya adı aynen kullanılır
+    (kalite/kaynak bilgisi korunur). Başlıksız ("S01E03.mkv", "1x04.mkv") ise dizi adı klasörden
+    alınır. Bölüm bulunamazsa None döner.
+    """
+    p = PurePosixPath(path)
+    fname = p.name
+
+    season_dir = None
+    show = show_override
+    for part in reversed(p.parent.parts):
+        sm = _SEASON_DIR2.match(part)
+        if sm:
+            season_dir = season_dir or int(sm.group(1) or sm.group(2))
+            continue
+        if not show:
+            show = part
+        break
+
+    season = ep = None
+    full = _SXXEYY.search(fname) or _NXNN.search(fname)
+    if full:
+        season, ep = int(full.group(1)), int(full.group(2))
+        has_title = bool(re.search(r"[^\W\d_]", fname[:full.start()]))
+        if not show_override and has_title:
+            return fname           # "Dizi.S01E03.1080p.mkv": başlık + bölüm zaten var, aynen kullan
+    else:
+        for rx in _EP_ONLY:
+            m = rx.search(p.stem)
+            if m:
+                ep = int(m.group(1))
+                break
+        season = season_dir if season_dir is not None else 1
+
+    if ep is None or not show:
+        return None
+    return f"{show} S{season:02d}E{ep:02d}{_res_token(fname)}{p.suffix}"
+
+
+def _movie_search_name(path: str) -> str:
+    """Dosya adında yıl yoksa ama klasör adında varsa ('Film (2010)/movie.mkv') klasör adını kullan."""
+    p = PurePosixPath(path)
+    if not _YEAR.search(p.stem) and p.parent.name and _YEAR.search(p.parent.name):
+        return f"{p.parent.name}{_res_token(p.name)}{p.suffix}"
+    return p.name
+
+
+def _folder_search_name(path: str, kind: str, show: str = "") -> str:
+    if kind == "tv":
+        return _tv_search_name(path, show) or _meta_name(path)
+    if kind == "movie":
+        return _movie_search_name(path)
+    return _meta_name(path)
 
 
 def _normalize_meta(meta: dict) -> dict:
@@ -182,13 +273,15 @@ def _queue_announcement(meta: dict, file_name: str) -> None:
     """
     Telegram'dan gelen içerikte (reciever.py) yapıldığı gibi, yeni içeriği
     duyuru kuyruğuna ekler. Ayarlardan kapalıysa, imdb_id boşsa veya aynı başlık
-    son 18 saat içinde duyurulduysa content_announcer kendisi atlar.
+    18 saat sınırı burada uygulanmaz (webdav.html'de işaretlendiyse gönderilir).
     """
     try:
         from Backend.helper.content_announcer import announce_new_content
         info = dict(meta)
         info["source_filename"] = file_name  # cam/telesync tespiti bu alana bakar
+        info["announce_resolution"] = meta.get("quality")  # duyuruda "Çözünürlük" satırı
         info.setdefault("db_index", db.current_db_index)
+        info["_force_announce"] = True   # webdav.html: 18 saat sınırı aranmaz
         announce_new_content(info)
     except Exception as e:
         LOGGER.warning("[webdav] Duyuru tetiklenemedi: %s", e)
@@ -546,36 +639,97 @@ def _prune_jobs() -> None:
         _JOBS.pop(k, None)
 
 
-async def _run_bulk(job_id: str, server: dict, paths: list, announce: bool = True) -> None:
+_TASKS: set = set()
+
+
+def _spawn(coro) -> None:
+    """Arka plan görevini referansını tutarak başlat (GC ile yarıda kesilmesin)."""
+    t = asyncio.create_task(coro)
+    _TASKS.add(t)
+    t.add_done_callback(_TASKS.discard)
+
+
+def _new_job(total: int, phase: str = "adding", **extra) -> dict:
+    _prune_jobs()
+    job_id = secrets.token_hex(6)
+    _JOBS[job_id] = {
+        "id": job_id, "state": "running", "phase": phase, "total": total, "done": 0,
+        "added": 0, "skipped": 0, "no_meta": 0, "failed": 0,
+        "current": "", "log": [], "started": time.time(), "error": "", "truncated": False,
+        **extra,
+    }
+    return _JOBS[job_id]
+
+
+async def _run_bulk(job_id: str, server: dict, items: list, announce: bool = True) -> None:
+    """
+    items: [{"path": str, "name": Optional[str]}]  (name = metadata arama adı)
+    Zaten eklenmiş dosyalar metadata sorgusu yapılmadan atlanır; böylece aynı
+    klasör tekrar eklendiğinde yalnızca yeni dosyalar işlenir.
+    """
     job = _JOBS[job_id]
-    for path in paths:
+    override_id = job.get("override_id") or None
+    for it in items:
+        path = it["path"]
         if job.get("cancel"):
             break
         job["current"] = path
+        slept = False
         try:
-            meta = await _query_meta(path)
-            if not meta:
-                job["no_meta"] += 1
-                job["log"].append({"path": path, "status": "no_meta"})
+            if await _already_added(server["_id"], path):
+                job["skipped"] += 1
             else:
-                res = await _add_media(server, path, meta, announce=announce)
-                st = res["status"]
-                if st == "ok":
-                    job["added"] += 1
-                elif st == "duplicate":
-                    job["skipped"] += 1
+                meta = await _query_meta(path, name=it.get("name"), override_id=override_id)
+                slept = True
+                if not meta:
+                    job["no_meta"] += 1
+                    job["log"].append({"path": path, "status": "no_meta"})
                 else:
-                    job["failed"] += 1
-                job["log"].append({"path": path, "status": st, "title": res.get("title"),
-                                   "error": res.get("error")})
+                    res = await _add_media(server, path, meta, announce=announce)
+                    st = res["status"]
+                    if st == "ok":
+                        job["added"] += 1
+                    elif st == "duplicate":
+                        job["skipped"] += 1
+                    else:
+                        job["failed"] += 1
+                    if st != "duplicate":
+                        job["log"].append({"path": path, "status": st, "title": res.get("title"),
+                                           "error": res.get("error")})
         except Exception:
             LOGGER.error("[webdav] toplu ekleme hatası: %s", path, exc_info=True)
             job["failed"] += 1
             job["log"].append({"path": path, "status": "error", "error": "İşlenemedi"})
         job["done"] += 1
-        await asyncio.sleep(0.2)  # TMDB / DB üzerinde nazik ol
+        if slept:
+            await asyncio.sleep(0.2)  # TMDB / DB üzerinde nazik ol
     job["current"] = ""
+    job["phase"] = "done"
     job["state"] = "cancelled" if job.get("cancel") else "finished"
+
+
+async def _run_folder(job_id: str, server: dict, base: str, kind: str, show: str,
+                      announce: bool) -> None:
+    """Klasörü özyinelemeli tara, ardından bulunan tüm videoları ekle."""
+    job = _JOBS[job_id]
+    try:
+        files = await dav.walk_videos(server, base, max_files=MAX_FOLDER)
+    except dav.WebDAVError as e:
+        job.update(state="error", phase="done", error=str(e))
+        return
+    except Exception:
+        LOGGER.error("[webdav] klasör tarama hatası: %s", base, exc_info=True)
+        job.update(state="error", phase="done", error="Klasör taranamadı")
+        return
+
+    job["truncated"] = len(files) >= MAX_FOLDER
+    items = [{"path": f["path"], "name": _folder_search_name(f["path"], kind, show)} for f in files]
+    job["total"] = len(items)
+    job["phase"] = "adding"
+    if not items:
+        job.update(state="finished", phase="done")
+        return
+    await _run_bulk(job_id, server, items, announce=announce)
 
 
 @router.post("/toplu-ekle")
@@ -600,15 +754,49 @@ async def bulk_add(request: Request):
     if not clean_paths:
         return _err("Geçerli yol yok")
 
-    _prune_jobs()
-    job_id = secrets.token_hex(6)
-    _JOBS[job_id] = {
-        "id": job_id, "state": "running", "total": len(clean_paths), "done": 0,
-        "added": 0, "skipped": 0, "no_meta": 0, "failed": 0,
-        "current": "", "log": [], "started": time.time(),
+    job = _new_job(len(clean_paths))
+    _spawn(_run_bulk(job["id"], server, [{"path": p} for p in clean_paths],
+                     announce=bool(body.get("announce", True))))
+    return {"job_id": job["id"], "total": len(clean_paths), "capped": len(paths) > MAX_BULK}
+
+
+@router.post("/klasor-ekle")
+async def folder_add(request: Request):
+    """
+    Bir klasörü (alt klasörleriyle birlikte) tek istekle ekler.
+
+    body: {
+      server, path,
+      kind:        "auto" | "tv" | "movie"   (varsayılan auto)
+      show_name:   (tv için isteğe bağlı) dizi adı; boşsa klasör adlarından bulunur
+      override_id: (isteğe bağlı) TMDB linki / IMDb id — tüm dosyalara uygulanır
+      announce:    yeni içerikleri duyur (varsayılan true)
     }
-    asyncio.create_task(_run_bulk(job_id, server, clean_paths, announce=bool(body.get("announce", True))))
-    return {"job_id": job_id, "total": len(clean_paths), "capped": len(paths) > MAX_BULK}
+    İlerleme: GET /is/{job_id}  (phase = "scanning" → "adding" → "done")
+    """
+    body = await _json(request)
+    if body is None:
+        return _err("Geçersiz JSON")
+    server = await _server_or_none(body.get("server", ""))
+    if not server:
+        return _err("Sunucu bulunamadı", 404)
+    try:
+        base = dav._norm_path(body.get("path", ""))
+    except dav.WebDAVError as e:
+        return _err(str(e))
+
+    kind = (body.get("kind") or "auto").strip().lower()
+    if kind not in _KINDS:
+        return _err("Geçersiz tür (auto, tv veya movie olmalı)")
+    show = (body.get("show_name") or "").strip()[:200]
+    override_id = (body.get("override_id") or "").strip()[:200]
+
+    if any(j["state"] == "running" for j in _JOBS.values()):
+        return _err("Devam eden bir toplu ekleme işi var, bitmesini bekleyin", 409)
+
+    job = _new_job(0, phase="scanning", path=base, kind=kind, override_id=override_id)
+    _spawn(_run_folder(job["id"], server, base, kind, show, bool(body.get("announce", True))))
+    return {"job_id": job["id"], "path": base, "kind": kind}
 
 
 @router.get("/is/{job_id}")
@@ -627,6 +815,41 @@ async def job_cancel(request: Request):
         return _err("İş bulunamadı", 404)
     job["cancel"] = True
     return {"ok": True}
+
+
+# ── Senkronizasyon: WebDAV'dan silinenleri katalogdan kaldır ──────────────────
+
+@router.post("/sync")
+async def sync(request: Request):
+    """
+    body: { server?: <profil id>, dry_run?: bool, force?: bool }
+      dry_run=true → hiçbir şey silinmez, silinecekler listelenir
+      force=true   → toplu silme güvenlik eşiğini yok say
+    """
+    body = (await _json(request)) or {}
+    server_id = (body.get("server") or "").strip() or None
+
+    from Backend.helper.webdav_sync import sync_webdav
+    try:
+        report = await sync_webdav(
+            server_id=server_id,
+            dry_run=bool(body.get("dry_run", False)),
+            force=bool(body.get("force", False)),
+        )
+    except Exception:
+        _logger.error("WebDAV sync hatası", exc_info=True)
+        return _err("Sunucu hatası", 500)
+
+    if report.get("error"):
+        return _err(report["error"], 409)
+
+    # Yanıtı küçük tut: sunucu başına en fazla SYNC_PREVIEW_LIMIT kayıt göster
+    for entry in report["servers"]:
+        entry["missing_count"] = len(entry["missing"])
+        entry["missing"] = entry["missing"][:SYNC_PREVIEW_LIMIT]
+        entry["unknown_count"] = len(entry["unknown"])
+        entry["unknown"] = entry["unknown"][:SYNC_PREVIEW_LIMIT]
+    return report
 
 
 # ── Eklenmiş içerikler ────────────────────────────────────────────────────────

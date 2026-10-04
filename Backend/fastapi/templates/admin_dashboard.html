@@ -119,12 +119,25 @@
 
     <!-- Dead Links -->
     <div>
-        <h2 class="text-xl font-semibold text-text mb-4">İşaretlenmiş Hatalı Linkler</h2>
+        <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+            <h2 class="text-xl font-semibold text-text">İşaretlenmiş Hatalı Linkler</h2>
+            <div class="flex items-center gap-3">
+                <span id="dead-selected-count" class="text-xs theme-text-secondary">0 seçili</span>
+                <button id="dead-bulk-delete-btn" onclick="bulkDeleteDeadLinks()" disabled
+                    class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors shadow-sm flex items-center disabled:opacity-40 disabled:cursor-not-allowed">
+                    <i class="fas fa-trash-alt mr-2"></i> Seçilenleri Sil
+                </button>
+            </div>
+        </div>
         <div class="theme-card border rounded-xl overflow-hidden shadow-sm">
             <div class="overflow-x-auto">
                 <table class="w-full text-sm text-left text-text">
                     <thead class="text-xs uppercase theme-card border-b text-text">
                         <tr>
+                            <th class="px-4 py-4 w-10 text-center">
+                                <input type="checkbox" id="dead-select-all" onchange="toggleAllDeadLinks(this.checked)"
+                                    class="w-4 h-4 cursor-pointer accent-red-600" title="Tümünü seç">
+                            </th>
                             <th class="px-6 py-4 font-semibold">Başlık</th>
                             <th class="px-6 py-4 font-semibold w-24">Tür</th>
                             <th class="px-6 py-4 font-semibold">Kalite Detayları</th>
@@ -134,7 +147,7 @@
                     </thead>
                     <tbody id="dead-links-tbody" class="divide-y divide-white/10">
                         <tr>
-                            <td colspan="5" class="px-6 py-8 text-center theme-text-secondary">
+                            <td colspan="6" class="px-6 py-8 text-center theme-text-secondary">
                                 <i class="fas fa-spinner fa-spin text-primary mr-2"></i> Hatalı linkler yükleniyor...
                             </td>
                         </tr>
@@ -298,27 +311,43 @@
         renderAnalyticsPage();
     }
 
+    function escHtml(v) {
+        return String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    }
+    const escAttr = escHtml;
+
+    function copyTgLink(url, btn) {
+        const done = () => { const i = btn.querySelector('i'); if (i) { i.className = 'fas fa-check'; setTimeout(() => i.className = 'fas fa-copy', 1200); } };
+        if (navigator.clipboard) navigator.clipboard.writeText(url).then(done).catch(() => {});
+        else { const t = document.createElement('textarea'); t.value = url; document.body.appendChild(t); t.select(); document.execCommand('copy'); t.remove(); done(); }
+    }
+
     async function fetchDeadLinks() {
         try {
             const res = await fetch('/api/admin/dead-links');
             const tbody = document.getElementById('dead-links-tbody');
             if (res.ok) {
                 const data = await res.json();
-                const links = data.data;
+                const links = data.data || [];
+                _deadLinks = links;
+                updateDeadSelection();
 
                 if (links.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="5" class="px-6 py-8 text-center theme-text-secondary">Hatalı link bulunamadı. Tüm dosyalar sağlıklı!</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="6" class="px-6 py-8 text-center theme-text-secondary">Hatalı link bulunamadı. Tüm dosyalar sağlıklı!</td></tr>';
                     return;
                 }
 
                 let html = '';
-                links.forEach(l => {
+                links.forEach((l, idx) => {
                     const typeBadge = l.type === 'movie'
                         ? '<span class="px-2 py-1 rounded bg-primary/10 text-primary text-xs font-medium">Film</span>'
                         : '<span class="px-2 py-1 rounded bg-accent/10 text-accent text-xs font-medium">Dizi</span>';
 
                     html += `
                         <tr class="hover:bg-white/5 transition-colors">
+                            <td class="px-4 py-4 text-center">
+                                <input type="checkbox" class="dead-check w-4 h-4 cursor-pointer accent-red-600" data-idx="${idx}" onchange="updateDeadSelection()">
+                            </td>
                             <td class="px-6 py-4">
                                 <div class="font-medium text-text">${l.title}</div>
                                 <div class="text-xs theme-text-secondary">${l.year || ''}</div>
@@ -327,6 +356,11 @@
                             <td class="px-6 py-4">
                                 <div class="text-sm font-medium text-red-500">${l.quality}</div>
                                 <div class="text-xs theme-text-secondary">${l.size || 'Boyut bilinmiyor'}</div>
+                                ${l.file_name ? `<div class="text-xs theme-text-secondary break-all mt-1" title="${escAttr(l.file_name)}">${escHtml(l.file_name)}</div>` : ''}
+                                ${l.telegram_link
+                                    ? `<a href="${escAttr(l.telegram_link)}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 mt-1 text-xs text-primary hover:underline break-all"><i class="fa-brands fa-telegram"></i> ${escHtml(l.telegram_link)}</a>
+                                       <button type="button" onclick="copyTgLink('${escAttr(l.telegram_link)}', this)" class="ml-1 text-xs theme-text-secondary hover:text-primary" title="Linki kopyala"><i class="fas fa-copy"></i></button>`
+                                    : '<div class="text-xs theme-text-secondary mt-1">Telegram linki yok (yerel/harici kaynak)</div>'}
                             </td>
                             <td class="px-6 py-4 text-center theme-text-secondary text-xs">${l.date_added ? new Date(l.date_added).toLocaleDateString() : '—'}</td>
                             <td class="px-6 py-4 text-center">
@@ -378,6 +412,73 @@
             }
         } catch (err) {
             alert('Analizler temizlenirken hata oluştu.');
+        }
+    }
+
+    let _deadLinks = [];
+
+    function updateDeadSelection() {
+        const checks = Array.from(document.querySelectorAll('.dead-check'));
+        const selected = checks.filter(c => c.checked).length;
+        document.getElementById('dead-selected-count').textContent = `${selected} seçili`;
+        document.getElementById('dead-bulk-delete-btn').disabled = selected === 0;
+        const all = document.getElementById('dead-select-all');
+        all.checked = checks.length > 0 && selected === checks.length;
+        all.indeterminate = selected > 0 && selected < checks.length;
+    }
+
+    function toggleAllDeadLinks(checked) {
+        document.querySelectorAll('.dead-check').forEach(c => { c.checked = checked; });
+        updateDeadSelection();
+    }
+
+    async function bulkDeleteDeadLinks() {
+        const items = Array.from(document.querySelectorAll('.dead-check:checked'))
+            .map(c => _deadLinks[parseInt(c.dataset.idx, 10)])
+            .filter(Boolean)
+            .map(l => ({
+                type: l.type,
+                tmdb_id: l.tmdb_id,
+                db_index: l.db_index,
+                quality_id: l.quality_id,
+                season: l.type === 'tv' ? l.season : null,
+                episode: l.type === 'tv' ? l.episode : null,
+            }));
+        if (items.length === 0) return;
+
+        if (!confirm(`${items.length} hatalı link silinecek.\n\n` +
+            `• Filmde başka video kalmazsa film silinir.\n` +
+            `• Dizide bölümde başka video kalmazsa bölüm, sezonda başka bölüm kalmazsa sezon, ` +
+            `dizide başka sezon kalmazsa dizi de silinir.\n\nBu işlem geri alınamaz. Devam edilsin mi?`)) return;
+
+        const btn = document.getElementById('dead-bulk-delete-btn');
+        btn.disabled = true;
+        const oldHtml = btn.innerHTML;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> Siliniyor...';
+        try {
+            const res = await fetch('/api/admin/dead-links/bulk-delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ items }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (res.ok && data.data) {
+                const d = data.data;
+                const lines = [`${d.links_deleted} link silindi.`];
+                if (d.movies_deleted) lines.push(`${d.movies_deleted} film silindi.`);
+                if (d.episodes_deleted) lines.push(`${d.episodes_deleted} bölüm silindi.`);
+                if (d.seasons_deleted) lines.push(`${d.seasons_deleted} sezon silindi.`);
+                if (d.shows_deleted) lines.push(`${d.shows_deleted} dizi silindi.`);
+                if (d.not_found) lines.push(`${d.not_found} link bulunamadı (zaten silinmiş olabilir).`);
+                alert(lines.join('\n'));
+            } else {
+                alert(data.detail || 'Toplu silme başarısız oldu.');
+            }
+        } catch (err) {
+            alert('Sunucuyla iletişim hatası.');
+        } finally {
+            btn.innerHTML = oldHtml;
+            fetchDeadLinks();
         }
     }
 

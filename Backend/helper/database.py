@@ -270,7 +270,7 @@ class Database:
                 await self.dbs["tracking"]["member_sessions"].create_index(
                     "user_id", unique=True, background=True
                 )
-                # 72 saatte otomatik TTL temizliği (session_expires null olanlar etkilenmez)
+                # TTL indeksi duruyor ama artık hiçbir kayıtta session_expires set edilmiyor
                 await self.dbs["tracking"]["member_sessions"].create_index(
                     "session_expires",
                     expireAfterSeconds=0,
@@ -279,8 +279,16 @@ class Database:
                 )
             except Exception as idx_err:
                 LOGGER.warning(f"member_sessions index: {idx_err}")
+            # Eski sürümden kalan 72 saatlik bitiş tarihlerini kaldır (TTL silmesin)
+            try:
+                await self.dbs["tracking"]["member_sessions"].update_many(
+                    {"session_expires": {"$ne": None}},
+                    {"$set": {"session_expires": None}},
+                )
+            except Exception as mig_err:
+                LOGGER.warning(f"member_sessions session_expires migration: {mig_err}")
 
-            # admin_sessions koleksiyonu için unique index (singleton _id="admin")
+            # admin_sessions koleksiyonu için unique index (OWNER: _id="admin", diğer yöneticiler: "admin_<id>")
             try:
                 await self.dbs["tracking"]["admin_sessions"].create_index(
                     "otp_username", unique=True, sparse=True, background=True
@@ -692,6 +700,9 @@ class Database:
         return [convert_objectid_to_str(d) for d in docs]
 
     async def ban_user(self, user_id: int) -> bool:
+        # Ana yönetici (OWNER_ID) hiçbir yoldan (panel, bot, API) engellenemez
+        if int(user_id) == Telegram.OWNER_ID:
+            return False
         await self.dbs["tracking"]["users"].update_one(
             {"_id": user_id},
             {
@@ -2833,6 +2844,277 @@ class Database:
 
 
     # ─────────────────────────────────────────────────────────────────
+    # Dosya bazlı "Yeniden Sorgula" (media_edit.html)
+    # ─────────────────────────────────────────────────────────────────
+
+    async def _find_existing_media(self, coll: str, imdb_id, tmdb_id, title, release_year):
+        """update_movie / update_tv_show ile aynı eşleştirme mantığıyla (imdb_id →
+        tmdb_id → başlık+yıl) tüm storage DB'lerinde mevcut kaydı arar.
+        (doc, db_index) döner; bulunamazsa (None, None)."""
+        total_storage_dbs = len(self.dbs) - 1
+        for idx in range(1, total_storage_dbs + 1):
+            col = self.dbs[f"storage_{idx}"][coll]
+            doc = None
+            if imdb_id:
+                doc = await col.find_one({"imdb_id": imdb_id})
+            if not doc and tmdb_id:
+                doc = await col.find_one({"tmdb_id": tmdb_id})
+            if not doc and title and release_year:
+                doc = await col.find_one({"title": title, "release_year": release_year})
+            if doc:
+                return doc, idx
+        return None, None
+
+    @staticmethod
+    def _prune_empty_tv(tv: dict) -> None:
+        """Kalitesi kalmayan bölümleri, bölümü kalmayan sezonları kaldırır."""
+        for season in tv.get("seasons") or []:
+            season["episodes"] = [
+                e for e in (season.get("episodes") or []) if e.get("telegram")
+            ]
+        tv["seasons"] = [s for s in (tv.get("seasons") or []) if s.get("episodes")]
+
+    @staticmethod
+    def _episode_dict_from_metadata(mi: dict, entry: dict) -> dict:
+        return Episode(
+            episode_number=mi["episode_number"],
+            title=mi.get("episode_title") or f"Episode {mi['episode_number']}",
+            title_tr=mi.get("episode_title_tr"),
+            title_de=mi.get("episode_title_de"),
+            episode_backdrop=mi.get("episode_backdrop"),
+            overview=mi.get("episode_overview"),
+            overview_tr=mi.get("episode_overview_tr"),
+            overview_de=mi.get("episode_overview_de"),
+            released=mi.get("episode_released"),
+            telegram=[],
+        ).dict() | {"telegram": [entry]}
+
+    async def requery_move_quality(
+        self,
+        tmdb_id: int,
+        db_index: int,
+        media_type: str,
+        quality_id: str,
+        season_number: Optional[int] = None,
+        episode_number: Optional[int] = None,
+        override_id: Optional[str] = None,
+    ) -> dict:
+        """Tek bir dosyayı (kalite satırı) dosya adından yeniden sorgular ve sonuca
+        göre doğru içeriğe taşır.
+
+        - Sorgu sonucundaki film/dizi veritabanında VARSA dosya o içeriğe eklenir
+          (dizide ilgili sezon/bölüme; yoksa sezon/bölüm de oluşturulur).
+        - YOKSA yeni bir içerik kartı (film/dizi) açılır ve sadece bu dosya eklenir.
+        - Dosya, bulunduğu içerikten çıkarılır. Telegram mesajı SİLİNMEZ; sadece
+          veritabanındaki bağlantı taşınır. Diğer dosyalara dokunulmaz.
+        - Kaynakta hiç dosya kalmazsa boş kalan kart/sezon/bölüm temizlenir.
+
+        Dönüş: {"ok": bool, "changed": bool, "error": str|None, ...}
+        """
+        from Backend.helper.metadata import metadata as _metadata
+
+        src_coll = "tv" if media_type == "tv" else "movie"
+        src_db_key = f"storage_{db_index}"
+        if src_db_key not in self.dbs:
+            return {"ok": False, "error": "Geçersiz veritabanı."}
+
+        src_doc = await self.dbs[src_db_key][src_coll].find_one({"tmdb_id": tmdb_id})
+        if not src_doc:
+            return {"ok": False, "error": "Kaynak içerik bulunamadı."}
+
+        # ── Kaynak dosya girdisini bul ───────────────────────────────
+        entry = None
+        if src_coll == "movie":
+            entry = next((q for q in (src_doc.get("telegram") or []) if q.get("id") == quality_id), None)
+        else:
+            for s_ in src_doc.get("seasons") or []:
+                if s_.get("season_number") != season_number:
+                    continue
+                for e_ in s_.get("episodes") or []:
+                    if e_.get("episode_number") != episode_number:
+                        continue
+                    entry = next((q for q in (e_.get("telegram") or []) if q.get("id") == quality_id), None)
+        if not entry:
+            return {"ok": False, "error": "Dosya bulunamadı."}
+
+        file_name = (entry.get("name") or "").strip()
+        if not file_name:
+            return {"ok": False, "error": "Dosya adı boş, sorgulanamadı."}
+
+        # ── Dosya adından (veya verilen linkten) metadata çıkar ──────
+        try:
+            decoded = await decode_string(quality_id)
+            chat_id, msg_id = decoded["chat_id"], decoded["msg_id"]
+        except Exception as e:
+            LOGGER.error(f"[requery_file] id çözülemedi: {e}")
+            return {"ok": False, "error": "Dosya kimliği çözülemedi."}
+
+        # Bot akışıyla aynı: dosya adı temizlenir, kanal ID'si "-100" olmadan verilir.
+        try:
+            from Backend.helper.pyro import clean_filename as _clean_filename
+            query_name = _clean_filename(file_name) or file_name
+        except Exception:
+            query_name = file_name
+        mi = await _metadata(query_name, int(chat_id), msg_id, override_id=override_id, ignore_default_id=True)
+        if not mi:
+            return {"ok": False, "error": "Dosya adından içerik tespit edilemedi (TMDB/IMDb sonuç vermedi)."}
+
+        mi["encoded_string"] = quality_id  # mevcut kimlik aynen korunur
+        new_type = "tv" if mi.get("media_type") in ("tv", "tv_show") else "movie"
+        new_season = mi.get("season_number")
+        new_episode = mi.get("episode_number")
+
+        target_doc, target_db_index = await self._find_existing_media(
+            new_type, mi.get("imdb_id"), mi.get("tmdb_id"), mi.get("title"), mi.get("year")
+        )
+
+        same_doc = bool(
+            target_doc
+            and new_type == src_coll
+            and target_doc["_id"] == src_doc["_id"]
+        )
+
+        # ── Hiçbir şey değişmiyor mu? ────────────────────────────────
+        if same_doc and (
+            src_coll == "movie"
+            or (new_season == season_number and new_episode == episode_number)
+        ):
+            return {
+                "ok": True, "changed": False,
+                "message": "Sorgu sonucu dosyanın zaten bulunduğu içerikle aynı; değişiklik yapılmadı.",
+                "target": {"title": src_doc.get("title_tr") or src_doc.get("title")},
+            }
+
+        created = False
+        now = datetime.utcnow()
+
+        # ═════════════ A) Aynı dizi içinde başka sezon/bölüme taşı ═════════════
+        if same_doc:  # (yalnızca dizi buraya düşer)
+            tv = target_doc
+            # kaynaktan çıkar
+            for s_ in tv["seasons"]:
+                if s_.get("season_number") == season_number:
+                    for e_ in s_["episodes"]:
+                        if e_.get("episode_number") == episode_number:
+                            e_["telegram"] = [q for q in e_.get("telegram", []) if q.get("id") != quality_id]
+            # hedefe ekle
+            season_d = next((x for x in tv["seasons"] if x["season_number"] == new_season), None)
+            if not season_d:
+                season_d = {"season_number": new_season, "episodes": []}
+                tv["seasons"].append(season_d)
+            ep_d = next((x for x in season_d["episodes"] if x["episode_number"] == new_episode), None)
+            if not ep_d:
+                season_d["episodes"].append(self._episode_dict_from_metadata(mi, entry))
+            else:
+                ep_d.setdefault("telegram", [])
+                if not any(q.get("id") == quality_id for q in ep_d["telegram"]):
+                    ep_d["telegram"].append(entry)
+            self._prune_empty_tv(tv)
+            tv["seasons"].sort(key=lambda x: x["season_number"])
+            for x in tv["seasons"]:
+                x["episodes"].sort(key=lambda e: e["episode_number"])
+            tv["updated_on"] = now
+            await self.dbs[f"storage_{target_db_index}"]["tv"].replace_one({"_id": tv["_id"]}, tv)
+            return {
+                "ok": True, "changed": True, "created": False, "source_removed": False,
+                "target": {
+                    "tmdb_id": tv.get("tmdb_id"), "db_index": target_db_index, "media_type": "tv",
+                    "title": tv.get("title_tr") or tv.get("title"),
+                    "season": new_season, "episode": new_episode,
+                },
+            }
+
+        # ═════════════ B) Farklı bir içeriğe ekle ═════════════
+        if target_doc:
+            tcol = self.dbs[f"storage_{target_db_index}"][new_type]
+            if new_type == "movie":
+                target_doc.setdefault("telegram", [])
+                if not any(q.get("id") == quality_id for q in target_doc["telegram"]):
+                    target_doc["telegram"].append(entry)
+            else:
+                target_doc.setdefault("seasons", [])
+                season_d = next((x for x in target_doc["seasons"] if x["season_number"] == new_season), None)
+                if not season_d:
+                    season_d = {"season_number": new_season, "episodes": []}
+                    target_doc["seasons"].append(season_d)
+                ep_d = next((x for x in season_d["episodes"] if x["episode_number"] == new_episode), None)
+                if not ep_d:
+                    season_d["episodes"].append(self._episode_dict_from_metadata(mi, entry))
+                else:
+                    ep_d.setdefault("telegram", [])
+                    if not any(q.get("id") == quality_id for q in ep_d["telegram"]):
+                        ep_d["telegram"].append(entry)
+                target_doc["seasons"].sort(key=lambda x: x["season_number"])
+                for x in target_doc["seasons"]:
+                    x["episodes"].sort(key=lambda e: e["episode_number"])
+            target_doc["updated_on"] = now
+            await tcol.replace_one({"_id": target_doc["_id"]}, target_doc)
+        else:
+            # Yeni içerik kartı aç (bot akışıyla aynı: kataloğa bildirim + özel katalog eşleştirme)
+            created = True
+            new_id = await self.insert_media(
+                mi, int(chat_id), int(msg_id), entry.get("size") or "", file_name, 0,
+            )
+            if not new_id:
+                return {"ok": False, "error": "Yeni içerik kaydı oluşturulamadı."}
+            # insert_media tek parçalı/varsayılan bir kalite satırı kurar; özgün satırı
+            # (parts, group_key, is_archive, size ... aynen) geri yaz.
+            target_doc, target_db_index = None, None
+            for idx in range(1, len(self.dbs)):
+                doc = await self.dbs[f"storage_{idx}"][new_type].find_one({"_id": new_id})
+                if doc:
+                    target_doc, target_db_index = doc, idx
+                    break
+            if not target_doc:
+                return {"ok": False, "error": "Yeni içerik kaydı doğrulanamadı."}
+            if new_type == "movie":
+                target_doc["telegram"] = [entry]
+            else:
+                target_doc["seasons"][0]["episodes"][0]["telegram"] = [entry]
+            await self.dbs[f"storage_{target_db_index}"][new_type].replace_one({"_id": new_id}, target_doc)
+
+        # ── Kaynaktan çıkar (Telegram mesajı SİLİNMEZ) ───────────────
+        source_removed = False
+        src_col = self.dbs[src_db_key][src_coll]
+        if src_coll == "movie":
+            src_doc["telegram"] = [q for q in src_doc.get("telegram", []) if q.get("id") != quality_id]
+            if not src_doc["telegram"]:
+                await src_col.delete_one({"_id": src_doc["_id"]})
+                source_removed = True
+            else:
+                src_doc["updated_on"] = now
+                await src_col.replace_one({"_id": src_doc["_id"]}, src_doc)
+        else:
+            for s_ in src_doc.get("seasons", []):
+                if s_.get("season_number") == season_number:
+                    for e_ in s_.get("episodes", []):
+                        if e_.get("episode_number") == episode_number:
+                            e_["telegram"] = [q for q in e_.get("telegram", []) if q.get("id") != quality_id]
+            self._prune_empty_tv(src_doc)
+            if not src_doc["seasons"]:
+                await src_col.delete_one({"_id": src_doc["_id"]})
+                source_removed = True
+            else:
+                src_doc["updated_on"] = now
+                await src_col.replace_one({"_id": src_doc["_id"]}, src_doc)
+
+        LOGGER.info(
+            f"[requery_file] '{file_name}' → "
+            f"{'YENİ ' if created else ''}{new_type} '{target_doc.get('title')}' "
+            f"(tmdb:{target_doc.get('tmdb_id')})"
+            + (f" S{new_season:02d}E{new_episode:02d}" if new_type == "tv" else "")
+        )
+        return {
+            "ok": True, "changed": True, "created": created, "source_removed": source_removed,
+            "target": {
+                "tmdb_id": target_doc.get("tmdb_id"), "db_index": target_db_index,
+                "media_type": new_type,
+                "title": target_doc.get("title_tr") or target_doc.get("title"),
+                "season": new_season, "episode": new_episode,
+            },
+        }
+
+    # ─────────────────────────────────────────────────────────────────
     # Canlı Yayın Kataloğu  (tracking DB'deki "live" koleksiyonu)
     # ─────────────────────────────────────────────────────────────────
 
@@ -3791,6 +4073,35 @@ class Database:
                 
         return False
 
+    @staticmethod
+    async def _build_telegram_link(quality: dict) -> Optional[str]:
+        """Kalite kaydından https://t.me/c/<kanal>/<mesaj> linki üretir.
+
+        Önce split-dosya parçalarına (parts), yoksa şifreli id içindeki chat_id/msg_id'ye bakar.
+        Yerel sunucu / Drive / harici link kayıtlarında (chat_id=0) None döner.
+        """
+        chat_id, msg_id = None, None
+        try:
+            parts = quality.get("parts") or []
+            if parts:
+                first = sorted(parts, key=lambda p: p.get("part_number", 0))[0]
+                chat_id, msg_id = first.get("chat_id"), first.get("msg_id")
+            if not chat_id or not msg_id:
+                from Backend.helper.encrypt import decode_string
+                data = await decode_string(quality.get("id") or "")
+                chat_id, msg_id = data.get("chat_id"), data.get("msg_id")
+            chat_id, msg_id = int(chat_id or 0), int(msg_id or 0)
+        except Exception:
+            return None
+        if not chat_id or not msg_id:
+            return None
+        cid = str(chat_id)
+        if cid.startswith("-100"):
+            cid = cid[4:]
+        elif cid.startswith("-"):
+            cid = cid[1:]
+        return f"https://t.me/c/{cid}/{msg_id}"
+
     async def get_all_dead_links(self) -> List[dict]:
         """
         Scans all active storage databases for both movies and TV shows, returning a
@@ -3818,7 +4129,9 @@ class Database:
                             "quality_id": quality.get("id"),
                             "quality": quality.get("quality"),
                             "size": quality.get("size"),
-                            "date_added": quality.get("date_added")
+                            "date_added": quality.get("date_added"),
+                            "file_name": quality.get("name"),
+                            "telegram_link": await self._build_telegram_link(quality),
                         })
                         
             # --- Scan TV Shows ---
@@ -3846,10 +4159,171 @@ class Database:
                                     "quality_id": quality.get("id"),
                                     "quality": quality.get("quality"),
                                     "size": quality.get("size"),
-                                    "date_added": quality.get("date_added")
+                                    "date_added": quality.get("date_added"),
+                                    "file_name": quality.get("name"),
+                                    "telegram_link": await self._build_telegram_link(quality),
                                 })
                                 
         return dead_links
+
+    async def _queue_quality_message_deletion(self, quality: dict) -> None:
+        """Bir kalite kaydına ait Telegram mesaj(lar)ını silmek üzere kuyruğa alır."""
+        parts = quality.get("parts") or []
+        if parts:
+            for part in parts:
+                try:
+                    part_chat_id = part.get("chat_id")
+                    part_msg_id = part.get("msg_id")
+                    if part_chat_id and part_msg_id:
+                        create_task(delete_message(int(f"-100{part_chat_id}"), int(part_msg_id)))
+                except Exception as e:
+                    LOGGER.error(f"Failed to queue split part for deletion: {e}")
+            return
+        try:
+            old_id = quality.get("id")
+            if old_id:
+                decoded = await decode_string(old_id)
+                create_task(delete_message(int(f"-100{decoded['chat_id']}"), int(decoded["msg_id"])))
+        except Exception as e:
+            LOGGER.error(f"Failed to queue file for deletion: {e}")
+
+    async def bulk_delete_dead_links(self, items: List[dict]) -> dict:
+        """
+        Seçilen hatalı linkleri toplu siler ve boş kalan üst öğeleri temizler:
+          - Film: kalite listesi boşalırsa film kaydı silinir.
+          - Dizi: bölümde video kalmazsa bölüm silinir; sezonda bölüm kalmazsa sezon
+            silinir; dizide sezon kalmazsa dizi kaydı silinir.
+        items: [{type, tmdb_id, db_index, quality_id, season?, episode?}, ...]
+        """
+        summary = {
+            "links_deleted": 0, "movies_deleted": 0, "episodes_deleted": 0,
+            "seasons_deleted": 0, "shows_deleted": 0, "not_found": 0,
+        }
+
+        # (type, db_index, tmdb_id) -> {(season, episode, quality_id), ...}
+        grouped: Dict[tuple, set] = {}
+        for it in items or []:
+            try:
+                mtype = it.get("type")
+                if mtype not in ("movie", "tv"):
+                    continue
+                key = (mtype, int(it["db_index"]), int(it["tmdb_id"]))
+                qid = it.get("quality_id")
+                if not qid:
+                    continue
+                season = int(it["season"]) if mtype == "tv" else None
+                episode = int(it["episode"]) if mtype == "tv" else None
+                grouped.setdefault(key, set()).add((season, episode, qid))
+            except (KeyError, TypeError, ValueError):
+                summary["not_found"] += 1
+
+        for (mtype, db_index, tmdb_id), targets in grouped.items():
+            db_key = f"storage_{db_index}"
+            if db_key not in self.dbs:
+                summary["not_found"] += len(targets)
+                continue
+            try:
+                if mtype == "movie":
+                    coll = self.dbs[db_key]["movie"]
+                    movie = await coll.find_one({"tmdb_id": tmdb_id})
+                    if not movie:
+                        summary["not_found"] += len(targets)
+                        continue
+
+                    ids = {qid for (_, _, qid) in targets}
+                    kept = []
+                    removed = 0
+                    for q in movie.get("telegram") or []:
+                        if q.get("id") in ids:
+                            await self._queue_quality_message_deletion(q)
+                            removed += 1
+                        else:
+                            kept.append(q)
+                    summary["links_deleted"] += removed
+                    summary["not_found"] += max(0, len(ids) - removed)
+                    if removed == 0:
+                        continue
+
+                    if not kept:
+                        await coll.delete_one({"tmdb_id": tmdb_id})
+                        summary["movies_deleted"] += 1
+                        await self._clear_announce_cooldown("movie", tmdb_id)
+                    else:
+                        movie["telegram"] = kept
+                        movie["updated_on"] = datetime.utcnow()
+                        await coll.replace_one({"tmdb_id": tmdb_id}, movie)
+                else:
+                    coll = self.dbs[db_key]["tv"]
+                    tv = await coll.find_one({"tmdb_id": tmdb_id})
+                    if not tv:
+                        summary["not_found"] += len(targets)
+                        continue
+
+                    by_ep: Dict[tuple, set] = {}
+                    for (sn, en, qid) in targets:
+                        by_ep.setdefault((sn, en), set()).add(qid)
+
+                    removed_total = 0
+                    wanted_total = len(targets)
+                    new_seasons = []
+                    for season in tv.get("seasons") or []:
+                        sn = season.get("season_number")
+                        new_eps = []
+                        season_touched = False
+                        for ep in season.get("episodes") or []:
+                            en = ep.get("episode_number")
+                            ids = by_ep.get((sn, en))
+                            if not ids:
+                                new_eps.append(ep)
+                                continue
+                            kept_q = []
+                            for q in ep.get("telegram") or []:
+                                if q.get("id") in ids:
+                                    await self._queue_quality_message_deletion(q)
+                                    removed_total += 1
+                                    season_touched = True
+                                else:
+                                    kept_q.append(q)
+                            if kept_q:
+                                ep["telegram"] = kept_q
+                                new_eps.append(ep)
+                            else:
+                                summary["episodes_deleted"] += 1
+                        if new_eps:
+                            season["episodes"] = new_eps
+                            new_seasons.append(season)
+                        elif season_touched:
+                            # Bu işlemle tüm bölümleri boşalan sezon silinir
+                            summary["seasons_deleted"] += 1
+                        else:
+                            # Bu işlemden etkilenmeyen sezona dokunma
+                            new_seasons.append(season)
+
+                    summary["links_deleted"] += removed_total
+                    summary["not_found"] += max(0, wanted_total - removed_total)
+                    if removed_total == 0:
+                        continue
+
+                    if not new_seasons:
+                        await coll.delete_one({"tmdb_id": tmdb_id})
+                        summary["shows_deleted"] += 1
+                        await self._clear_announce_cooldown("tv", tmdb_id)
+                    else:
+                        tv["seasons"] = new_seasons
+                        tv["updated_on"] = datetime.utcnow()
+                        await coll.replace_one({"tmdb_id": tmdb_id}, tv)
+            except Exception as e:
+                LOGGER.error(f"bulk_delete_dead_links failed for {mtype}:{tmdb_id}: {e}")
+                summary["not_found"] += len(targets)
+
+        return summary
+
+    async def _clear_announce_cooldown(self, media_type: str, tmdb_id: int) -> None:
+        """İçerik tamamen silindiğinde duyuru bekleme kaydını temizler (delete_document ile aynı davranış)."""
+        try:
+            await self.dbs["tracking"]["announced_content"].delete_one({"_id": f"{media_type}:{tmdb_id}"})
+        except Exception as e:
+            LOGGER.warning(f"Duyuru bekleme kaydı temizlenemedi (tmdb_id={tmdb_id}): {e}")
 
     # -------------------------------
     # Stream Analytics
@@ -4859,11 +5333,60 @@ class Database:
                 "session_id":   new_session_id,
                 "used":         False,
                 "created_at":   now,
-                "session_expires": None,   # login sonrası 72 saat uzatılır
+                "session_expires": None,   # süre sınırı yok
             }},
             upsert=True
         )
         return {"username": otp_username, "password": otp_pass}
+
+    async def get_member_created_at(self, user_id):
+        """Üyenin son /start (şifre üretimi) zamanı. Yoksa None."""
+        try:
+            doc = await self.dbs["tracking"]["member_sessions"].find_one(
+                {"user_id": int(user_id)}, {"created_at": 1}
+            )
+            return (doc or {}).get("created_at")
+        except Exception:
+            return None
+
+    async def get_admin_created_at(self, admin_key: str = "admin"):
+        """Yöneticinin son /start (şifre üretimi) zamanı. Yoksa None."""
+        try:
+            doc = await self.dbs["tracking"]["admin_sessions"].find_one(
+                {"_id": admin_key or "admin"}, {"created_at": 1}
+            )
+            return (doc or {}).get("created_at")
+        except Exception:
+            return None
+
+    async def expire_member_credentials(self, user_id: int) -> None:
+        """Üyenin şifresini geçersiz kılar (yeni şifre ÜRETMEZ / göndermez).
+        Üye yeni şifreyi /start ile alır. otp_username unique index'i yüzünden
+        alan silinmez, benzersiz bir yer tutucu ile değiştirilir."""
+        import uuid as _uuid
+        await self.dbs["tracking"]["member_sessions"].update_one(
+            {"user_id": user_id},
+            {"$set": {
+                "otp_username": f"expired_{user_id}_{_uuid.uuid4().hex[:8]}",
+                "pass_hash":    "",
+                "session_id":   str(_uuid.uuid4()),  # açık cookie'ler geçersiz olur
+                "used":         False,
+                "created_at":   None,
+            }},
+        )
+
+    async def get_credentials_older_than(self, days: int) -> dict:
+        """7 günden (days) eski üye ve yönetici giriş bilgilerini döner."""
+        from datetime import timedelta as _td2
+        cutoff = datetime.utcnow() - _td2(days=days)
+        members = await self.dbs["tracking"]["member_sessions"].find(
+            {"created_at": {"$lt": cutoff}}
+        ).to_list(length=None)
+        admins = await self.dbs["tracking"]["admin_sessions"].find(
+            {"created_at": {"$lt": cutoff}, "pass_hash": {"$exists": True}}
+        ).to_list(length=None)
+        return {"members": members, "admins": admins}
+
 
     async def verify_member_otp(self, username: str, password: str) -> Optional[dict]:
         """
@@ -4902,15 +5425,14 @@ class Database:
             if user.get("subscription_status") not in ("active",):
                 return None
 
-        # Oturumu 72 saat uzat
-        from datetime import timedelta as _timedelta
-        new_expiry = now + _timedelta(hours=72)
+        # Oturum süresi sınırı yok (session_expires=None → TTL silmez).
+        # Şifre/oturum 7 günde bir credential_rotator tarafından yenilenir.
         await self.dbs["tracking"]["member_sessions"].update_one(
             {"_id": doc["_id"]},
-            {"$set": {"used": True, "session_expires": new_expiry}}
+            {"$set": {"used": True, "session_expires": None}}
         )
         doc["user_id"]         = user_id
-        doc["session_expires"] = new_expiry.isoformat()
+        doc["session_expires"] = None
 
         # Token bul
         all_tokens = await self.get_all_api_tokens()
@@ -4939,24 +5461,50 @@ class Database:
     # Admin OTP — yönetici paneli giriş bilgileri
     # ──────────────────────────────────────────────────────────────────
 
-    async def create_admin_otp(self, photo_url: str = "",
-                               display_name: str = "Yönetici") -> dict:
+    @staticmethod
+    def admin_key_for(user_id=None) -> str:
         """
-        OWNER'ın /start komutuyla tetiklenen yönetici giriş bilgileri.
-        Her çağrıda önceki kayıt silinir (invalidate_admin_session ile),
-        ardından yeni kullanıcı adı + şifre üretilir ve DB'ye yazılır.
+        Yönetici oturum kaydının _id'si. OWNER (veya belirtilmemiş) → "admin"
+        (eski kurulumlarla uyumlu); diğer yöneticiler → "admin_<telegram_id>".
+        Böylece her yönetici kendi tek kullanımlık giriş bilgisine ve kendi
+        session_version değerine sahip olur; biri /start atınca diğerlerinin
+        oturumu düşmez.
+        """
+        try:
+            if user_id is None or int(user_id) == Telegram.OWNER_ID:
+                return "admin"
+            return f"admin_{int(user_id)}"
+        except (TypeError, ValueError):
+            return "admin"
+
+    async def create_admin_otp(self, photo_url: str = "",
+                               display_name: str = "Yönetici",
+                               admin_id=None) -> dict:
+        """
+        Yönetici (OWNER veya panelden eklenen yönetici) /start komutuyla tetiklenen
+        giriş bilgileri. Aynı yöneticinin önceki kaydı yeni bilgilerle değiştirilir;
+        diğer yöneticilerin kayıtlarına dokunulmaz.
         photo_url:    Telegram profil fotoğrafının sunucu URL'si (opsiyonel).
         display_name: Panelde gösterilecek Telegram adı.
+        admin_id:     Telegram kullanıcı ID'si (None → OWNER).
         Dönen dict: {"username": ..., "password": ...}
         """
         import secrets as _secrets
         import string as _string
+        key = self.admin_key_for(admin_id)
+        coll = self.dbs["tracking"]["admin_sessions"]
         adjectives = ["hızlı","cesur","zeki","güçlü","sakin","kızıl","derin","şen","sessiz","gümüş","asil"]
         nouns      = ["aslan","kartal","tilki","kurt","yıldız","pars","kaplan","şahin","güneş","fırtına","panter"]
-        adj        = _secrets.choice(adjectives)
-        noun       = _secrets.choice(nouns)
-        rand       = _secrets.randbelow(9000) + 1000
-        otp_username = f"{adj}{noun}{rand}"
+
+        # Kullanıcı adı başka bir yöneticide varsa (unique index) yeniden üret
+        otp_username = ""
+        for _ in range(20):
+            cand = f"{_secrets.choice(adjectives)}{_secrets.choice(nouns)}{_secrets.randbelow(9000) + 1000}"
+            if not await coll.find_one({"otp_username": cand, "_id": {"$ne": key}}):
+                otp_username = cand
+                break
+        if not otp_username:
+            otp_username = f"yonetici{_secrets.randbelow(900000) + 100000}"
 
         alphabet  = _string.ascii_letters + _string.digits + "!@#$%"
         otp_pass  = "".join(_secrets.choice(alphabet) for _ in range(14))
@@ -4964,16 +5512,16 @@ class Database:
 
         now = datetime.utcnow()
         # Mevcut session_version'ı koru (invalidate_admin_session artırmış olabilir)
-        existing = await self.dbs["tracking"]["admin_sessions"].find_one({"_id": "admin"})
+        existing = await coll.find_one({"_id": key})
         current_version = existing.get("session_version", 0) if existing else 0
-        await self.dbs["tracking"]["admin_sessions"].update_one(
-            {"_id": "admin"},
+        await coll.update_one(
+            {"_id": key},
             {"$set": {
-                "_id":             "admin",
                 "otp_username":    otp_username,
                 "pass_hash":       pass_hash,
                 "photo_url":       photo_url,
                 "display_name":    display_name,
+                "admin_user_id":   (None if key == "admin" else int(admin_id)),
                 "used":            False,
                 "created_at":      now,
                 "session_version": current_version,
@@ -4982,58 +5530,74 @@ class Database:
         )
         return {"username": otp_username, "password": otp_pass}
 
-    async def invalidate_admin_session(self):
+    async def invalidate_admin_session(self, admin_id=None):
         """
-        Eski yönetici oturumunu geçersiz kılar:
+        Bir yöneticinin eski oturumunu geçersiz kılar (admin_id None → OWNER):
         - OTP/kimlik bilgilerini siler
         - session_version'ı artırır (aktif tarayıcı cookie'lerini otomatik geçersiz kılar)
-        Bot yeniden başladığında veya /start çağrıldığında tetiklenir.
+        /start çağrıldığında, create_admin_otp öncesinde tetiklenir.
+        NOT: otp_username alanı None yapılmaz, KALDIRILIR — unique+sparse index,
+        birden fazla yönetici kaydında null değerleri çakışma sayar.
         """
-        # Mevcut session_version'ı oku, +1 artır
-        doc = await self.dbs["tracking"]["admin_sessions"].find_one({"_id": "admin"})
+        key = self.admin_key_for(admin_id)
+        coll = self.dbs["tracking"]["admin_sessions"]
+        doc = await coll.find_one({"_id": key})
         new_version = (doc.get("session_version", 0) + 1) if doc else 1
-        await self.dbs["tracking"]["admin_sessions"].update_one(
-            {"_id": "admin"},
-            {"$set": {
-                "session_version": new_version,
-                "otp_username":    None,
-                "pass_hash":       None,
-                "used":            False,
-                "created_at":      None,
-            }},
+        await coll.update_one(
+            {"_id": key},
+            {"$set":   {"session_version": new_version, "used": False, "created_at": None},
+             "$unset": {"otp_username": "", "pass_hash": ""}},
             upsert=True,
         )
 
-    async def get_admin_session_version(self) -> int:
+    async def invalidate_all_admin_sessions(self, include_owner: bool = True):
+        """Yöneticilerin oturumlarını düşürür. include_owner=False → ana yönetici (OWNER)
+        kaydına dokunulmaz (OWNER dışı bir yönetici bu işlemi başlattığında kullanılır)."""
+        coll = self.dbs["tracking"]["admin_sessions"]
+        keys = [d["_id"] async for d in coll.find({}, {"_id": 1})]
+        if "admin" not in keys:
+            keys.append("admin")
+        if not include_owner:
+            keys = [k for k in keys if k != "admin"]
+        for key in keys:
+            uid = None if key == "admin" else key.replace("admin_", "", 1)
+            await self.invalidate_admin_session(uid)
+
+    async def get_admin_session_version(self, admin_key: str = "admin") -> int:
         """
-        Geçerli session_version değerini döner.
+        Geçerli session_version değerini döner (varsayılan: OWNER kaydı).
         require_auth tarafından cookie'nin hâlâ geçerli olup olmadığını
         kontrol etmek için kullanılır.
         """
-        doc = await self.dbs["tracking"]["admin_sessions"].find_one({"_id": "admin"})
+        doc = await self.dbs["tracking"]["admin_sessions"].find_one({"_id": admin_key or "admin"})
         return doc.get("session_version", 0) if doc else 0
 
     async def verify_admin_credentials(self, username: str, password: str) -> Optional[dict]:
         """
         Yönetici paneli giriş doğrulaması.
-        DB'deki admin_sessions kaydıyla karşılaştırır.
-        Başarılıysa kaydı döner (truthy — photo_url ve display_name dahil);
-        başarısızsa None döner.
+        DB'deki admin_sessions kayıtlarıyla (OWNER + yöneticiler) karşılaştırır.
+        Başarılıysa kaydı döner (truthy — _id, photo_url ve display_name dahil);
+        başarısızsa None döner. Panelden yönetici listesinden çıkarılmış bir
+        kişinin kaydı geçersiz sayılır.
         """
         if not username or not password:
             return None
 
-        # Kullanıcı adına göre kaydı çek, hash'i güvenli karşılaştır
-        doc = await self.dbs["tracking"]["admin_sessions"].find_one({
-            "_id":          "admin",
-            "otp_username": username,
-        })
+        coll = self.dbs["tracking"]["admin_sessions"]
+        doc = await coll.find_one({"otp_username": username})
         if not doc or not _verify_password(password, doc.get("pass_hash", "")):
             return None
+
+        # Yönetici listesinden çıkarılmışsa giriş yapamaz
+        if doc["_id"] != "admin":
+            uid = doc.get("admin_user_id")
+            if uid is None or int(uid) not in Telegram.APPROVER_IDS:
+                return None
+
         # Eski SHA-256 kaydını scrypt'e yükselt (otomatik migration)
         if not doc.get("pass_hash", "").startswith("scrypt$"):
-            await self.dbs["tracking"]["admin_sessions"].update_one(
-                {"_id": "admin", "otp_username": username},
+            await coll.update_one(
+                {"_id": doc["_id"], "otp_username": username},
                 {"$set": {"pass_hash": _hash_password(password)}},
             )
         return doc
@@ -5222,11 +5786,28 @@ class Database:
         """
         now = datetime.utcnow()
         month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        # İade edilen (reddedilip hakkı geri verilen) talepler sayılmaz.
         count = await self.dbs["tracking"]["content_requests"].count_documents({
             "user_id": user_id,
-            "created_at": {"$gte": month_start}
+            "created_at": {"$gte": month_start},
+            "refunded": {"$ne": True},
         })
         return count
+
+    async def refund_content_request(self, request_id: str) -> bool:
+        """
+        Reddedilen içerik talebinin istek hakkını kullanıcıya iade eder.
+        Talep 'refunded' olarak işaretlenir ve aylık kullanım sayacına dahil edilmez.
+        Daha önce iade edilmişse tekrar iade etmez (True döner).
+        """
+        try:
+            result = await self.dbs["tracking"]["content_requests"].update_one(
+                {"_id": ObjectId(request_id), "refunded": {"$ne": True}},
+                {"$set": {"refunded": True, "refunded_at": datetime.utcnow()}}
+            )
+            return result.modified_count > 0
+        except Exception:
+            return False
 
     async def add_content_request(
         self,
@@ -5295,6 +5876,24 @@ class Database:
             return result.modified_count > 0
         except Exception:
             return False
+
+    async def get_deepl_alert_state(self) -> dict:
+        """DeepL uyarılarının (karakter/süre) daha önce gönderilip gönderilmediği bilgisi."""
+        try:
+            doc = await self.dbs["tracking"]["deepl_alert_state"].find_one({"_id": "state"})
+            return {k: v for k, v in (doc or {}).items() if k != "_id"}
+        except Exception:
+            return {}
+
+    async def set_deepl_alert_state(self, state: dict) -> None:
+        """DeepL uyarı durumunu kaydeder (tekrar bildirim gitmesini engeller)."""
+        try:
+            data = {k: v for k, v in (state or {}).items() if k != "_id"}
+            await self.dbs["tracking"]["deepl_alert_state"].update_one(
+                {"_id": "state"}, {"$set": data}, upsert=True
+            )
+        except Exception as e:
+            LOGGER.warning(f"set_deepl_alert_state error: {e}")
 
     async def delete_user_content_requests(self, user_id: int) -> int:
         """

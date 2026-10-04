@@ -146,12 +146,16 @@
 
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div class="sm:col-span-2">
-                        <label class="block text-xs font-semibold theme-text-secondary mb-1.5 uppercase tracking-wide">Başlık (Orijinal)</label>
+                        <label class="block text-xs font-semibold theme-text-secondary mb-1.5 uppercase tracking-wide">Başlık (İngilizce)</label>
                         <input id="mr-title" type="text" class="w-full rounded-xl border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary transition">
                     </div>
                     <div class="sm:col-span-2">
                         <label class="block text-xs font-semibold theme-text-secondary mb-1.5 uppercase tracking-wide">Başlık (Türkçe)</label>
                         <input id="mr-title-tr" type="text" class="w-full rounded-xl border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary transition">
+                    </div>
+                    <div class="sm:col-span-2">
+                        <label class="block text-xs font-semibold theme-text-secondary mb-1.5 uppercase tracking-wide">Başlık (Almanca)</label>
+                        <input id="mr-title-de" type="text" class="w-full rounded-xl border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary transition">
                     </div>
                     <div>
                         <label class="block text-xs font-semibold theme-text-secondary mb-1.5 uppercase tracking-wide">Tür</label>
@@ -181,17 +185,49 @@
                         <input id="mr-meta-filename" type="text" class="w-full rounded-xl border px-3 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary transition">
                     </div>
                     <div class="sm:col-span-2">
+                        <label class="block text-xs font-semibold theme-text-secondary mb-1.5 uppercase tracking-wide">IMDb / TMDb Linki <span class="normal-case font-normal">(isteğe bağlı — "Yeniden Sorgula" bu içeriği kullanır)</span></label>
+                        <input id="mr-custom-link" type="text" placeholder="https://www.imdb.com/title/tt1234567/  ·  https://www.themoviedb.org/movie/123  ·  tt1234567"
+                            onkeydown="if(event.key==='Enter'){event.preventDefault();reQueryMetadata();}"
+                            class="w-full rounded-xl border px-3 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary transition">
+                        <p class="text-xs theme-text-secondary mt-1">Yanlış içerik bulunduysa doğru filmin/dizinin linkini yapıştırıp <b>Yeniden Sorgula</b>'ya basın. Dizi linkinde dosya adında SxxExx olmalıdır.</p>
+                    </div>
+                    <div class="sm:col-span-2">
+                        <label class="block text-xs font-semibold theme-text-secondary mb-1.5 uppercase tracking-wide"><i class="fas fa-clock text-orange-400 mr-1"></i>Silinme Tarihi <span class="normal-case font-normal">(isteğe bağlı — sunucudan ve Stremio'dan silinir)</span></label>
+                        <div class="flex flex-col sm:flex-row gap-2">
+                            <input id="mr-delete-at" type="datetime-local" onchange="updateReviewDeletePreview()"
+                                class="flex-1 rounded-xl border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary transition">
+                            <button type="button" onclick="clearReviewDeleteAt()" class="px-3 py-2 rounded-xl border border-white/15 hover:bg-white/10 text-xs transition">Temizle</button>
+                        </div>
+                        <div class="flex flex-wrap gap-1.5 mt-2">
+                            <button type="button" onclick="setReviewDeleteIn(48)" class="px-3 py-2 rounded-lg border border-white/15 hover:bg-white/10 text-xs font-semibold transition" style="touch-action:manipulation">2 gün</button>
+                            <button type="button" onclick="setReviewDeleteIn(72)" class="px-3 py-2 rounded-lg border border-white/15 hover:bg-white/10 text-xs font-semibold transition" style="touch-action:manipulation">3 gün</button>
+                            <button type="button" onclick="setReviewDeleteIn(96)" class="px-3 py-2 rounded-lg border border-white/15 hover:bg-white/10 text-xs font-semibold transition" style="touch-action:manipulation">4 gün</button>
+                            <button type="button" onclick="setReviewDeleteIn(168)" class="px-3 py-2 rounded-lg border border-white/15 hover:bg-white/10 text-xs font-semibold transition" style="touch-action:manipulation">7 gün</button>
+                        </div>
+                        <p id="mr-delete-preview" class="text-xs text-orange-300 mt-1"></p>
+                    </div>
+                    <div class="sm:col-span-2">
                         <label class="block text-xs font-semibold theme-text-secondary mb-1.5 uppercase tracking-wide">Poster URL</label>
                         <input id="mr-poster-url" type="url" class="w-full rounded-xl border px-3 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary transition">
                     </div>
                     <div class="sm:col-span-2">
-                        <label class="block text-xs font-semibold theme-text-secondary mb-1.5 uppercase tracking-wide">Açıklama</label>
+                        <label class="block text-xs font-semibold theme-text-secondary mb-1.5 uppercase tracking-wide">Açıklama (İngilizce)</label>
                         <textarea id="mr-description" rows="4" class="w-full rounded-xl border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary transition resize-none"></textarea>
+                    </div>
+                    <div class="sm:col-span-2">
+                        <label class="block text-xs font-semibold theme-text-secondary mb-1.5 uppercase tracking-wide">Açıklama (Türkçe)</label>
+                        <textarea id="mr-description-tr" rows="4" class="w-full rounded-xl border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary transition resize-none"></textarea>
+                    </div>
+                    <div class="sm:col-span-2">
+                        <label class="block text-xs font-semibold theme-text-secondary mb-1.5 uppercase tracking-wide">Açıklama (Almanca)</label>
+                        <textarea id="mr-description-de" rows="4" class="w-full rounded-xl border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary transition resize-none"></textarea>
                     </div>
                 </div>
             </div>
 
             <!-- Result / Error display -->
+            <div id="mr-existing-note" class="hidden mb-4 p-3 rounded-xl border text-sm"></div>
+            <div id="mr-upload-options-note" class="hidden mb-4 p-3 rounded-xl bg-orange-500/10 border border-orange-500/30 text-orange-200 text-sm space-y-1"></div>
             <div id="mr-success" class="hidden mb-4 p-4 rounded-xl bg-green-500/10 border border-green-500/30 text-green-400 text-sm flex items-center gap-2">
                 <i class="fas fa-check-circle text-lg"></i>
                 <span id="mr-success-msg"></span>
@@ -210,7 +246,7 @@
                     <i class="fas fa-trash-alt mr-2"></i>Reddet &amp; Dosyayı Sil
                 </button>
                 <button onclick="reQueryMetadata()" class="flex-1 px-4 py-3 rounded-xl border border-blue-500/40 text-blue-400 hover:bg-blue-500/10 text-sm transition font-medium">
-                    <i class="fas fa-redo mr-2"></i>Tekrar Sorgula
+                    <i class="fas fa-redo mr-2"></i>Yeniden Sorgula
                 </button>
                 <button id="mr-save-btn" onclick="confirmAndSaveMetadata()"
                     class="flex-1 sm:flex-[2] flex items-center justify-center gap-2 px-4 py-3 bg-green-600 text-white rounded-xl hover:opacity-90 transition font-semibold text-sm shadow-lg">
@@ -220,36 +256,119 @@
         </div>
     </div>
 
-    <!-- Upload Modal -->
-    <div id="upload-modal" class="fixed inset-0 z-40 hidden flex items-center justify-center bg-black/60 backdrop-blur-sm">
-        <div class="theme-card rounded-2xl shadow-2xl w-full max-w-lg mx-4 p-6 border border-white/10">
-            <div class="flex items-center justify-between mb-5">
-                <h2 class="text-lg font-bold flex items-center gap-2">
-                    <i class="fas fa-cloud-download-alt text-primary"></i>
-                    HTTPS'den Dosya İndir
+    <!-- Upload Modal (HTTPS'den Dosya İndir) — mobilde alttan açılan kaydırılabilir sheet -->
+    <style>
+        /* ── HTTPS indir kartı: masaüstünde ortada kart, mobilde alttan sheet ── */
+        .upload-modal-overlay { align-items: center; justify-content: center; padding: 16px; overscroll-behavior: contain; }
+        .upload-modal-overlay:not(.hidden) { display: flex; }
+        .upload-sheet {
+            display: flex; flex-direction: column; width: 100%; max-width: 32rem;
+            max-height: calc(100vh - 32px); max-height: calc(100dvh - 32px);
+            border-radius: 1rem; overflow: hidden;
+        }
+        .upload-sheet-head { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; padding: 1.25rem 1.25rem 0.75rem; }
+        .upload-sheet-body {
+            flex: 1 1 auto; min-height: 0; padding: 0.25rem 1.25rem 0.75rem;
+            overflow-y: auto; overflow-x: hidden;
+            -webkit-overflow-scrolling: touch;          /* iOS akıcı kaydırma */
+            overscroll-behavior: contain;               /* sayfa arkada kaymasın */
+            touch-action: pan-y;                        /* yukarı/aşağı kaydırma jesti */
+            scrollbar-width: thin;
+        }
+        .upload-sheet-foot { flex: 0 0 auto; display: flex; gap: 0.75rem; padding: 0.75rem 1.25rem 1.25rem; border-top: 1px solid var(--hairline, rgba(255,255,255,.08)); }
+        .upload-sheet-grab { display: none; }
+        .upload-sheet .u-input { min-height: 44px; }
+
+        /* Süre seçici (2 / 3 / 4 / 7 gün) */
+        .upload-days { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.5rem; }
+        .upload-day-chip {
+            min-height: 48px; border-radius: 0.75rem; border: 1px solid rgba(255,255,255,.15);
+            background: rgba(255,255,255,.04); font-weight: 700; font-size: .95rem; line-height: 1.1;
+            display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+            transition: background .15s, border-color .15s, transform .1s; touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+        }
+        .upload-day-chip small { font-size: .65rem; font-weight: 500; opacity: .7; }
+        .upload-day-chip:active { transform: scale(.96); }
+        .upload-day-chip.active { background: var(--c-prim); border-color: var(--c-prim); color: #fff; box-shadow: 0 4px 14px rgba(0,0,0,.25); }
+
+        @keyframes uploadSheetUp { from { transform: translateY(100%); opacity: .6; } to { transform: translateY(0); opacity: 1; } }
+        @keyframes uploadSheetIn { from { transform: translateY(12px) scale(.98); opacity: 0; } to { transform: none; opacity: 1; } }
+        .upload-modal-overlay:not(.hidden) .upload-sheet { animation: uploadSheetIn .18s ease-out; }
+
+        @media (max-width: 640px) {
+            .upload-modal-overlay { align-items: flex-end; padding: 0; }
+            .upload-sheet {
+                max-width: none; max-height: 92vh; max-height: 92dvh;
+                border-radius: 1.25rem 1.25rem 0 0; border-bottom: 0 !important;
+            }
+            .upload-modal-overlay:not(.hidden) .upload-sheet { animation: uploadSheetUp .22s cubic-bezier(.2,.8,.2,1); }
+            .upload-sheet-grab { display: block; width: 40px; height: 4px; border-radius: 999px; background: rgba(255,255,255,.25); margin: 8px auto 0; flex: 0 0 auto; }
+            .upload-sheet-head { padding: 0.75rem 1rem 0.5rem; }
+            .upload-sheet-body { padding: 0.25rem 1rem 0.75rem; }
+            .upload-sheet-foot { padding: 0.75rem 1rem calc(0.75rem + env(safe-area-inset-bottom, 0px)); }
+            /* iOS'ta input'a odaklanınca zoom yapmasın */
+            .upload-sheet input[type="url"], .upload-sheet input[type="text"] { font-size: 16px; }
+            .upload-sheet-foot button { min-height: 48px; }
+            #upload-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        }
+    </style>
+    <div id="upload-modal" class="upload-modal-overlay fixed inset-0 z-40 hidden bg-black/60 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="upload-modal-title">
+        <div class="upload-sheet theme-card shadow-2xl border border-white/10">
+            <div class="upload-sheet-grab" aria-hidden="true"></div>
+            <div class="upload-sheet-head">
+                <h2 id="upload-modal-title" class="text-base sm:text-lg font-bold flex items-center gap-2 min-w-0">
+                    <i class="fas fa-cloud-download-alt text-primary flex-shrink-0"></i>
+                    <span class="truncate">HTTPS'den Dosya İndir</span>
                 </h2>
-                <button onclick="closeUploadModal()" class="text-gray-400 hover:text-white transition-colors">
+                <button onclick="closeUploadModal()" aria-label="Kapat" class="text-gray-400 hover:text-white transition-colors w-10 h-10 -mr-2 flex items-center justify-center flex-shrink-0">
                     <i class="fas fa-times text-lg"></i>
                 </button>
             </div>
 
+            <div class="upload-sheet-body">
             <div class="space-y-4">
                 <div>
                     <label class="block text-xs font-semibold theme-text-secondary mb-1.5 uppercase tracking-wide">İndirme URL'si (HTTPS)</label>
-                    <input id="upload-url" type="url" placeholder="https://example.com/film.mkv ya da Google Drive linki"
-                        class="w-full rounded-xl border px-3 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary transition"/>
+                    <input id="upload-url" type="url" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="https://example.com/film.mkv ya da Google Drive linki"
+                        class="u-input w-full rounded-xl border px-3 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary transition"/>
+                    <p class="text-xs theme-text-secondary mt-1">Port olarak 80, 443 ve <b>8443</b> desteklenir (ör. https://sunucu.com:8443/dizi.zip).</p>
                 </div>
                 <div>
                     <label class="block text-xs font-semibold theme-text-secondary mb-1.5 uppercase tracking-wide">Özel Dosya Adı <span class="normal-case font-normal">(isteğe bağlı)</span></label>
                     <input id="upload-filename" type="text" placeholder="Firebrand 2024 1080p WEB-DL.mkv"
-                        class="w-full rounded-xl border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary transition"/>
+                        class="u-input w-full rounded-xl border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary transition"/>
                     <p class="text-xs theme-text-secondary mt-1">Boş bırakırsanız URL'deki dosya adı kullanılır. Metadata bu isimden sorgulanır.</p>
                 </div>
                 <div>
                     <label class="block text-xs font-semibold theme-text-secondary mb-1.5 uppercase tracking-wide">Hedef Klasör</label>
                     <input id="upload-dest" type="text" placeholder="Filmler/Aksiyon"
-                        class="w-full rounded-xl border px-3 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary transition" readonly/>
+                        class="u-input w-full rounded-xl border px-3 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary transition" readonly/>
                     <p class="text-xs theme-text-secondary mt-1">Şu an açık olan klasöre indirilir.</p>
+                </div>
+
+                <!-- Zamanlı silme + duyuru seçenekleri -->
+                <div class="rounded-xl border border-white/10 bg-white/5 p-3 space-y-3">
+                    <label class="flex items-start gap-2.5 text-sm cursor-pointer select-none py-1">
+                        <input id="upload-schedule-enable" type="checkbox" onchange="toggleUploadSchedule()" class="mt-0.5 w-5 h-5 accent-orange-500 flex-shrink-0">
+                        <span><i class="fas fa-clock text-orange-400 mr-1"></i>Süre bitince <b>sunucudan ve Stremio'dan sil</b></span>
+                    </label>
+                    <div id="upload-schedule-fields" class="hidden space-y-2">
+                        <input id="upload-delete-at" type="hidden">
+                        <div class="upload-days" role="radiogroup" aria-label="Silinme süresi">
+                            <button type="button" class="upload-day-chip" data-days="2" onclick="selectUploadDays(2)" role="radio">2<small>gün</small></button>
+                            <button type="button" class="upload-day-chip" data-days="3" onclick="selectUploadDays(3)" role="radio">3<small>gün</small></button>
+                            <button type="button" class="upload-day-chip" data-days="4" onclick="selectUploadDays(4)" role="radio">4<small>gün</small></button>
+                            <button type="button" class="upload-day-chip" data-days="7" onclick="selectUploadDays(7)" role="radio">7<small>gün</small></button>
+                        </div>
+                        <p id="upload-delete-preview" class="text-xs text-orange-300"></p>
+                        <p class="text-xs theme-text-secondary">Süre, içerik metadata onayıyla veritabanına kaydedildiği andan itibaren işlemeye başlar.</p>
+                    </div>
+
+                    <label class="flex items-start gap-2.5 text-sm cursor-pointer select-none py-1">
+                        <input id="upload-announce" type="checkbox" class="mt-0.5 w-5 h-5 accent-blue-500 flex-shrink-0">
+                        <span><i class="fas fa-bullhorn text-blue-400 mr-1"></i>Kayıt onaylanınca <b>duyuru gönder</b>
+                            <span class="block text-xs theme-text-secondary">Ayarlardaki duyuru kanalına gönderilir.</span></span>
+                    </label>
                 </div>
             </div>
 
@@ -265,7 +384,7 @@
                          style="width:0%; background: linear-gradient(90deg, var(--c-prim), var(--c-acc, var(--c-prim)))"></div>
                 </div>
                 <!-- İstatistikler -->
-                <div class="grid grid-cols-5 gap-2 text-center">
+                <div id="upload-stats" class="grid grid-cols-5 gap-2 text-center">
                     <div class="bg-white/5 rounded-lg px-2 py-1.5">
                         <div class="text-xs theme-text-secondary mb-0.5">İndirilen</div>
                         <div id="stat-downloaded" class="text-xs font-bold text-text">—</div>
@@ -288,10 +407,11 @@
                     </div>
                 </div>
                 <!-- Arşiv / Meta log -->
-                <div id="upload-log" class="hidden text-xs font-mono bg-black/30 rounded-lg px-3 py-2 max-h-28 overflow-y-auto space-y-1"></div>
+                <div id="upload-log" class="hidden text-xs font-mono bg-black/30 rounded-lg px-3 py-2 max-h-28 overflow-y-auto space-y-1" style="-webkit-overflow-scrolling:touch;overscroll-behavior:contain"></div>
+            </div>
             </div>
 
-            <div class="flex gap-3 mt-6">
+            <div class="upload-sheet-foot">
                 <button onclick="closeUploadModal()" class="flex-1 px-4 py-2.5 rounded-xl border border-white/20 hover:bg-white/5 text-sm transition">
                     İptal
                 </button>
@@ -355,6 +475,34 @@
     </div>
 
     <!-- Rename Modal -->
+    <!-- Silinme Tarihi Modal -->
+    <div id="deleteat-modal" style="z-index:60" class="fixed inset-0 hidden flex items-center justify-center bg-black/60 backdrop-blur-sm">
+        <div class="theme-card rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6 border border-white/10">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-lg font-bold flex items-center gap-2"><i class="fas fa-clock text-orange-400"></i> Silinme Tarihi</h2>
+                <button onclick="closeDeleteAtModal()" class="text-gray-400 hover:text-white transition-colors"><i class="fas fa-times text-lg"></i></button>
+            </div>
+            <input id="deleteat-path" type="hidden">
+            <p id="deleteat-name" class="text-sm font-mono theme-text-secondary truncate mb-3"></p>
+            <input id="deleteat-input" type="datetime-local" onchange="updateDeleteAtModalPreview()"
+                class="w-full rounded-xl border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary transition">
+            <div class="flex flex-wrap gap-1.5 mt-2">
+                            <button type="button" onclick="setDeleteAtModalIn(48)" class="px-3 py-2 rounded-lg border border-white/15 hover:bg-white/10 text-xs font-semibold transition" style="touch-action:manipulation">2 gün</button>
+                            <button type="button" onclick="setDeleteAtModalIn(72)" class="px-3 py-2 rounded-lg border border-white/15 hover:bg-white/10 text-xs font-semibold transition" style="touch-action:manipulation">3 gün</button>
+                            <button type="button" onclick="setDeleteAtModalIn(96)" class="px-3 py-2 rounded-lg border border-white/15 hover:bg-white/10 text-xs font-semibold transition" style="touch-action:manipulation">4 gün</button>
+                            <button type="button" onclick="setDeleteAtModalIn(168)" class="px-3 py-2 rounded-lg border border-white/15 hover:bg-white/10 text-xs font-semibold transition" style="touch-action:manipulation">7 gün</button>
+            </div>
+            <p id="deleteat-preview" class="text-xs text-orange-300 mt-2"></p>
+            <p class="text-xs theme-text-secondary mt-1">Saat tarayıcınızın saat dilimine göredir. Zamanı gelince dosya sunucudan ve Stremio'dan silinir; Stremio'da akış listesinde bu tarih görünür.</p>
+            <div id="deleteat-error" class="hidden mt-3 p-2.5 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-xs"></div>
+            <div class="flex gap-2 mt-5">
+                <button onclick="closeDeleteAtModal()" class="flex-1 px-4 py-2.5 rounded-xl border border-white/20 hover:bg-white/5 text-sm transition">Vazgeç</button>
+                <button id="deleteat-remove-btn" onclick="saveDeleteAt(true)" class="hidden px-4 py-2.5 rounded-xl border border-red-500/40 text-red-400 hover:bg-red-500/10 text-sm transition">Kaldır</button>
+                <button id="deleteat-save-btn" onclick="saveDeleteAt(false)" class="flex-1 px-4 py-2.5 bg-orange-600 text-white rounded-xl hover:opacity-90 text-sm font-semibold transition">Kaydet</button>
+            </div>
+        </div>
+    </div>
+
     <div id="rename-modal" class="fixed inset-0 z-40 hidden flex items-center justify-center bg-black/60 backdrop-blur-sm">
         <div class="theme-card rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6 border border-white/10">
             <div class="flex items-center justify-between mb-5">
@@ -414,6 +562,11 @@
                     <input id="meta-filename" type="text"
                         class="w-full rounded-xl border px-3 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 transition"/>
                     <p class="text-xs theme-text-secondary mt-1">Film.2024.1080p.mkv gibi TMDB/IMDB sorgulamasını doğru yapacak bir ad girin.</p>
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold theme-text-secondary mb-1.5 uppercase tracking-wide">IMDb / TMDb Linki <span class="normal-case font-normal">(isteğe bağlı)</span></label>
+                    <input id="meta-custom-link" type="text" placeholder="https://www.imdb.com/title/tt1234567/ veya TMDb linki"
+                        class="w-full rounded-xl border px-3 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 transition"/>
                 </div>
             </div>
             <div id="meta-result" class="hidden mt-4 p-4 rounded-xl border border-white/10 bg-white/5">
@@ -888,6 +1041,22 @@ function renderEntry(e, i) {
     const sizeCell = e.is_dir ? '<span class="theme-text-secondary text-xs">—</span>' : `<span class="text-xs theme-text-secondary">${escHtml(e.size || '—')}</span>`;
     const dateCell = `<span class="text-xs theme-text-secondary">${e.modified ? new Date(e.modified * 1000).toLocaleDateString('tr-TR', {day:'2-digit',month:'2-digit',year:'numeric'}) : '—'}</span>`;
 
+    const schedBadge = e.scheduled_delete_at
+        ? `<div class="text-[11px] text-orange-400 flex items-center gap-1 mt-0.5">
+               <i class="fas fa-clock"></i> ${escHtml(_fmtDateTime(e.scheduled_delete_at))} tarihinde silinecek
+               <button onclick="openDeleteAtModalByIndex(${i})" title="Silinme tarihini değiştir"
+                   class="ml-1 px-1 rounded hover:bg-orange-400/20 transition-colors"><i class="fas fa-pen text-[10px]"></i></button>
+               <button onclick="cancelScheduledDeleteByIndex(${i})" title="Zamanlı silmeyi iptal et"
+                   class="ml-1 px-1 rounded hover:bg-orange-400/20 transition-colors">✕</button>
+           </div>` : '';
+
+    const clockBtn = !e.is_dir
+        ? `<button onclick="openDeleteAtModalByIndex(${i})"
+                title="${e.scheduled_delete_at ? 'Silinme tarihini değiştir' : 'Silinme tarihi belirle'}"
+                class="p-1.5 rounded-lg text-orange-400 hover:bg-orange-400/10 transition-colors">
+                <i class="fas fa-clock text-sm"></i>
+           </button>` : '';
+
     const metaBtn = !e.is_dir
         ? `<button onclick="openMetaModalByIndex(${i})"
                 title="Metadata Sorgula"
@@ -912,13 +1081,14 @@ function renderEntry(e, i) {
         <div class="grid grid-cols-12 items-center px-5 py-3.5 hover:bg-white/5 transition-colors group">
             <div class="col-span-8 sm:col-span-6 flex items-center gap-3 min-w-0">
                 ${icon}
-                <div class="min-w-0">${nameCell}</div>
+                <div class="min-w-0">${nameCell}${schedBadge}</div>
             </div>
             <div class="hidden sm:flex col-span-2 justify-end">${sizeCell}</div>
             <div class="hidden sm:flex col-span-2 justify-center">${dateCell}</div>
             <div class="col-span-4 sm:col-span-2 flex items-center justify-end gap-1">
                 ${downloadBtn}
                 ${metaBtn}
+                ${clockBtn}
                 <button onclick="openRenameModalByIndex(${i})"
                     title="Yeniden Adlandır"
                     class="p-1.5 rounded-lg text-yellow-400 hover:bg-yellow-400/10 transition-colors">
@@ -1097,12 +1267,63 @@ function openUploadModal() {
     document.getElementById('upload-dest').value = currentPath;
     document.getElementById('upload-progress').classList.add('hidden');
     document.getElementById('upload-btn').disabled = false;
+    document.getElementById('upload-schedule-enable').checked = false;
+    document.getElementById('upload-schedule-fields').classList.add('hidden');
+    document.getElementById('upload-delete-at').value = '';
+    document.getElementById('upload-delete-preview').textContent = '';
+    document.getElementById('upload-announce').checked = false;
+    _uploadDays = 0;
+    document.querySelectorAll('.upload-day-chip').forEach(c => c.classList.remove('active'));
+    const _sheetBody = document.querySelector('#upload-modal .upload-sheet-body');
+    if (_sheetBody) _sheetBody.scrollTop = 0;
     document.getElementById('upload-modal').classList.remove('hidden');
     setTimeout(() => document.getElementById('upload-url').focus(), 100);
 }
 function closeUploadModal() {
     if (_activeSSE) { _activeSSE.close(); _activeSSE = null; }
     document.getElementById('upload-modal').classList.add('hidden');
+}
+
+// ── Zamanlı silme / duyuru seçenekleri (HTTPS indirme modalı) ─────────────────
+function _toLocalInputValue(d) {
+    const pad = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function _fmtDateTime(isoOrDate) {
+    const d = isoOrDate instanceof Date ? isoOrDate : new Date(isoOrDate);
+    return d.toLocaleString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+// Seçilen silinme süresi (gün): 2 / 3 / 4 / 7
+let _uploadDays = 0;
+const UPLOAD_DAY_OPTIONS = [2, 3, 4, 7];
+function toggleUploadSchedule() {
+    const on = document.getElementById('upload-schedule-enable').checked;
+    const box = document.getElementById('upload-schedule-fields');
+    box.classList.toggle('hidden', !on);
+    if (on) {
+        selectUploadDays(UPLOAD_DAY_OPTIONS.includes(_uploadDays) ? _uploadDays : 2);   // varsayılan: 2 gün
+        // Küçük ekranda seçenekler görünür kalsın
+        setTimeout(() => box.scrollIntoView({ block: 'nearest', behavior: 'smooth' }), 50);
+    } else {
+        _uploadDays = 0;
+        document.getElementById('upload-delete-preview').textContent = '';
+    }
+}
+function selectUploadDays(days) {
+    if (!UPLOAD_DAY_OPTIONS.includes(days)) return;
+    _uploadDays = days;
+    document.querySelectorAll('.upload-day-chip').forEach(c => {
+        const on = Number(c.dataset.days) === days;
+        c.classList.toggle('active', on);
+        c.setAttribute('aria-checked', on ? 'true' : 'false');
+    });
+    updateDeletePreview();
+}
+function updateDeletePreview() {
+    const el = document.getElementById('upload-delete-preview');
+    if (!_uploadDays) { el.textContent = ''; return; }
+    const d = new Date(Date.now() + _uploadDays * 86400 * 1000);
+    el.textContent = `🗑 ${_uploadDays} gün sonra (${_fmtDateTime(d)}) silinecek`;
 }
 
 let _activeSSE = null;
@@ -1140,6 +1361,17 @@ async function startUpload() {
     if (!isGdrive && !url.startsWith('https://')) {
         showToast('Geçerli bir HTTPS URL ya da Google Drive linki gerekli', 'error');
         return;
+    }
+
+    // Zamanlı silme / duyuru seçenekleri
+    const uploadOpts = { delete_at: null, announce: document.getElementById('upload-announce').checked, path: null };
+    if (document.getElementById('upload-schedule-enable').checked) {
+        if (!UPLOAD_DAY_OPTIONS.includes(_uploadDays)) { showToast('Silinme süresini seçin (2, 3, 4 veya 7 gün)', 'error'); return; }
+        // Süre, kayıt onaylandığı anda başlar (indirme süresi hesaba katılmaz)
+        uploadOpts.delete_days = _uploadDays;
+        const d = new Date(Date.now() + _uploadDays * 86400 * 1000);
+        uploadOpts.delete_at = d.toISOString();   // UTC; sunucu UTC saklar
+        uploadOpts.delete_at_local = _fmtDateTime(d);
     }
 
     const btn  = document.getElementById('upload-btn');
@@ -1230,6 +1462,9 @@ async function startUpload() {
             setTimeout(() => {
                 closeUploadModal();
                 loadFiles(currentPath);
+                // Seçilen zamanlı silme / duyuru, onay (kaydet) sırasında uygulanacak
+                window._reviewOptions = (uploadOpts.delete_at || uploadOpts.announce)
+                    ? { ...uploadOpts, path: pendingMeta.meta_path } : null;
                 // path bilgisini meta'dan al
                 openMetaReview({
                     ...pendingMeta,
@@ -1242,6 +1477,9 @@ async function startUpload() {
                 closeUploadModal();
                 await loadFiles(currentPath);
                 showToast(`İndirildi: ${d.filename} (${d.size})`, 'success');
+                if (uploadOpts.delete_at || uploadOpts.announce) {
+                    showToast('Metadata bulunamadığı için içerik kaydedilmedi; zamanlı silme/duyuru uygulanmadı.', 'error');
+                }
             }, 1200);
         }
 
@@ -1282,6 +1520,76 @@ function _resetBtn() {
 
 // ── Index tabanlı sarmalayıcılar (onclick'te string encoding sorunu yaşamamak için) ──
 function _getEntry(i) { return window._entryMap && window._entryMap[i]; }
+
+async function cancelScheduledDeleteByIndex(i) {
+    const e = _getEntry(i);
+    if (!e || !e.scheduled_delete_id) return;
+    if (!confirm(`"${e.name}" için zamanlı silme iptal edilsin mi?\n\nDosya sunucuda ve Stremio'da kalmaya devam eder.`)) return;
+    try {
+        const res = await fetch('/api/sunucu/zamanli-silme?id=' + encodeURIComponent(e.scheduled_delete_id), { method: 'DELETE' });
+        const data = await res.json();
+        if (!res.ok || data.error) { showToast(data.error || 'İptal edilemedi', 'error'); return; }
+        showToast('Zamanlı silme iptal edildi', 'success');
+        loadFiles(currentPath);
+    } catch (err) {
+        showToast('İptal edilemedi', 'error');
+    }
+}
+
+// ── Silinme tarihini değiştir ─────────────────────────────────────────────
+function openDeleteAtModalByIndex(i) {
+    const e = _getEntry(i);
+    if (!e) return;
+    document.getElementById('deleteat-path').value = e.path;
+    document.getElementById('deleteat-name').textContent = e.name;
+    const inp = document.getElementById('deleteat-input');
+    inp.min = _toLocalInputValue(new Date());
+    inp.value = e.scheduled_delete_at ? _toLocalInputValue(new Date(e.scheduled_delete_at)) : '';
+    document.getElementById('deleteat-remove-btn').classList.toggle('hidden', !e.scheduled_delete_at);
+    document.getElementById('deleteat-error').classList.add('hidden');
+    updateDeleteAtModalPreview();
+    document.getElementById('deleteat-modal').classList.remove('hidden');
+}
+function closeDeleteAtModal() { document.getElementById('deleteat-modal').classList.add('hidden'); }
+function updateDeleteAtModalPreview() {
+    const v = document.getElementById('deleteat-input').value;
+    const el = document.getElementById('deleteat-preview');
+    const d = v ? new Date(v) : null;
+    el.textContent = (d && !isNaN(d)) ? `🗑 ${_fmtDateTime(d)} tarihinde silinecek` : '';
+}
+function setDeleteAtModalIn(hours) {
+    const d = new Date(Date.now() + hours * 3600 * 1000);
+    d.setSeconds(0, 0);
+    document.getElementById('deleteat-input').value = _toLocalInputValue(d);
+    updateDeleteAtModalPreview();
+}
+async function saveDeleteAt(remove) {
+    const path = document.getElementById('deleteat-path').value;
+    const v = document.getElementById('deleteat-input').value;
+    const errEl = document.getElementById('deleteat-error');
+    errEl.classList.add('hidden');
+    let deleteAt = null;
+    if (!remove) {
+        const d = v ? new Date(v) : null;
+        if (!d || isNaN(d)) { errEl.textContent = 'Lütfen geçerli bir tarih/saat seçin.'; errEl.classList.remove('hidden'); return; }
+        deleteAt = d.toISOString();
+    }
+    try {
+        const res = await fetch('/api/sunucu/zamanli-silme', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path, delete_at: deleteAt })
+        });
+        const data = await res.json();
+        if (!res.ok || data.error) { errEl.textContent = data.error || 'Kaydedilemedi'; errEl.classList.remove('hidden'); return; }
+        showToast(remove ? 'Zamanlı silme kaldırıldı' : 'Silinme tarihi güncellendi', 'success');
+        closeDeleteAtModal();
+        loadFiles(currentPath);
+    } catch (err) {
+        errEl.textContent = 'Sunucu hatası: ' + err.message;
+        errEl.classList.remove('hidden');
+    }
+}
 
 function navigateByIndex(i)          { const e = _getEntry(i); if (e) navigate(e.path); }
 function openMetaModalByIndex(i)     { const e = _getEntry(i); if (e) openMetaModal(e.path, e.name); }
@@ -1377,6 +1685,7 @@ function openMetaModal(path, name) {
     document.getElementById('meta-path').value = path;
     document.getElementById('meta-path-display').textContent = path;
     document.getElementById('meta-filename').value = name;
+    document.getElementById('meta-custom-link').value = '';
     document.getElementById('meta-result').classList.add('hidden');
     document.getElementById('meta-loading').classList.add('hidden');
     document.getElementById('meta-error').classList.add('hidden');
@@ -1406,7 +1715,8 @@ async function submitMetadata() {
         const res = await fetch('/api/sunucu/metadata-sorgu', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ path, custom_filename: filename || null })
+            body: JSON.stringify({ path, custom_filename: filename || null,
+                custom_link: (document.getElementById('meta-custom-link').value || '').trim() || null })
         });
         const data = await res.json();
 
@@ -1438,7 +1748,11 @@ async function submitMetadata() {
         resultDiv.classList.remove('hidden');
         btn.disabled = false;
         btn.innerHTML = `<i class="fas fa-eye"></i> Önizle &amp; Onayla`;
-        btn.onclick = () => openMetaReview(data);
+        const _firstLink = (document.getElementById('meta-custom-link').value || '').trim();
+        btn.onclick = () => {
+            openMetaReview(data);
+            if (_firstLink) document.getElementById('mr-custom-link').value = _firstLink;
+        };
 
     } catch (err) {
         loading.classList.add('hidden');
@@ -1457,17 +1771,27 @@ function openMetaReview(data) {
     // Alanları doldur
     document.getElementById('mr-path').value = data.path || document.getElementById('meta-path').value;
     document.getElementById('mr-meta-filename').value = data.filename || '';
+    _renderReviewOptionsNote();
+    _renderExistingRecordNote(data.existing_record);
     document.getElementById('mr-raw-metadata').value = JSON.stringify(data.metadata || data);
 
+    const _mm = (data.metadata && typeof data.metadata === 'object') ? data.metadata : {};
+    const _pk = (k, alt) => (data[k] ?? _mm[k] ?? (alt ? _mm[alt] : undefined) ?? '');
     document.getElementById('mr-title').value = data.title || '';
     document.getElementById('mr-title-tr').value = data.title_tr || '';
     document.getElementById('mr-media-type').value = data.media_type || 'movie';
     document.getElementById('mr-year').value = data.year || '';
-    document.getElementById('mr-quality').value = data.quality || '';
-    document.getElementById('mr-tmdb-id').value = data.tmdb_id || '';
-    document.getElementById('mr-rating').value = data.rating || '';
-    document.getElementById('mr-description').value = data.description || '';
-    document.getElementById('mr-poster-url').value = data.poster || '';
+    document.getElementById('mr-quality').value = _pk('quality');
+    document.getElementById('mr-tmdb-id').value = _pk('tmdb_id');
+    document.getElementById('mr-rating').value = _pk('rating','rate');
+    document.getElementById('mr-description').value = _pk('description','desc');
+    document.getElementById('mr-poster-url').value = _pk('poster');
+    // Almanca başlık + Türkçe/Almanca açıklama: üst düzeyde ya da data.metadata içinde gelebilir
+    const _m = (data.metadata && typeof data.metadata === 'object') ? data.metadata : data;
+    const _pick = (k) => (data[k] ?? _m[k] ?? '');
+    document.getElementById('mr-title-de').value       = _pick('title_de');
+    document.getElementById('mr-description-tr').value = _pick('description_tr');
+    document.getElementById('mr-description-de').value = _pick('description_de');
 
     // Preview card
     document.getElementById('mr-title-display').textContent = data.title_tr || data.title || data.filename;
@@ -1503,6 +1827,26 @@ function openMetaReview(data) {
     if (data.backdrop) { backdrop.src = data.backdrop; backdropWrap.classList.remove('hidden'); }
     else { backdropWrap.classList.add('hidden'); }
 
+    // Silinme tarihi alanı: yükleme seçeneğinden ya da dosyanın mevcut zamanlamasından doldur
+    {
+        const opts = _activeReviewOptions();
+        let iso = (opts && opts.delete_at) || null;
+        if (opts && opts.delete_days) {
+            // Seçilen gün sayısı, onay ekranı açıldığı andan itibaren sayılır
+            iso = new Date(Date.now() + opts.delete_days * 86400 * 1000).toISOString();
+        }
+        if (!iso && window._entryMap) {
+            const cur = document.getElementById('mr-path').value;
+            const ent = Object.values(window._entryMap).find(x => x && x.path === cur);
+            if (ent && ent.scheduled_delete_at) iso = ent.scheduled_delete_at;
+        }
+        const _lk = document.getElementById('mr-custom-link'); if (_lk) _lk.value = '';
+        const dEl = document.getElementById('mr-delete-at');
+        dEl.value = iso ? _toLocalInputValue(new Date(iso)) : '';
+        dEl.min = _toLocalInputValue(new Date());
+        updateReviewDeletePreview();
+    }
+
     document.getElementById('mr-success').classList.add('hidden');
     document.getElementById('mr-error').classList.add('hidden');
     const saveBtn = document.getElementById('mr-save-btn');
@@ -1529,7 +1873,59 @@ function openMetaReview(data) {
     document.documentElement.style.overflow = 'hidden';
 }
 
+// Onay ekranındaki formu (EN/TR/DE başlık + açıklama dahil) metadata nesnesine yazar
+function applyReviewFieldsToMeta(meta) {
+    const val = (id) => (document.getElementById(id)?.value || '').trim();
+    meta.title          = val('mr-title');
+    meta.title_tr       = val('mr-title-tr');
+    meta.title_de       = val('mr-title-de');
+    meta.media_type     = document.getElementById('mr-media-type').value;
+    meta.year           = document.getElementById('mr-year').value;
+    meta.quality        = val('mr-quality');
+    meta.tmdb_id        = document.getElementById('mr-tmdb-id').value;
+    meta.rating         = document.getElementById('mr-rating').value;
+    meta.description    = val('mr-description');
+    meta.description_tr = val('mr-description-tr');
+    meta.description_de = val('mr-description-de');
+    meta.poster         = val('mr-poster-url');
+    return meta;
+}
+
+function _activeReviewOptions() {
+    const o = window._reviewOptions;
+    if (!o) return null;
+    return o.path === document.getElementById('mr-path').value ? o : null;
+}
+function _renderReviewOptionsNote() {
+    const note = document.getElementById('mr-upload-options-note');
+    const o = _activeReviewOptions();
+    if (!o) { note.classList.add('hidden'); note.innerHTML = ''; return; }
+    const lines = [];
+    if (o.announce)  lines.push(`<div><i class="fas fa-bullhorn mr-1"></i>Kaydedilince duyuru gönderilecek.</div>`);
+    if (!lines.length) { note.classList.add('hidden'); note.innerHTML = ''; return; }
+    note.innerHTML = lines.join('');
+    note.classList.remove('hidden');
+}
+
+// Sorgu sonucuna göre: veritabanında kayıt varsa o kayda eklenir, yoksa yeni kayıt açılır
+function _renderExistingRecordNote(ex) {
+    const el = document.getElementById('mr-existing-note');
+    if (!el) return;
+    if (ex === undefined) { el.classList.add('hidden'); el.innerHTML = ''; return; }   // Drive/Rclone akışı: bilgi yok
+    if (ex) {
+        el.className = 'mb-4 p-3 rounded-xl border text-sm bg-blue-500/10 border-blue-500/30 text-blue-200';
+        el.innerHTML = `<i class="fas fa-link mr-1"></i>Veritabanında kayıt var: <b>${escHtml(ex.title || '—')}</b> (TMDB ${escHtml(String(ex.tmdb_id ?? '—'))}) — dosya <b>bu kayda eklenecek</b>.`;
+    } else {
+        el.className = 'mb-4 p-3 rounded-xl border text-sm bg-emerald-500/10 border-emerald-500/30 text-emerald-200';
+        el.innerHTML = `<i class="fas fa-plus-circle mr-1"></i>Veritabanında kayıt bulunamadı — <b>yeni kayıt açılacak</b>.`;
+    }
+}
+
 function closeMetaReview() {
+    window._reviewOptions = null;
+    const _lnk = document.getElementById('mr-custom-link'); if (_lnk) _lnk.value = '';
+    const _note = document.getElementById('mr-upload-options-note');
+    if (_note) { _note.classList.add('hidden'); _note.innerHTML = ''; }
     document.getElementById('meta-review-overlay').classList.add('hidden');
     document.documentElement.style.overflow = '';
 }
@@ -1561,9 +1957,29 @@ async function rejectAndDeleteFile() {
     }
 }
 
+function updateReviewDeletePreview() {
+    const v = document.getElementById('mr-delete-at').value;
+    const el = document.getElementById('mr-delete-preview');
+    if (!v) { el.textContent = ''; return; }
+    const d = new Date(v);
+    el.textContent = isNaN(d) ? '' : `🗑 ${_fmtDateTime(d)} tarihinde silinecek`;
+}
+function setReviewDeleteIn(hours) {
+    const d = new Date(Date.now() + hours * 3600 * 1000);
+    d.setSeconds(0, 0);
+    document.getElementById('mr-delete-at').value = _toLocalInputValue(d);
+    updateReviewDeletePreview();
+}
+function clearReviewDeleteAt() {
+    document.getElementById('mr-delete-at').value = '';
+    updateReviewDeletePreview();
+}
+
 async function reQueryMetadata() {
     const path = document.getElementById('mr-path').value;
     const filename = document.getElementById('mr-meta-filename').value.trim();
+    const link = (document.getElementById('mr-custom-link')?.value || '').trim();
+    const keepDelete = document.getElementById('mr-delete-at').value;   // yeniden sorguda kaybolmasın
     document.getElementById('mr-error').classList.add('hidden');
     document.getElementById('mr-success').classList.add('hidden');
 
@@ -1571,7 +1987,7 @@ async function reQueryMetadata() {
         const res = await fetch('/api/sunucu/metadata-sorgu', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ path, custom_filename: filename || null })
+            body: JSON.stringify({ path, custom_filename: filename || null, custom_link: link || null })
         });
         const data = await res.json();
         if (data.error) {
@@ -1580,10 +1996,21 @@ async function reQueryMetadata() {
             return;
         }
         openMetaReview(data);
+        document.getElementById('mr-custom-link').value = link;
+        document.getElementById('mr-delete-at').value = keepDelete;
+        updateReviewDeletePreview();
+        showToast(link ? 'Link ile yeniden sorgulandı' : 'Yeniden sorgulandı', 'success');
     } catch (err) {
         document.getElementById('mr-error-msg').textContent = 'Sunucu hatası: ' + err.message;
         document.getElementById('mr-error').classList.remove('hidden');
     }
+}
+
+function _reviewDeleteAtISO() {
+    const v = document.getElementById('mr-delete-at').value;
+    if (!v) return null;
+    const d = new Date(v);
+    return isNaN(d) ? null : d.toISOString();
 }
 
 async function confirmAndSaveMetadata() {
@@ -1597,15 +2024,7 @@ async function confirmAndSaveMetadata() {
     // Güncel formdaki değerlerle metadata'yı güncelle
     let meta = {};
     try { meta = JSON.parse(document.getElementById('mr-raw-metadata').value); } catch {}
-    meta.title       = document.getElementById('mr-title').value.trim();
-    meta.title_tr    = document.getElementById('mr-title-tr').value.trim();
-    meta.media_type  = document.getElementById('mr-media-type').value;
-    meta.year        = document.getElementById('mr-year').value;
-    meta.quality     = document.getElementById('mr-quality').value.trim();
-    meta.tmdb_id     = document.getElementById('mr-tmdb-id').value;
-    meta.rating      = document.getElementById('mr-rating').value;
-    meta.description = document.getElementById('mr-description').value.trim();
-    meta.poster      = document.getElementById('mr-poster-url').value.trim();
+    applyReviewFieldsToMeta(meta);
 
     try {
         const res = await fetch('/api/sunucu/metadata-kaydet', {
@@ -1614,7 +2033,9 @@ async function confirmAndSaveMetadata() {
             body: JSON.stringify({
                 path: document.getElementById('mr-path').value,
                 filename: document.getElementById('mr-meta-filename').value.trim(),
-                metadata: meta
+                metadata: meta,
+                delete_at: _reviewDeleteAtISO(),
+                ...(_activeReviewOptions() ? { announce: !!_activeReviewOptions().announce } : {})
             })
         });
         const data = await res.json();
@@ -1628,11 +2049,16 @@ async function confirmAndSaveMetadata() {
         }
 
         const title = data.title_tr || data.title || 'İçerik';
-        document.getElementById('mr-success-msg').textContent =
-            `✓ "${title}" başarıyla kaydedildi! (DB ID: ${data.db_id || '—'})`;
+        let successMsg = `✓ "${title}" başarıyla kaydedildi! (DB ID: ${data.db_id || '—'})`;
+        if (data.scheduled_delete_at) successMsg += ` ⏰ ${_fmtDateTime(data.scheduled_delete_at)} tarihinde silinecek.`;
+        if (data.announce) successMsg += data.announce.sent ? ' 📢 Duyuru gönderildi.' : ` 📢 Duyuru gönderilemedi: ${data.announce.message}`;
+        document.getElementById('mr-success-msg').textContent = successMsg;
         document.getElementById('mr-success').classList.remove('hidden');
         btn.innerHTML = `<i class="fas fa-check"></i> Kaydedildi`;
         showToast(`Metadata kaydedildi: ${title}`, 'success');
+        if (data.schedule_error) showToast(data.schedule_error, 'error');
+        if (data.announce && !data.announce.sent) showToast(`Duyuru gönderilemedi: ${data.announce.message}`, 'error');
+        window._reviewOptions = null;   // tekrar tıklanırsa ikinci kez uygulanmasın
         setTimeout(async () => {
             closeMetaReview();
             await loadFiles(currentPath);
@@ -1967,15 +2393,7 @@ async function confirmAndSaveGdriveMeta() {
 
     let meta = {};
     try { meta = JSON.parse(document.getElementById('mr-raw-metadata').value); } catch {}
-    meta.title       = document.getElementById('mr-title').value.trim();
-    meta.title_tr    = document.getElementById('mr-title-tr').value.trim();
-    meta.media_type  = document.getElementById('mr-media-type').value;
-    meta.year        = document.getElementById('mr-year').value;
-    meta.quality     = document.getElementById('mr-quality').value.trim();
-    meta.tmdb_id     = document.getElementById('mr-tmdb-id').value;
-    meta.rating      = document.getElementById('mr-rating').value;
-    meta.description = document.getElementById('mr-description').value.trim();
-    meta.poster      = document.getElementById('mr-poster-url').value.trim();
+    applyReviewFieldsToMeta(meta);
 
     // _pendingGdriveFile null ise hidden input'lardan kurtar
     const gf = _pendingGdriveFile || {
@@ -2543,15 +2961,7 @@ async function _confirmAndSaveRcloneMeta() {
 
     let meta = {};
     try { meta = JSON.parse(document.getElementById('mr-raw-metadata').value); } catch {}
-    meta.title       = document.getElementById('mr-title').value.trim();
-    meta.title_tr    = document.getElementById('mr-title-tr').value.trim();
-    meta.media_type  = document.getElementById('mr-media-type').value;
-    meta.year        = document.getElementById('mr-year').value;
-    meta.quality     = document.getElementById('mr-quality').value.trim();
-    meta.tmdb_id     = document.getElementById('mr-tmdb-id').value;
-    meta.rating      = document.getElementById('mr-rating').value;
-    meta.description = document.getElementById('mr-description').value.trim();
-    meta.poster      = document.getElementById('mr-poster-url').value.trim();
+    applyReviewFieldsToMeta(meta);
 
     const rd = _rcloneMetaReviewData || {
         remote: document.getElementById('mr-rclone-remote')?.value || '',

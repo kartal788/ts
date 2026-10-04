@@ -99,6 +99,12 @@ class DeadLinkChecker:
         """
         try:
             decoded = await decode_string(quality_id)
+
+            # WebDAV kayıtlarında chat_id/msg_id yoktur; Telegram kontrolü yerine
+            # WebDAV sunucusunda dosyanın varlığına bakılır.
+            if decoded and decoded.get("webdav_id") and decoded.get("webdav_path"):
+                return await self._check_webdav_alive(decoded)
+
             if not decoded or "chat_id" not in decoded or "msg_id" not in decoded:
                 return False
                 
@@ -120,3 +126,20 @@ class DeadLinkChecker:
             # If the channel is banned, chat_id is invalid, or any other critical error occurs
             LOGGER.error(f"Link checker failed to resolve {quality_id}: {e}")
             return False
+
+    async def _check_webdav_alive(self, decoded: dict) -> bool:
+        """
+        WebDAV dosyası için canlılık kontrolü.
+        Sunucu açıkça "yok" (404) derse veya profil silinmişse False;
+        bağlantı/kimlik hatası gibi belirsiz durumlarda True (yanlış 'ölü' işareti koyma).
+        """
+        try:
+            from Backend.helper import webdav as dav
+            server = await dav.get_server(decoded["webdav_id"])
+            if not server:
+                return False
+            exists = await dav.file_exists(server, decoded["webdav_path"])
+            return exists is not False
+        except Exception as e:
+            LOGGER.error(f"Link checker WebDAV kontrol hatası: {e}")
+            return True

@@ -25,6 +25,7 @@ from pyrogram.types import (
 from pyrogram.enums import ParseMode
 
 from Backend.helper.custom_filter import CustomFilters
+from Backend.config import Telegram
 from Backend.logger import LOGGER
 from Backend import db
 
@@ -60,7 +61,7 @@ KEY_DESCRIPTIONS = {
     "EKLENTI_ACIKLAMASI": "Stremio eklenti açıklaması",
     "EKLENTI_LOGOSU":     "Stremio eklenti logo URL'si",
     "BOLUM_RESIMI":       "Bölüm resmi fallback URL'si",
-    "APPROVER_IDS":       "Onaylayan admin ID'leri (virgülle ayır)",
+    "APPROVER_IDS":       "Yönetici ID'leri: onay + bot komutları + panel (virgülle ayır)",
     "AUTH_CHANNEL":       "Zorunlu üyelik kanalı",
     "SUBSCRIPTION_URL":   "Abonelik sayfası URL'si",
     "YENILEME":           "Token geçerlilik süresi (saat). Boş = varsayılan 6 saat. Video izleme + indirme için geçerli.",
@@ -494,6 +495,12 @@ async def catch_text_input(client: Client, message: Message):
         return
 
     value = "" if message.text.strip() == "-" else message.text.strip()
+    if key == "APPROVER_IDS":
+        # Ana yönetici (OWNER_ID) yönetici listesinden çıkarılamaz
+        _ids = [x.strip() for x in value.split(",") if x.strip()]
+        if str(Telegram.OWNER_ID) not in _ids:
+            _ids.insert(0, str(Telegram.OWNER_ID))
+        value = ",".join(_ids)
     _write_env_key(key, value)
 
     # Eski ayarlar menüsü mesajını sil

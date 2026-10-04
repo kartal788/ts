@@ -70,13 +70,52 @@
         <h2 class="text-lg font-semibold mb-3">2. Gezin ve Ekle</h2>
         <div class="flex flex-wrap items-center gap-2 mb-3">
             <select id="dv-browse-server" onchange="dvBrowse('')" class="dv-input" style="max-width:16rem"></select>
+            <button onclick="dvFolderOpen(dvPath)" class="px-4 py-2 bg-green-600 text-white rounded-lg text-sm hover:opacity-90">
+                📂 Bu klasörü topluca ekle
+            </button>
             <button onclick="dvScan()" class="px-4 py-2 bg-primary text-white rounded-lg text-sm hover:opacity-90">
-                Bu klasörü alt klasörleriyle tara
+                Bu klasörü alt klasörleriyle tara (seçerek ekle)
             </button>
         </div>
         <div id="dv-crumbs" class="text-xs theme-text-secondary flex flex-wrap gap-1 mb-2"></div>
         <div id="dv-error" class="hidden text-sm text-red-400 mb-2"></div>
         <div id="dv-list" class="space-y-1 max-h-96 overflow-y-auto"></div>
+
+        <div id="dv-folder-box" class="hidden mt-4 border-t border-white/10 pt-4">
+            <div class="text-sm font-medium mb-1">📂 Klasörü topluca ekle: <span id="dv-folder-path" class="text-primary break-all"></span></div>
+            <p class="text-xs theme-text-secondary mb-3">
+                Klasör ve tüm alt klasörleri taranır, bulunan her video metadata ile eklenir. Daha önce eklenenler atlanır;
+                diziye yeni bölüm geldiğinde aynı klasörü tekrar ekleyerek yalnızca yenileri alabilirsiniz.
+            </p>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
+                <label class="text-xs theme-text-secondary">Tür
+                    <select id="dv-folder-kind" class="dv-input" onchange="dvFolderKindChanged()">
+                        <option value="auto">Otomatik (dosya adına göre)</option>
+                        <option value="tv">Dizi klasörü</option>
+                        <option value="movie">Film klasörü</option>
+                    </select>
+                </label>
+                <label id="dv-folder-show-wrap" class="text-xs theme-text-secondary hidden">Dizi adı (boşsa klasör adından)
+                    <input id="dv-folder-show" class="dv-input" placeholder="Dizi adı">
+                </label>
+                <label class="text-xs theme-text-secondary">TMDB linki / IMDb id (isteğe bağlı)
+                    <input id="dv-folder-id" class="dv-input" placeholder="themoviedb.org/tv/1399 veya tt0944947">
+                </label>
+            </div>
+            <p class="text-xs theme-text-secondary mb-3">
+                <b>Dizi klasörü:</b> bölüm numarası dosya adından, sezon <i>Season 1 / Sezon 2</i> gibi klasörlerden bulunur
+                (<code>Dizi/Season 1/E01.mkv</code> → "Dizi S01E01").
+                <b>Film klasörü:</b> dosya adında yıl yoksa klasör adı kullanılır (<code>Film (2010)/movie.mkv</code>).
+                TMDB/IMDb id girerseniz <u>tüm dosyalara</u> uygulanır; yalnızca tek bir dizi/film klasöründe kullanın.
+            </p>
+            <label class="flex items-center gap-2 text-sm mb-3">
+                <input type="checkbox" id="dv-folder-announce" checked> Yeni içerikleri gruba/kanala duyur
+            </label>
+            <div class="flex gap-2">
+                <button id="dv-folder-go" onclick="dvFolderStart()" class="px-4 py-2 bg-green-600 text-white rounded-lg text-sm hover:opacity-90">Eklemeyi başlat</button>
+                <button onclick="dvFolderClose()" class="px-4 py-2 border border-white/20 rounded-lg text-sm hover:bg-white/5">Kapat</button>
+            </div>
+        </div>
 
         <div id="dv-scan-box" class="hidden mt-4 border-t border-white/10 pt-4">
             <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
@@ -127,8 +166,15 @@
     <div class="theme-card rounded-2xl shadow-lg p-6 mb-6">
         <div class="flex items-center justify-between mb-3">
             <h2 class="text-lg font-semibold">3. Eklenen WebDAV İçerikleri <span id="dv-db-count" class="text-xs font-normal theme-text-secondary"></span></h2>
-            <button onclick="dvLoadAdded(0)" class="px-3 py-1.5 border border-white/20 rounded-lg text-xs hover:bg-white/5">Yenile</button>
+            <div class="flex gap-2">
+                <button id="dv-sync-btn" onclick="dvSync()" title="WebDAV sunucusunda artık olmayan dosyaları katalogdan kaldırır"
+                        class="px-3 py-1.5 border border-white/20 rounded-lg text-xs hover:bg-white/5">🔄 Silinenleri senkronize et</button>
+                <button onclick="dvLoadAdded(0)" class="px-3 py-1.5 border border-white/20 rounded-lg text-xs hover:bg-white/5">Yenile</button>
+            </div>
         </div>
+        <p class="text-xs theme-text-secondary mb-2">
+            WebDAV'dan silinen dosyalar otomatik olarak (varsayılan 6 saatte bir) katalogdan da kaldırılır; hemen kontrol etmek için butonu kullanın.
+        </p>
         <div id="dv-added" class="divide-y divide-white/5"></div>
         <div class="flex justify-between mt-3">
             <button id="dv-prev" onclick="dvLoadAdded(dvPage-1)" class="px-3 py-1.5 border border-white/20 rounded-lg text-xs hidden">← Önceki</button>
@@ -230,6 +276,7 @@ async function dvBrowse(path){
   const err=document.getElementById('dv-error'),list=document.getElementById('dv-list');
   err.classList.add('hidden');list.innerHTML='<p class="text-sm theme-text-secondary p-2">Yükleniyor...</p>';
   document.getElementById('dv-scan-box').classList.add('hidden');
+  document.getElementById('dv-folder-box').classList.add('hidden');
   const d=await api(`/api/sunucu/webdav/listele?server=${encodeURIComponent(sid)}&path=${encodeURIComponent(path)}`);
   if(d.error){list.innerHTML='';err.textContent=d.error;err.classList.remove('hidden');return;}
   // breadcrumb
@@ -243,6 +290,9 @@ async function dvBrowse(path){
     if(it.is_dir){
       row.innerHTML=`<span>📁</span><a href="#" class="flex-1 truncate hover:underline">${esc(it.name)}</a>`;
       row.querySelector('a').onclick=e=>{e.preventDefault();dvBrowse(it.path);};
+      const fb=document.createElement('button');fb.textContent='Topluca ekle';
+      fb.className='px-3 py-1 border border-white/20 rounded-lg text-xs hover:bg-white/5';
+      fb.onclick=()=>dvFolderOpen(it.path);row.appendChild(fb);
     }else{
       row.innerHTML=`<span>🎬</span><span class="flex-1 truncate">${esc(it.name)}</span>
         <span class="text-xs theme-text-secondary">${fmtSize(it.size)}</span>`;
@@ -310,10 +360,47 @@ async function dvBulkAdd(){
   const d=await api('/api/sunucu/webdav/toplu-ekle',J('POST',{server:curServer(),paths,announce:document.getElementById('dv-announce').checked}));
   if(d.error){toast(d.error,'error');return;}
   if(d.capped)toast('Tek seferde en fazla 500 dosya eklenir; kalanını sonra tekrar seçin','info');
-  dvJob=d.job_id;dvLogOff=0;
+  dvStartJob(d.job_id);
+}
+
+// ── Klasörü topluca ekle ─────────────────────────────────────────────────────
+let dvFolderPath='';
+function dvFolderOpen(path){
+  if(!curServer()){toast('Önce bir sunucu seçin','info');return;}
+  dvFolderPath=path||'';
+  document.getElementById('dv-folder-path').textContent='/'+dvFolderPath;
+  document.getElementById('dv-folder-show').value='';
+  document.getElementById('dv-folder-id').value='';
+  document.getElementById('dv-scan-box').classList.add('hidden');
+  const box=document.getElementById('dv-folder-box');box.classList.remove('hidden');
+  box.scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+const dvFolderClose=()=>document.getElementById('dv-folder-box').classList.add('hidden');
+function dvFolderKindChanged(){
+  document.getElementById('dv-folder-show-wrap').classList.toggle('hidden',document.getElementById('dv-folder-kind').value!=='tv');
+}
+async function dvFolderStart(){
+  const kind=document.getElementById('dv-folder-kind').value;
+  const idv=document.getElementById('dv-folder-id').value.trim();
+  if(!dvFolderPath&&!confirm('Sunucunun kök klasöründeki TÜM videolar taranıp eklenecek. Devam edilsin mi?'))return;
+  if(idv&&kind==='auto'&&!confirm('TMDB/IMDb id, klasördeki TÜM dosyalara uygulanacak. Klasör tek bir dizi/film içeriyor mu?'))return;
+  const d=await api('/api/sunucu/webdav/klasor-ekle',J('POST',{
+    server:curServer(),path:dvFolderPath,kind,
+    show_name:document.getElementById('dv-folder-show').value.trim(),
+    override_id:idv,
+    announce:document.getElementById('dv-folder-announce').checked}));
+  if(d.error){toast(d.error,'error');return;}
+  dvStartJob(d.job_id);
+}
+
+// ── İş takibi (seçerek ekleme + klasör ekleme ortak) ─────────────────────────
+function dvSetBusy(b){['dv-bulk-btn','dv-folder-go'].forEach(id=>{const e=document.getElementById(id);if(e)e.disabled=b;});}
+function dvStartJob(jobId){
+  dvJob=jobId;dvLogOff=0;
   document.getElementById('dv-job').classList.remove('hidden');
   document.getElementById('dv-job-log').innerHTML='';
-  document.getElementById('dv-bulk-btn').disabled=true;
+  document.getElementById('dv-job-bar').style.width='0%';
+  dvSetBusy(true);
   dvPoll=setInterval(dvPollJob,1500);dvPollJob();
 }
 async function dvPollJob(){
@@ -321,8 +408,9 @@ async function dvPollJob(){
   const j=await api(`/api/sunucu/webdav/is/${dvJob}?since=${dvLogOff}`);
   if(j.error){clearInterval(dvPoll);return;}
   document.getElementById('dv-job-bar').style.width=(j.total?j.done/j.total*100:0)+'%';
-  document.getElementById('dv-job-text').textContent=
-    `${j.done}/${j.total} · eklendi ${j.added} · atlandı ${j.skipped} · metadata yok ${j.no_meta} · hata ${j.failed}`+(j.current?` — ${j.current}`:'');
+  document.getElementById('dv-job-text').textContent=j.phase==='scanning'
+    ?`Klasör taranıyor… (/${j.path||''})`
+    :`${j.done}/${j.total} · eklendi ${j.added} · atlandı ${j.skipped} · metadata yok ${j.no_meta} · hata ${j.failed}`+(j.current?` — ${j.current}`:'');
   const log=document.getElementById('dv-job-log');
   (j.log||[]).forEach(e=>{
     const div=document.createElement('div');
@@ -333,13 +421,48 @@ async function dvPollJob(){
   });
   dvLogOff+=(j.log||[]).length;log.scrollTop=log.scrollHeight;
   if(j.state!=='running'){
-    clearInterval(dvPoll);dvJob=null;document.getElementById('dv-bulk-btn').disabled=false;
+    clearInterval(dvPoll);dvJob=null;dvSetBusy(false);
     document.getElementById('dv-job-cancel').classList.add('hidden');
-    toast(j.state==='cancelled'?'İş iptal edildi':'Toplu ekleme tamamlandı');
+    if(j.state==='error')toast(j.error||'Klasör eklenemedi','error');
+    else{
+      toast(j.state==='cancelled'?'İş iptal edildi':'Toplu ekleme tamamlandı');
+      if(j.truncated)toast('Klasörde çok fazla video var; ilk 3000 işlendi. Kalanı için klasörü tekrar ekleyin (eklenenler atlanır).','info');
+    }
     dvLoadAdded(0);
   }else document.getElementById('dv-job-cancel').classList.remove('hidden');
 }
 async function dvCancelJob(){if(dvJob)await api('/api/sunucu/webdav/is-iptal',J('POST',{job_id:dvJob}));}
+
+// ── Silinenleri senkronize et ────────────────────────────────────────────────
+async function dvSync(){
+  const btn=document.getElementById('dv-sync-btn');btn.disabled=true;
+  try{
+    let d=await api('/api/sunucu/webdav/sync',J('POST',{dry_run:true}));
+    if(d.error){toast(d.error,'error');return;}
+    const skipped=d.servers.filter(x=>x.skipped);
+    skipped.forEach(x=>toast(`${x.server_name||x.server_id}: atlandı — ${x.skipped}`,'info'));
+    const unk=d.servers.flatMap(x=>(x.unknown||[]).map(u=>'• '+u.path+' → '+u.reason));
+    if(!d.missing){
+      if(unk.length){alert(`⚠️ ${unk.length} kayıt doğrulanamadı (sunucu "silindi" demedi, bu yüzden dokunulmadı):\n\n`+unk.slice(0,10).join('\n'));return;}
+      toast(skipped.length?'Erişilemeyen sunucular dışında silinecek içerik yok':'Her şey güncel: silinecek içerik yok');return;}
+    const blocked=d.servers.filter(x=>x.blocked);
+    let force=false;
+    if(blocked.length){
+      const n=blocked.reduce((a,x)=>a+x.missing_count,0);
+      if(!confirm(`⚠️ ${n} kayıt bu sunucularda topluca eksik görünüyor: ${blocked.map(x=>x.server_name).join(', ')}.\n`+
+        `NAS bağlantısı/mount sorunu olabilir; otomatik silme güvenlik nedeniyle durduruldu.\n\n`+
+        `Yine de bu kayıtlar da dahil TÜMÜ katalogdan silinsin mi?`)){
+        if(d.missing===n)return;           // yalnızca bloklananlar vardı
+      }else force=true;
+    }
+    const sample=d.servers.filter(x=>force||!x.blocked).flatMap(x=>x.missing.map(m=>'• '+m.path)).slice(0,10).join('\n');
+    if(!confirm(`WebDAV'da bulunamayan ${force?d.missing:d.missing-d.blocked} içerik katalogdan kaldırılacak.\n\n${sample}\n\nDevam edilsin mi?`))return;
+    d=await api('/api/sunucu/webdav/sync',J('POST',{dry_run:false,force}));
+    if(d.error){toast(d.error,'error');return;}
+    toast(`${d.removed} içerik kaldırıldı`+(d.failed?`, ${d.failed} hata`:'')+(d.blocked?`, ${d.blocked} güvenlik nedeniyle bekletildi`:''),d.failed?'error':'success');
+    dvLoadAdded(0);dvBrowse(dvPath);
+  }finally{btn.disabled=false;}
+}
 
 // ── Eklenenler ───────────────────────────────────────────────────────────────
 async function dvLoadAdded(page){

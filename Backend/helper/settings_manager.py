@@ -20,10 +20,87 @@ ve config.env'in önüne geçer.
 from __future__ import annotations
 
 import os
+import re
 from typing import Any, Dict, List
 
 from Backend.config import Telegram
 from Backend.logger import LOGGER
+
+#----- Ana yönetici (OWNER_ID) yönetici listesinden hiçbir şekilde çıkarılamaz.
+#----- Liste her kaydedilişte/yüklenişte normalize edilir: tamsayıya çevrilir,
+#----- tekrarlar atılır ve OWNER_ID HER ZAMAN ilk sırada yer alır. Böylece
+#----- panelden, API'den, yedek geri yüklemeden ya da DB'den gelen listeden
+#----- ana yönetici silinmiş olsa bile onay talepleri ve yetkisi korunur.
+def normalize_approver_ids(values) -> List[int]:
+    result: List[int] = []
+    owner = Telegram.OWNER_ID
+    if owner:
+        result.append(int(owner))
+    for v in (values or []):
+        try:
+            iv = int(v)
+        except (TypeError, ValueError):
+            continue
+        if iv not in result:
+            result.append(iv)
+    return result
+
+
+#----- Yönetici Telegram kullanıcı adı (ör. "kaya89"). Panelde (Ayarlar > Abonelik)
+#----- girilir; abonelik talebi bekleme / red mesajlarında "yönetici" yerine gösterilir.
+#----- Başındaki "@" ve "https://t.me/" öneki atılır; boş bırakılabilir (boşsa
+#----- mesajlar eskisi gibi "yönetici" der).
+_USERNAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{4,31}$")
+
+
+def normalize_admin_username(value) -> str:
+    name = str(value or "").strip()
+    name = re.sub(r"^(?:https?://)?(?:t\.me/|telegram\.me/)", "", name, flags=re.IGNORECASE)
+    name = name.lstrip("@").strip().rstrip("/")
+    return name
+
+
+def get_admin_username() -> str:
+    try:
+        name = normalize_admin_username(SettingsManager.current().admin_username)
+    except Exception:
+        return ""
+    return name if _USERNAME_RE.match(name) else ""
+
+
+#----- Türkçe yönelme (-e/-a) eki: kullanıcı adının OKUNUŞUNA göre seçilir.
+#----- Sayılar okunuşlarıyla değerlendirilir (89 -> "dokuz" -> 'a, 86 -> "altı" -> 'ya).
+_DIGIT_SUFFIX = {
+    "0": "a", "1": "e", "2": "ye", "3": "e", "4": "e",
+    "5": "e", "6": "ya", "7": "ye", "8": "e", "9": "a",
+}
+_BACK_VOWELS = set("aıouAIOU")
+_FRONT_VOWELS = set("eiöüEİÖÜ")
+_ALL_VOWELS = _BACK_VOWELS | _FRONT_VOWELS | set("Iı")
+
+
+def _dative_suffix(name: str) -> str:
+    last = name[-1]
+    if last in _DIGIT_SUFFIX:
+        return _DIGIT_SUFFIX[last]
+    if last == "_":
+        return _dative_suffix(name[:-1]) if len(name) > 1 else "e"
+    last_vowel = next((c for c in reversed(name) if c in _ALL_VOWELS), None)
+    harmony = "a" if (last_vowel is None or last_vowel in _BACK_VOWELS) else "e"
+    return ("y" + harmony) if last in _ALL_VOWELS else harmony
+
+
+#----- "Talebiniz {yöneticiye / @kullanici'ya} iletildi."
+def admin_forwarded_to() -> str:
+    name = get_admin_username()
+    return f"@{name}'{_dative_suffix(name)}" if name else "yöneticiye"
+
+
+#----- "Daha fazla bilgi için {yönetici / @kullanici} ile iletişime geçin."
+def admin_contact_ref() -> str:
+    name = get_admin_username()
+    return f"@{name}" if name else "yönetici"
+
 
 #----- Panelden yönetilebilir ayarların varsayılan değerleri
 _DEFAULTS: Dict[str, Any] = {
@@ -34,6 +111,9 @@ _DEFAULTS: Dict[str, Any] = {
     #----- DeepL çeviri API anahtarı (bkz. Backend.helper.metadata çeviri zinciri).
     #----- Boş bırakılırsa DeepL adımı atlanır, Google -> MyMemory zincirine düşülür.
     "deepl_api": "",
+    #----- Birden fazla DeepL anahtari (oncelik sirasi = liste sirasi). "deepl_api" her zaman
+    #----- bu listenin ilk elemanina esitlenir (eski kodlarla uyumluluk icin).
+    "deepl_api_keys": [],
     #----- DeepL API kendi abonelik/faturalama dönemini (başlangıç-bitiş)
     #----- DÖNMÜYOR, sadece karakter kullanımı/kotasını veriyor (bkz.
     #----- Backend.helper.metadata.get_deepl_usage). Bu yüzden dönem
@@ -66,6 +146,8 @@ _DEFAULTS: Dict[str, Any] = {
     "proxy_scope_mode": "subscribers",
     "proxy_scope_member_ids": [],
     "default_device_limit": 0,
+    "member_bot_limit": 3,
+    "credential_rotate_days": 7,
     "yenileme": "",
     "hiz_limiti": "",
     "limit_sifirlama": "",
@@ -73,6 +155,9 @@ _DEFAULTS: Dict[str, Any] = {
     "subscription_group_id": 0,
     "subscription_url": "https://t.me/",
     "approver_ids": [],
+    #----- Abonelik mesajlarında "yönetici" yerine gösterilen Telegram kullanıcı adı
+    #----- (bkz. admin_forwarded_to / admin_contact_ref). Boş = "yönetici".
+    "admin_username": "",
     "websitesi": False,
     "brute_window": 60,
     "brute_max": 5,
@@ -86,6 +171,9 @@ _DEFAULTS: Dict[str, Any] = {
     #----- Brute-force korumasının X-Forwarded-For'a güvendiği proxy CIDR'ları.
     #----- Boş = header'a hiç güvenilmez (bkz. Backend.fastapi.security.brute_force).
     "trusted_proxy_cidrs": "",
+    #----- WebDAV senkronizasyon aralığı (saat). 0 = kapalı. Varsayılan config.env'den gelir.
+    "webdav_sync_interval_hours": Telegram.WEBDAV_SYNC_INTERVAL_HOURS,
+    "cloud_sync_interval_hours": Telegram.CLOUD_SYNC_INTERVAL_HOURS,
     "extra_databases": [],
     "multi_tokens": [],
     "announce_new_content": False,
@@ -117,6 +205,7 @@ _SETTINGS_TO_TELEGRAM_ATTR: Dict[str, str] = {
     "auth_channels": "AUTH_CHANNEL",
     "tmdb_api": "TMDB_API",
     "deepl_api": "DEEPL_API",
+    "deepl_api_keys": "DEEPL_API_KEYS",
     "base_url": "BASE_URL",
     "upstream_repo": "UPSTREAM_REPO",
     "upstream_branch": "UPSTREAM_BRANCH",
@@ -133,6 +222,8 @@ _SETTINGS_TO_TELEGRAM_ATTR: Dict[str, str] = {
     "proxy_scope_mode": "PROXY_SCOPE_MODE",
     "proxy_scope_member_ids": "PROXY_SCOPE_MEMBER_IDS",
     "default_device_limit": "DEFAULT_DEVICE_LIMIT",
+    "member_bot_limit": "MEMBER_BOT_LIMIT",
+    "credential_rotate_days": "CREDENTIAL_ROTATE_DAYS",
     "yenileme": "YENILEME",
     "hiz_limiti": "HIZ_LIMITI",
     "limit_sifirlama": "LIMIT_SIFIRLAMA",
@@ -147,6 +238,8 @@ _SETTINGS_TO_TELEGRAM_ATTR: Dict[str, str] = {
     "parallel": "PARALLEL",
     "pre_fetch": "PRE_FETCH",
     "trusted_proxy_cidrs": "TRUSTED_PROXY_CIDRS",
+    "webdav_sync_interval_hours": "WEBDAV_SYNC_INTERVAL_HOURS",
+    "cloud_sync_interval_hours": "CLOUD_SYNC_INTERVAL_HOURS",
 }
 
 
@@ -159,6 +252,7 @@ def _seed_from_env() -> Dict[str, Any]:
         "auth_channels":        list(Telegram.AUTH_CHANNEL),
         "tmdb_api":             Telegram.TMDB_API,
         "deepl_api":            Telegram.DEEPL_API,
+        "deepl_api_keys":       list(Telegram.DEEPL_API_KEYS),
         "base_url":             Telegram.BASE_URL,
         "upstream_repo":        Telegram.UPSTREAM_REPO,
         "upstream_branch":      Telegram.UPSTREAM_BRANCH,
@@ -175,6 +269,8 @@ def _seed_from_env() -> Dict[str, Any]:
         "proxy_scope_mode":       Telegram.PROXY_SCOPE_MODE,
         "proxy_scope_member_ids": list(Telegram.PROXY_SCOPE_MEMBER_IDS),
         "default_device_limit": Telegram.DEFAULT_DEVICE_LIMIT,
+        "member_bot_limit":     Telegram.MEMBER_BOT_LIMIT,
+        "credential_rotate_days": Telegram.CREDENTIAL_ROTATE_DAYS,
         "yenileme":             Telegram.YENILEME,
         "hiz_limiti":           Telegram.HIZ_LIMITI,
         "limit_sifirlama":      Telegram.LIMIT_SIFIRLAMA,
@@ -189,6 +285,8 @@ def _seed_from_env() -> Dict[str, Any]:
         "parallel":             Telegram.PARALLEL,
         "pre_fetch":            Telegram.PRE_FETCH,
         "trusted_proxy_cidrs":  Telegram.TRUSTED_PROXY_CIDRS,
+        "webdav_sync_interval_hours": Telegram.WEBDAV_SYNC_INTERVAL_HOURS,
+        "cloud_sync_interval_hours": Telegram.CLOUD_SYNC_INTERVAL_HOURS,
         "extra_databases":      list(Telegram.DATABASE[2:]) if len(Telegram.DATABASE) > 2 else [],
         "multi_tokens":         [],
     })
@@ -287,7 +385,69 @@ class SettingsManager:
         merged = dict(old)
         merged.update({k: v for k, v in new_values.items() if k in _DEFAULTS})
 
+        #----- DeepL anahtarlari: temizle, tekrarlari at; "deepl_api" = ilk anahtar
+        if "deepl_api_keys" in new_values or "deepl_api" in new_values:
+            from Backend.helper.deepl_keys import split_keys, prune
+            raw = new_values["deepl_api_keys"] if "deepl_api_keys" in new_values else new_values["deepl_api"]
+            keys = split_keys(raw)
+            merged["deepl_api_keys"] = keys
+            merged["deepl_api"] = keys[0] if keys else ""
+            prune(keys)   # listeden cikarilan anahtarlarin durumunu unut
+
+        #----- Üye başına bot sayısı: tam sayı, en az 1
+        if "member_bot_limit" in new_values:
+            try:
+                mbl = int(str(new_values["member_bot_limit"]).strip())
+            except (TypeError, ValueError):
+                raise ValueError("Üye başına bot sayısı tam sayı olmalıdır (en az 1).")
+            if mbl < 1 or mbl > 100:
+                raise ValueError("Üye başına bot sayısı 1 ile 100 arasında olmalıdır.")
+            merged["member_bot_limit"] = mbl
+
+        #----- Şifre geçerlilik süresi (gün): tam sayı, 0 = kapalı
+        if "credential_rotate_days" in new_values:
+            try:
+                crd = int(str(new_values["credential_rotate_days"]).strip())
+            except (TypeError, ValueError):
+                raise ValueError("Şifre geçerlilik süresi tam sayı olmalıdır (gün; 0 = kapalı).")
+            if crd < 0 or crd > 3650:
+                raise ValueError("Şifre geçerlilik süresi 0 ile 3650 gün arasında olmalıdır (0 = kapalı).")
+            merged["credential_rotate_days"] = crd
+
+        #----- WebDAV senkron aralığı: sayı olmalı, negatif olamaz (0 = kapalı)
+        if "webdav_sync_interval_hours" in new_values:
+            try:
+                hours = float(str(new_values["webdav_sync_interval_hours"]).strip().replace(",", "."))
+            except (TypeError, ValueError):
+                raise ValueError("WebDAV senkron aralığı sayı olmalıdır (saat; 0 = kapalı).")
+            if hours < 0 or hours > 24 * 365:
+                raise ValueError("WebDAV senkron aralığı 0 ile 8760 saat arasında olmalıdır (0 = kapalı).")
+            merged["webdav_sync_interval_hours"] = int(hours) if hours == int(hours) else hours
+
+        #----- rclone/Drive senkron aralığı: sayı olmalı, negatif olamaz (0 = kapalı)
+        if "cloud_sync_interval_hours" in new_values:
+            try:
+                hours = float(str(new_values["cloud_sync_interval_hours"]).strip().replace(",", "."))
+            except (TypeError, ValueError):
+                raise ValueError("rclone/Drive senkron aralığı sayı olmalıdır (saat; 0 = kapalı).")
+            if hours < 0 or hours > 24 * 365:
+                raise ValueError("rclone/Drive senkron aralığı 0 ile 8760 saat arasında olmalıdır (0 = kapalı).")
+            merged["cloud_sync_interval_hours"] = int(hours) if hours == int(hours) else hours
+
+        #----- Yönetici kullanıcı adı: "@" atılır, Telegram kuralına uymalı (boş olabilir)
+        if "admin_username" in new_values:
+            uname = normalize_admin_username(new_values["admin_username"])
+            if uname and not _USERNAME_RE.match(uname):
+                raise ValueError(
+                    "Yönetici kullanıcı adı geçersiz. 5-32 karakter olmalı, harfle başlamalı; "
+                    "yalnızca harf, rakam ve alt çizgi içerebilir."
+                )
+            merged["admin_username"] = uname
+
         results: Dict[str, str] = {}
+
+        #----- Ana yönetici (OWNER_ID) listeden çıkarılamaz — sunucu tarafında zorlanır
+        merged["approver_ids"] = normalize_approver_ids(merged.get("approver_ids"))
 
         #----- Ek veritabanları değiştiyse önce onları bağla/ayır (başarısızsa kayıt iptal)
         old_extra = old.get("extra_databases") or []
@@ -316,7 +476,10 @@ class SettingsManager:
     def _apply_to_telegram(cls, data: Dict[str, Any]) -> None:
         for key, attr in _SETTINGS_TO_TELEGRAM_ATTR.items():
             if key in data:
-                setattr(Telegram, attr, data[key])
+                value = data[key]
+                if key == "approver_ids":
+                    value = normalize_approver_ids(value)
+                setattr(Telegram, attr, value)
 
     @classmethod
     async def _reinit_dependent(cls, old: dict, new: dict) -> Dict[str, str]:
@@ -356,6 +519,28 @@ class SettingsManager:
         proxy_keys = {"proxy", "proxy_type", "http_proxy_url", "proxy_mode"}
         if any(old.get(k) != new.get(k) for k in proxy_keys):
             results["proxy"] = "güncellendi — sonraki isteklerde geçerli olacak"
+
+        #----- WebDAV senkron aralığı değiştiyse arka plan görevini yeniden kur
+        if old.get("webdav_sync_interval_hours") != new.get("webdav_sync_interval_hours"):
+            try:
+                from Backend.helper.webdav_sync import configure_sync_interval
+                results["webdav_sync"] = configure_sync_interval(
+                    new.get("webdav_sync_interval_hours"), startup=False
+                )
+            except Exception as exc:
+                LOGGER.error(f"SettingsManager reinit webdav_sync: {exc}")
+                results["webdav_sync"] = f"hata: {exc}"
+
+        #----- rclone/Drive senkron aralığı değiştiyse arka plan görevini yeniden kur
+        if old.get("cloud_sync_interval_hours") != new.get("cloud_sync_interval_hours"):
+            try:
+                from Backend.helper.cloud_sync import configure_cloud_sync_interval
+                results["cloud_sync"] = configure_cloud_sync_interval(
+                    new.get("cloud_sync_interval_hours"), startup=False
+                )
+            except Exception as exc:
+                LOGGER.error(f"SettingsManager reinit cloud_sync: {exc}")
+                results["cloud_sync"] = f"hata: {exc}"
 
         #----- TRUSTED_PROXY_CIDRS değiştiyse brute-force modülündeki canlı
         #----- listeyi hemen güncelle (aksi halde process yeniden başlamadan

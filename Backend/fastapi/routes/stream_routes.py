@@ -1,3 +1,4 @@
+import os
 import logging
 import re
 _logger = logging.getLogger(__name__)
@@ -165,17 +166,25 @@ def parse_range_header(range_header: str, file_size: int):
     return start, end
 
 
+def _member_bot_limit() -> int:
+    """Her üyeye aynı anda atanabilecek maksimum bot sayısı.
+    Ayarlar sayfasından (MEMBER_BOT_LIMIT) canlı okunur; yeniden başlatma gerekmez."""
+    try:
+        return max(1, int(getattr(Telegram, "MEMBER_BOT_LIMIT", 3)))
+    except (TypeError, ValueError):
+        return 3
+
+
 def select_best_client(target_dc: int, user_token: str = None) -> int:
     """Pick the best available client.
 
-    Yeni davranış — her üye kendi (mümkünse ayrı) botunu kullanır:
-      1) Kullanıcının hâlihazırda aktif bir stream'i varsa, TUTARLILIK için
-         o stream'in kullandığı bot ile devam edilir (aynı üyenin farklı
-         parçaları/segmentleri farklı botlara dağılmasın).
-      2) Aksi halde, şu anda HİÇBİR aktif stream tarafından kullanılmayan
-         (tamamen boşta olan) bir bot varsa o seçilir — böylece her üye
-         mümkün olduğunca kendine ayrı bir bot kullanmış olur.
-      3) Boşta bot yoksa (yani 15+1 botun hepsi başka üyeler tarafından
+    Davranış — her üye en fazla member_bot_limit (Ayarlar > Üye Başına Bot Sayısı, varsayılan 3) bot kullanır:
+      1) Üyenin kullandığı bot sayısı limitin altındaysa ve tamamen boşta
+         (başka hiçbir üye tarafından kullanılmayan) bir bot varsa, o bot
+         üyeye eklenir.
+      2) Üye limite ulaştıysa (ya da boşta bot kalmadıysa) üyenin kendi
+         botları arasından en az yüklü olanı seçilir.
+      3) Üyenin hiç botu yok ve boşta bot da yoksa (yani 15+1 botun hepsi başka üyeler tarafından
          kullanımdaysa) ortak/paylaşımlı moda geçilir: work_loads + 3×
          client_failures skoruna göre en az yüklü bot paylaşılır — tıpkı
          eski (kullanıcı bazsız) davranış gibi.
@@ -185,6 +194,8 @@ def select_best_client(target_dc: int, user_token: str = None) -> int:
     DC-aware selection is kept but currently commented out (uncomment to
     prefer same-DC bots).
     """
+    member_bot_limit = _member_bot_limit()
+
     def _score(idx: int) -> int:
         return work_loads.get(idx, 0) + 3 * client_failures.get(idx, 0)
 
@@ -215,17 +226,28 @@ def select_best_client(target_dc: int, user_token: str = None) -> int:
             owner = (s.get("meta") or {}).get("user_token") or ""
             client_owners.setdefault(idx, set()).add(owner)
 
-        # 1) Üye zaten bir bot kullanıyorsa aynı bot ile devam et.
-        for idx, owners in client_owners.items():
-            if user_token in owners:
-                LOGGER.debug("Sticky client %s for user_token %s...", idx, user_token[:8])
-                return idx
+        # Bu üyenin şu an kullandığı botlar
+        my_clients = [idx for idx, owners in client_owners.items() if user_token in owners]
 
-        # 2) Tamamen boşta (başka hiçbir üye tarafından kullanılmayan) bot var mı?
+        # Başka hiçbir üye tarafından kullanılmayan botlar
         free = [i for i in multi_clients.keys() if i not in client_owners]
-        if free:
+
+        # 1) Limit dolmadıysa ve boşta bot varsa üyeye yeni bir bot ekle.
+        if len(my_clients) < member_bot_limit and free:
             selected = min(free, key=_score)
-            LOGGER.debug("Dedicated free client %s for user_token %s...", selected, user_token[:8])
+            LOGGER.debug(
+                "Dedicated free client %s for user_token %s... (%d/%d)",
+                selected, user_token[:8], len(my_clients) + 1, member_bot_limit,
+            )
+            return selected
+
+        # 2) Üyenin kendi botları varsa onlar arasından en az yüklüyü seç.
+        if my_clients:
+            selected = min(my_clients, key=_score)
+            LOGGER.debug(
+                "Sticky client %s for user_token %s... (%d/%d)",
+                selected, user_token[:8], len(my_clients), member_bot_limit,
+            )
             return selected
 
     # 3) Boşta bot yok (ya da kullanıcı belirtilmedi) → ortak/en az yüklü bot.

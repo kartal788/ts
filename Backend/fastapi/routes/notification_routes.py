@@ -1037,10 +1037,9 @@ async def submit_content_request(request: Request):
     request_id = str(result.inserted_id)
 
     # Yöneticinin tarayıcısına Web Push bildirimi gönder (Telegram'dan bağımsız)
-    _push_type_label = {"movie": "🎬 Film", "tv": "📺 Dizi", "unknown": "🎥 İçerik"}.get(media_type, "🎥 İçerik")
     asyncio.create_task(_notify_admins_push(
         title="Yeni İçerik Talebi",
-        body=f"{_push_type_label} talebi: {title or raw_link}",
+        body=f"İçerik talebi: {member.get('name') or raw_link}",
         url="/istekler",
         tag="istek-icerik",
     ))
@@ -1078,8 +1077,6 @@ async def submit_content_request(request: Request):
     except Exception:
         username_val   = member.get("name") or str(user_id)
     first_name_val = member.get("name") or username_val or str(user_id)
-    type_label     = {"movie": "🎬 Film", "tv": "📺 Dizi", "unknown": "🎥 Bilinmiyor"}.get(media_type, "?")
-    title_str      = f"\n<b>📌 Başlık:</b> {_html.escape(title)}" if title else ""
     note_str       = f"\n<b>💬 Not:</b> {_html.escape(note)}" if note else ""
     limit_info     = f"\n📊 Bu ay: <b>{monthly_count + 1}/{request_limit}</b> istek" if request_limit > 0 else ""
 
@@ -1088,7 +1085,6 @@ async def submit_content_request(request: Request):
         f"<b>👤 Kullanıcı:</b> {_html.escape(first_name_val)}\n"
         f"<b>🔗 Kullanıcı Adı:</b> @{_html.escape(username_val)}\n"
         f"<b>🆔 Telegram ID:</b> <code>{user_id}</code>\n"
-        f"<b>📂 Tür:</b> {type_label}{title_str}\n"
         f"<b>🔗 Link:</b> {link}{note_str}{limit_info}\n\n"
         f"Talebi onaylayın veya reddedin."
     )
@@ -1099,7 +1095,8 @@ async def submit_content_request(request: Request):
         InlineKeyboardButton("❌ Reddet", callback_data=f"req_reject_{request_id}_{user_id}"),
     ]])
 
-    approver_ids = Telegram.APPROVER_IDS if Telegram.APPROVER_IDS else [Telegram.OWNER_ID]
+    #----- Bota gelen onay mesajı SADECE ana yöneticiye (OWNER_ID) gider.
+    approver_ids = [Telegram.OWNER_ID]
     try:
         from Backend.pyrofork.bot import StreamBot as _StreamBot
     except Exception:
@@ -1353,25 +1350,20 @@ async def admin_list_content_requests() -> dict:
 
 async def _notify_requester(user_id: int, doc: dict, new_status: str) -> None:
     """Talep sahibine onay/red durumunu Telegram üzerinden bildirir."""
-    type_label = {"movie": "🎬 Film", "tv": "📺 Dizi", "unknown": "🎥 Bilinmiyor"}.get(
-        doc.get("media_type", "unknown"), "?"
-    )
-    title_str = f"\n<b>📌 Başlık:</b> {_html.escape(doc.get('title',''))}" if doc.get("title") else ""
     link = doc.get("link", "")
 
     if new_status == "approved":
         text = (
             f"✅ <b>İçerik Talebiniz Onaylandı!</b>\n\n"
-            f"<b>📂 Tür:</b> {type_label}{title_str}\n"
             f"<b>🔗 Link:</b> {link}\n\n"
             "Talebiniz yönetici tarafından onaylandı. İçerik en kısa sürede platforma eklenecektir."
         )
     else:
         text = (
             f"❌ <b>İçerik Talebiniz Reddedildi</b>\n\n"
-            f"<b>📂 Tür:</b> {type_label}{title_str}\n"
             f"<b>🔗 Link:</b> {link}\n\n"
-            "Maalesef talebiniz yönetici tarafından reddedildi."
+            "İstediğiniz içeriğin dublaj seçeneği mevcut olmadığı için talebiniz reddedildi. "
+            "İstek hakkınızı başka bir içerikte kullanabilmeniz için hesabınıza iade ettik."
         )
 
     try:
@@ -1405,21 +1397,18 @@ async def _notify_admins_web_action(
         return
 
     label = "✅ Onaylandı" if new_status == "approved" else "❌ Reddedildi"
-    type_label = {"movie": "🎬 Film", "tv": "📺 Dizi", "unknown": "🎥 Bilinmiyor"}.get(
-        media_type, "?"
-    )
     names_str = ", ".join(_html.escape(str(n)) for n in requester_names) if requester_names else "Bilinmeyen"
-    title_str = f"\n<b>📌 Başlık:</b> {_html.escape(title)}" if title else ""
     link_str = f"\n<b>🔗 Link:</b> {link}" if link else ""
     admin_str = f"\n<b>👮 İşlemi Yapan:</b> {_html.escape(admin_name)}" if admin_name else ""
 
     text = (
         f"<b>🌐 Web Panelinden İşlem — {label}</b>\n\n"
-        f"<b>👤 Talep Eden:</b> {names_str}\n"
-        f"<b>📂 Tür:</b> {type_label}{title_str}{link_str}{admin_str}"
+        f"<b>👤 Talep Eden:</b> {names_str}"
+        f"{link_str}{admin_str}"
     )
 
-    approver_ids = Telegram.APPROVER_IDS if Telegram.APPROVER_IDS else [Telegram.OWNER_ID]
+    #----- Panel işlem özeti de yalnızca ana yöneticinin botuna gider.
+    approver_ids = [Telegram.OWNER_ID]
     for approver_id in approver_ids:
         try:
             await _StreamBot.send_message(
@@ -1498,6 +1487,16 @@ async def admin_review_content_requests(request: Request) -> dict:
         )
         updated += 1
 
+        # Reddedilen talebin istek hakkını iade et; sonradan onaylanırsa iadeyi geri al
+        # (hak yeniden kullanılmış sayılır).
+        if new_status == "rejected":
+            await db.refund_content_request(str(doc["_id"]))
+        else:
+            await _content_requests_col().update_one(
+                {"_id": doc["_id"]},
+                {"$unset": {"refunded": "", "refunded_at": ""}},
+            )
+
         if not action_title and doc.get("title"):
             action_title = doc["title"]
         if not action_media_type:
@@ -1525,13 +1524,9 @@ async def admin_review_content_requests(request: Request) -> dict:
         admin_messages = doc.get("admin_messages") or []
         if _StreamBot and admin_messages:
             link = doc.get("link", "")
-            type_label = {"movie": "🎬 Film", "tv": "📺 Dizi", "unknown": "🎥 Bilinmiyor"}.get(
-                doc.get("media_type", "unknown"), "?"
-            )
             status_section = (
                 f"\n\n{'─' * 30}\n"
                 f"<b>{label}</b> — 🌐 Web panelinden\n"
-                f"<b>📂 Tür:</b> {type_label}\n"
                 f"<b>🔗 Link:</b> {link}"
             )
             for am in admin_messages:

@@ -1149,12 +1149,15 @@
                         </div>
                     </div>
 
-                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 w-full sm:w-auto xl:min-w-[24rem]">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2 w-full sm:w-auto xl:min-w-[32rem]">
                         <button onclick="copyStreamLink('{{ quality.id }}', '{{ quality.name }}')" class="btn-ui btn-success w-full" title="Copy direct stream link">
                             📋 Copy Link
                         </button>
                         <button onclick="runSpeedTest('{{ quality.id }}', 'movie', '{{ quality.quality }}')" class="btn-ui btn-info w-full">
                             🚀 Speed Test
+                        </button>
+                        <button onclick="requeryFile('{{ quality.id }}', this)" class="btn-ui btn-ghost w-full" title="Sadece bu dosyayı dosya adından yeniden sorgula ve doğru içeriğe taşı">
+                            🔄 Yeniden Sorgula
                         </button>
                         <button onclick="deleteQuality('{{ quality.id }}')" class="btn-ui btn-danger w-full">
                             Delete
@@ -1233,12 +1236,15 @@
                                                         <button onclick="cancelRename(this.parentElement)" class="btn-ui btn-ghost px-3 py-1.5 text-xs">✗</button>
                                                     </div>
                                                 </div>
-                                                <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 w-full sm:w-auto xl:min-w-[22rem]">
+                                                <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2 w-full sm:w-auto xl:min-w-[30rem]">
                                                     <button onclick="copyStreamLink('{{ quality.id }}', '{{ quality.name }}')" class="btn-ui btn-success w-full text-xs sm:text-sm">
                                                         📋 Copy
                                                     </button>
                                                     <button onclick="runSpeedTest('{{ quality.id }}', 'tv', '{{ quality.quality }}')" class="btn-ui btn-info w-full text-xs sm:text-sm">
                                                         🚀 Speed Test
+                                                    </button>
+                                                    <button onclick="requeryFile('{{ quality.id }}', this, {{ season.season_number }}, {{ episode.episode_number }})" class="btn-ui btn-ghost w-full text-xs sm:text-sm" title="Sadece bu dosyayı dosya adından yeniden sorgula ve doğru içeriğe taşı">
+                                                        🔄 Yeniden Sorgula
                                                     </button>
                                                     <button onclick="deleteTVQuality({{ season.season_number }}, {{ episode.episode_number }}, '{{ quality.id }}')" class="btn-ui btn-danger w-full text-xs sm:text-sm">
                                                         Delete
@@ -1383,6 +1389,67 @@
         } finally {
             btn.disabled = false;
             btn.innerHTML = originalHtml;
+        }
+    }
+
+    // Tek dosyayı yeniden sorgula: sonuçtaki içerik varsa ona eklenir, yoksa yeni içerik açılır
+    async function requeryFile(id, btn, season, episode) {
+        const link = prompt(
+            'Bu dosya dosya adından yeniden sorgulanacak ve sonuçtaki içeriğe taşınacak.\n\n' +
+            'İstersen TMDB/IMDb linki gir (boş bırakırsan otomatik sorgulanır):',
+            ''
+        );
+        if (link === null) return; // iptal
+
+        const origHtml = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '⏳ Sorgulanıyor...';
+
+        try {
+            const params = new URLSearchParams({
+                tmdb_id: tmdbId,
+                db_index: dbIndex,
+                media_type: mediaType,
+                id: id,
+                query: link.trim()
+            });
+            if (mediaType === 'tv') {
+                params.set('season', season);
+                params.set('episode', episode);
+            }
+            const response = await fetch(`/api/media/requery-file?${params.toString()}`, { method: 'POST' });
+            const data = await response.json().catch(() => ({}));
+
+            if (!response.ok) {
+                showErrorMessage(`Yeniden sorgulama hatası: ${formatApiError(data.detail)}`);
+                return;
+            }
+            if (!data.changed) {
+                showSuccessMessage(data.message || 'Değişiklik yapılmadı.');
+                return;
+            }
+
+            const t = data.target || {};
+            const ep = (t.media_type === 'tv' && t.season != null)
+                ? ` S${String(t.season).padStart(2, '0')}E${String(t.episode).padStart(2, '0')}` : '';
+            showSuccessMessage(
+                (data.created ? `Yeni içerik açıldı: ${t.title}${ep}` : `"${t.title}"${ep} içeriğine eklendi`)
+            );
+
+            setTimeout(() => {
+                if (data.source_removed) {
+                    // Bu sayfadaki içerik boşaldı ve silindi → yeni içeriğin düzenleme sayfasına git
+                    location.href = `/media/edit?tmdb_id=${t.tmdb_id}&db_index=${t.db_index}&media_type=${t.media_type}`;
+                } else {
+                    location.reload();
+                }
+            }, 1200);
+        } catch (error) {
+            console.error('Error requerying file:', error);
+            showErrorMessage('Yeniden sorgulama başarısız. Lütfen tekrar deneyin.');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = origHtml;
         }
     }
 

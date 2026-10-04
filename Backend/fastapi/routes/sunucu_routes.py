@@ -71,6 +71,8 @@ _SSRF_BLOCKED_NETS = [
     ipaddress.ip_network("fe80::/10"),
 ]
 
+_ALLOWED_PORTS = (80, 443, 8443)
+
 def _is_safe_url(url: str) -> tuple[bool, str]:
     """
     URL'nin dahili ağlara veya meta-data servislerine yönlendirmediğini doğrular.
@@ -88,9 +90,10 @@ def _is_safe_url(url: str) -> tuple[bool, str]:
     if not hostname:
         return False, "Geçersiz host"
 
-    # Açık port kontrolü: sadece 80 ve 443'e izin ver
+    # Açık port kontrolü: yalnızca 80, 443 ve 8443'e izin ver
+    # (SSRF koruması: dahili IP aralıkları aşağıda ayrıca engellenir)
     port = parsed.port
-    if port is not None and port not in (80, 443):
+    if port is not None and port not in _ALLOWED_PORTS:
         return False, f"İzin verilmeyen port: {port}"
 
     # Host'u IP'ye çözümle ve özel aralıkları engelle
@@ -555,6 +558,7 @@ async def sunucu_yukle_stream(request: Request, _: bool = Depends(require_auth))
             _override, _ = extract_default_id(_clean)
             _meta_info   = await fetch_metadata(_clean, 0, 0, override_id=_override)
             if _meta_info:
+                _ex_doc, _ex_mt = await _find_existing_record(_meta_info)
                 _rel_path = str(final_file.relative_to(SUNUCU_DIR)) if final_file.exists() else (extracted_path or str(dest_file.relative_to(SUNUCU_DIR)))
                 meta_event = {
                     "title":         _meta_info.get("title"),
@@ -562,6 +566,18 @@ async def sunucu_yukle_stream(request: Request, _: bool = Depends(require_auth))
                     "media_type":    _meta_info.get("media_type"),
                     "year":          _meta_info.get("year"),
                     "poster":        _meta_info.get("poster"),
+                    "backdrop":      _meta_info.get("backdrop"),
+                    "quality":       _meta_info.get("quality"),
+                    "tmdb_id":       _meta_info.get("tmdb_id"),
+                    "imdb_id":       _meta_info.get("imdb_id"),
+                    "rating":        _meta_info.get("rating") or _meta_info.get("rate"),
+                    "description":   _meta_info.get("description") or _meta_info.get("desc"),
+                    "genres":        _meta_info.get("genres", []),
+                    "existing_record": ({
+                        "title": _ex_doc.get("title_tr") or _ex_doc.get("title"),
+                        "tmdb_id": _ex_doc.get("tmdb_id"), "imdb_id": _ex_doc.get("imdb_id"),
+                        "media_type": _ex_mt,
+                    } if _ex_doc else None),
                     "meta_path":     _rel_path,
                     "meta_filename": _meta_name,
                     "metadata":      _meta_info,
@@ -679,6 +695,19 @@ async def sunucu_listele(request: Request, _: bool = Depends(require_auth)):
     except PermissionError:
         return JSONResponse({"error": "İzin reddedildi"}, status_code=403)
 
+    # Zamanlanmış silmesi olan dosyalara rozet bilgisi ekle (hata listelemeyi bozmaz)
+    try:
+        from Backend.helper.scheduled_delete import pending_by_path
+        _pending = await pending_by_path()
+        if _pending:
+            for e in entries:
+                info = _pending.get(e["path"])
+                if info:
+                    e["scheduled_delete_at"] = info["delete_at"]
+                    e["scheduled_delete_id"] = info["id"]
+    except Exception:
+        pass
+
     parts = []
     if rel:
         cumulative = ""
@@ -692,36 +721,38 @@ async def sunucu_listele(request: Request, _: bool = Depends(require_auth)):
 # ──────────────────────────────────────────────────────────────────────────────
 # DELETE /api/sunucu/sil
 # ──────────────────────────────────────────────────────────────────────────────
-async def _db_cleanup_after_delete(file_paths: list):
-    """Silinen dosyalara ait DB kayıtlarını arka planda temizler."""
-    from Backend.helper.encrypt import decode_string as _decode_string
-    db_removed = 0
+async def _db_cleanup_after_delete(file_paths: list | None = None) -> int:
+    """Silinen dosyalara ait Stremio/DB kayıtlarını temizler.
+
+    Dosyası artık diskte olmayan tüm sunucu kayıtları (şifreli local_path dahil)
+    kaldırılır. Silinen kayıt sayısını döner.
+    """
+    from Backend.helper.sunucu_file_checker import purge_missing_sunucu_records
     try:
-        for i in range(1, db.current_db_index + 1):
-            storage = db.dbs[f"storage_{i}"]
-            for col in ("movie", "tv"):
-                async for doc in storage[col].find({}):
-                    tg_list = []
-                    if col == "movie":
-                        tg_list = doc.get("telegram", [])
-                    else:
-                        for s in doc.get("seasons", []):
-                            for ep in s.get("episodes", []):
-                                tg_list += ep.get("telegram", [])
-                    for q in tg_list:
-                        qid = q.get("id", "")
-                        try:
-                            decoded = await _decode_string(qid)
-                            lp = decoded.get("local_path")
-                            if lp and lp in file_paths:
-                                await db.delete_media_by_stream_id(qid)
-                                db_removed += 1
-                        except Exception:
-                            pass
+        removed = await purge_missing_sunucu_records(force=True)
     except Exception as e:
         LOGGER.warning(f"[sunucu-sil] DB temizlik hatası: {e}")
-    if db_removed:
-        LOGGER.info(f"[sunucu-sil] DB temizlik tamamlandı: {db_removed} kayıt kaldırıldı")
+        return 0
+    if removed:
+        LOGGER.info(f"[sunucu-sil] DB temizlik tamamlandı: {removed} kayıt Stremio'dan kaldırıldı")
+    return removed
+
+
+_cleanup_tasks: set = set()
+
+
+async def _cleanup_db_now(file_paths: list | None = None) -> int:
+    """DB temizliğini çalıştırır; uzun sürerse arka planda devam eder (görev referansı tutulur,
+    böylece çöp toplayıcı yarıda kesemez). Bitmişse silinen sayısını, değilse 0 döner."""
+    task = asyncio.create_task(_db_cleanup_after_delete(file_paths))
+    _cleanup_tasks.add(task)
+    task.add_done_callback(_cleanup_tasks.discard)
+    try:
+        return await asyncio.wait_for(asyncio.shield(task), timeout=20)
+    except asyncio.TimeoutError:
+        return 0
+    except Exception:
+        return 0
 
 
 async def sunucu_sil(request: Request, _: bool = Depends(require_auth)):
@@ -763,11 +794,13 @@ async def sunucu_sil(request: Request, _: bool = Depends(require_auth)):
 
         return JSONResponse({"error": "Sunucu hatası"}, status_code=500)
 
-    # ── DB temizliğini arka planda başlat (kullanıcıyı beklettirmez) ───────
-    if file_paths:
-        asyncio.ensure_future(_db_cleanup_after_delete(file_paths))
+    # ── Stremio/DB kayıtlarını da kaldır ───────────────────────────────────
+    stremio_removed = await _cleanup_db_now(file_paths)
 
-    return {"status": "success", "message": f"{kind} silindi: {target.name}"}
+    msg = f"{kind} silindi: {target.name}"
+    if stremio_removed:
+        msg += f" (Stremio'dan {stremio_removed} kayıt da kaldırıldı)"
+    return {"status": "success", "message": msg, "stremio_removed": stremio_removed}
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -869,6 +902,13 @@ async def sunucu_yeniden_adlandir(request: Request, _: bool = Depends(require_au
 
     except Exception as e:
         LOGGER.warning(f"[yeniden-adlandir] DB güncelleme hatası: {e}")
+
+    # ── Bekleyen zamanlı silme kayıtlarının yolunu güncelle ───────────────────
+    try:
+        from Backend.helper.scheduled_delete import repath as _sd_repath
+        await _sd_repath(old_abs, new_abs)
+    except Exception as e:
+        LOGGER.warning(f"[yeniden-adlandir] Zamanlı silme yolu güncellenemedi: {e}")
 
     result = {
         "status":   "success",
@@ -1083,6 +1123,50 @@ async def sunucu_sistem_durumu(request: Request, _: bool = Depends(require_auth)
         return JSONResponse({"error": "Sunucu hatası"}, status_code=500)
 
 
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Veritabanında mevcut kayıt arama (imdb_id → tmdb_id → başlık+yıl)
+# update_movie / update_tv_show ile aynı sıra; tüm storage shard'larına bakar.
+# ──────────────────────────────────────────────────────────────────────────────
+def _meta_is_tv(meta: dict) -> bool:
+    return (meta.get("media_type") or "") in ("tv", "tv_show", "series")
+
+
+async def _find_existing_record(meta: dict):
+    """Metadata'ya karşılık gelen kayıt veritabanında varsa (doc, media_type) döner,
+    yoksa (None, media_type). Hata olursa (None, media_type) — akışı bozmaz."""
+    is_tv = _meta_is_tv(meta)
+    media_type = "tv" if is_tv else "movie"
+    coll_name = "tv" if is_tv else "movie"
+    imdb_id = str(meta.get("imdb_id") or "").strip()
+    try:
+        tmdb_id = int(str(meta.get("tmdb_id")).strip())
+    except (TypeError, ValueError):
+        tmdb_id = None
+    title = (meta.get("title") or "").strip()
+    try:
+        year = int(str(meta.get("year")).strip())
+    except (TypeError, ValueError):
+        year = None
+
+    try:
+        from Backend.helper.database import convert_objectid_to_str
+        storages = [v for k, v in db.dbs.items() if str(k).startswith("storage_")]
+        for st in storages:
+            coll = st[coll_name]
+            doc = None
+            if imdb_id:
+                doc = await coll.find_one({"imdb_id": imdb_id})
+            if not doc and tmdb_id:
+                doc = await coll.find_one({"tmdb_id": tmdb_id})
+            if not doc and title and year:
+                doc = await coll.find_one({"title": title, "release_year": year})
+            if doc:
+                return convert_objectid_to_str(doc), media_type
+    except Exception:
+        _logger.warning("Mevcut kayıt aranırken hata", exc_info=True)
+    return None, media_type
+
 # ──────────────────────────────────────────────────────────────────────────────
 # POST /api/sunucu/metadata-sorgu  → Sadece sorgula, kaydetme
 # ──────────────────────────────────────────────────────────────────────────────
@@ -1095,6 +1179,9 @@ async def sunucu_metadata_sorgu(request: Request, _: bool = Depends(require_auth
 
     rel             = body.get("path", "").strip()
     custom_filename = body.get("custom_filename") or None
+    # İsteğe bağlı: IMDb / TMDb linki (ya da tt1234567 / sayısal TMDb ID).
+    # Verilirse dosya adından arama yapmak yerine doğrudan bu içerik kullanılır.
+    custom_link     = (body.get("custom_link") or "").strip()
 
     if not rel:
         return JSONResponse({"error": "path gerekli"}, status_code=400)
@@ -1111,18 +1198,53 @@ async def sunucu_metadata_sorgu(request: Request, _: bool = Depends(require_auth
     meta_filename = custom_filename or target.name
     size_str      = _human_size(target.stat().st_size)
 
+    override_id = None
+    if custom_link:
+        from Backend.helper.metadata import extract_default_id
+        override_id, _mt = extract_default_id(custom_link)
+        if not override_id:
+            return JSONResponse(
+                {"error": "Link tanınamadı. IMDb (https://www.imdb.com/title/tt1234567/), "
+                          "TMDb (https://www.themoviedb.org/movie/123 veya /tv/123) linki "
+                          "ya da tt1234567 biçiminde bir ID girin."},
+                status_code=400,
+            )
+
     try:
-        meta = await fetch_metadata(filename=meta_filename, channel=0, msg_id=0)
+        # Link verilmediyse genel "varsayılan ID" modu bu sorguyu etkilemesin
+        meta = await fetch_metadata(
+            filename=meta_filename, channel=0, msg_id=0,
+            override_id=override_id, ignore_default_id=bool(override_id),
+        )
     except Exception as e:
         _logger.error("Metadata sorgusu başarısız", exc_info=True)
 
         return JSONResponse({"error": "Sunucu hatası"}, status_code=500)
 
     if not meta:
+        if override_id:
+            return JSONResponse(
+                {"error": f"Bu link için metadata bulunamadı ({custom_link}). "
+                          "Dizi linki verdiyseniz dosya adında SxxExx bilgisi olmalı; "
+                          "film linki verdiyseniz dosya adı bölüm bilgisi içermemeli."},
+                status_code=404,
+            )
         return JSONResponse({"error": f"Metadata bulunamadı: {meta_filename!r}"}, status_code=404)
+
+    # Veritabanında bu içerik zaten varsa kaydet aşamasında o kayda eklenir; yoksa yeni kayıt açılır.
+    existing_doc, _mt_found = await _find_existing_record(meta)
+    existing_info = None
+    if existing_doc:
+        existing_info = {
+            "title": existing_doc.get("title_tr") or existing_doc.get("title"),
+            "tmdb_id": existing_doc.get("tmdb_id"),
+            "imdb_id": existing_doc.get("imdb_id"),
+            "media_type": _mt_found,
+        }
 
     return {
         "status": "found",
+        "existing_record": existing_info,
         "filename": meta_filename,
         "size": size_str,
         "path": rel,
@@ -1144,6 +1266,55 @@ async def sunucu_metadata_sorgu(request: Request, _: bool = Depends(require_auth
 # ──────────────────────────────────────────────────────────────────────────────
 # POST /api/sunucu/metadata-kaydet  → Onaylanan metadatayı DB'ye kaydet
 # ──────────────────────────────────────────────────────────────────────────────
+def _normalize_metadata_numbers(meta: dict, fallback_title: str = "") -> dict:
+    """Panelden string olarak gelen sayısal alanları (tmdb_id, year, rate...) güvenle çevirir.
+
+    tmdb_id boş/geçersizse başlıktan kararlı, NEGATİF bir manuel id üretilir
+    (gerçek TMDB id'leri pozitif olduğundan çakışma olmaz); imdb_id boşsa manuel slug kullanılır.
+    """
+    from Backend.helper.metadata import _slugify_manual_title, _manual_tmdb_id
+
+    def _to_int(v):
+        if v is None or isinstance(v, bool):
+            return None
+        try:
+            return int(str(v).strip())
+        except (ValueError, TypeError):
+            return None
+
+    def _to_float(v):
+        try:
+            return float(str(v).strip().replace(",", "."))
+        except (ValueError, TypeError):
+            return None
+
+    title = (meta.get("title") or meta.get("title_tr") or fallback_title or "").strip()
+    manual_id = _slugify_manual_title(title) if title else None
+
+    tmdb_id = _to_int(meta.get("tmdb_id"))
+    if tmdb_id is None and manual_id:
+        tmdb_id = _manual_tmdb_id(manual_id)
+    meta["tmdb_id"] = tmdb_id
+
+    if not (meta.get("imdb_id") or "").strip() and manual_id:
+        meta["imdb_id"] = manual_id
+
+    meta["year"] = _to_int(meta.get("year"))
+
+    rate = _to_float(meta.get("rate", meta.get("rating")))
+    meta["rate"] = rate if rate is not None else 0
+    if "rating" in meta:
+        meta["rating"] = meta["rate"]
+
+    # database.py bu anahtarlara doğrudan erişiyor; eksikse KeyError olmasın
+    for k in ("description", "poster", "backdrop", "logo"):
+        meta[k] = meta.get(k) or ""
+    meta["cast"] = meta.get("cast") or []
+    meta.setdefault("runtime", None)
+    return meta
+
+
+
 async def sunucu_metadata_kaydet(request: Request, _: bool = Depends(require_auth)):
     """Kullanıcının onayladığı (ve düzenleyebileceği) metadatayı DB'ye kaydeder."""
     try:
@@ -1154,9 +1325,21 @@ async def sunucu_metadata_kaydet(request: Request, _: bool = Depends(require_aut
     rel      = body.get("path", "").strip()
     filename = body.get("filename", "").strip()
     metadata = body.get("metadata")
+    # İsteğe bağlı: "HTTPS'den Dosya İndir" modalından gelen seçenekler
+    delete_at_raw = body.get("delete_at")            # ISO-8601 (UTC) ya da boş
+    want_announce = bool(body.get("announce"))
 
     if not rel or not metadata:
         return JSONResponse({"error": "path ve metadata gerekli"}, status_code=400)
+
+    # Zamanlanmış silme tarihini DB'ye yazmadan ÖNCE doğrula (yarım kalmış kayıt olmasın)
+    delete_at = None
+    if delete_at_raw:
+        from Backend.helper.scheduled_delete import parse_delete_at
+        try:
+            delete_at = parse_delete_at(delete_at_raw)
+        except ValueError as ve:
+            return JSONResponse({"error": str(ve)}, status_code=400)
 
     try:
         target = _safe_path(rel)
@@ -1179,6 +1362,17 @@ async def sunucu_metadata_kaydet(request: Request, _: bool = Depends(require_aut
 
         return JSONResponse({"error": "Sunucu hatası"}, status_code=500)
 
+    # Formdan gelen alanlar string olabilir ('' dahil) — şemaya girmeden önce normalize et.
+    # Aksi halde boş tmdb_id "Input should be a valid integer" hatasıyla kaydı düşürüyordu.
+    try:
+        metadata = _normalize_metadata_numbers(dict(metadata), filename or target.name)
+    except Exception:
+        _logger.error("Metadata normalize hatası", exc_info=True)
+        return JSONResponse({"error": "Geçersiz metadata"}, status_code=400)
+
+    # Kayıt öncesi: bu içerik veritabanında var mı? (var → o kayda eklenir, yok → yeni kayıt)
+    existing_before, _ = await _find_existing_record(metadata)
+
     try:
         result = await db.insert_media(
             metadata_info={**metadata, "encoded_string": encoded_id},
@@ -1197,12 +1391,157 @@ async def sunucu_metadata_kaydet(request: Request, _: bool = Depends(require_aut
 
         return JSONResponse({"error": "Sunucu hatası"}, status_code=500)
 
-    return {
+    # Zamanlı silme / duyuru istendiyse kayıt GERÇEKTEN yapılmış olmalı; aksi halde
+    # (DB'ye yazılamadan) dosya zamanı gelince sessizce silinirdi.
+    if (delete_at is not None or want_announce) and not db_id:
+        return JSONResponse({"error": "İçerik veritabanına kaydedilemedi; zamanlı silme/duyuru uygulanmadı."}, status_code=500)
+
+    response = {
         "status": "success",
         "db_id": db_id,
         "title": metadata.get("title"),
         "title_tr": metadata.get("title_tr"),
+        "merged_into_existing": bool(existing_before),
     }
+
+    # ── Zamanlanmış silme (sunucudan + Stremio/DB'den) ────────────────────
+    if delete_at is not None:
+        try:
+            from Backend.helper.scheduled_delete import schedule as _schedule_delete
+            await _schedule_delete(
+                rel_path=str(target.resolve().relative_to(SUNUCU_DIR.resolve())),
+                abs_path=str(target.resolve()),
+                encoded_id=encoded_id,
+                delete_at=delete_at,
+                title=metadata.get("title_tr") or metadata.get("title") or (filename or target.name),
+            )
+            response["scheduled_delete_at"] = delete_at.replace(tzinfo=None).isoformat() + "Z"
+        except Exception:
+            _logger.error("Zamanlı silme kaydı oluşturulamadı", exc_info=True)
+            response["schedule_error"] = "İçerik kaydedildi ancak zamanlı silme oluşturulamadı."
+
+    # ── Duyuru (admin bilinçli seçti → manuel duyuru: ayar/cooldown'a takılmaz) ──
+    if want_announce:
+        response["announce"] = await _send_announcement_for_saved(metadata, delete_at)
+
+    return response
+
+
+async def _send_announcement_for_saved(metadata: dict, delete_at=None) -> dict:
+    """Kaydedilen içeriği DB'den okuyup duyuru kanalına hemen gönderir.
+    Admin "duyuru gönder"i bilinçli işaretlediği için 18 saat sınırı uygulanmaz.
+    Kayıt, mevcut bir kayda eklenmiş olsa da (farklı tmdb_id ile) imdb_id/tmdb_id/başlık
+    ile tüm shard'larda aranır. Duyuru başarısız olsa bile kayıt akışı bozulmaz."""
+    try:
+        from Backend.helper.content_announcer import send_manual_announcement
+        from Backend.fastapi.routes.api_routes import _build_announce_info
+
+        doc, media_type = await _find_existing_record(metadata)
+        if not doc:
+            return {"sent": False, "message": "İçerik veritabanında bulunamadı, duyuru gönderilmedi."}
+        info = _build_announce_info(doc, media_type)
+        info["media_type"] = media_type
+        # Formda düzenlenen/ dosya adından gelen çözünürlük
+        info["announce_resolution"] = metadata.get("quality")
+        if delete_at is not None:
+            info["announce_delete_at"] = delete_at
+        ok, msg = await send_manual_announcement(info)
+        return {"sent": bool(ok), "message": msg}
+    except Exception as e:
+        _logger.error("Duyuru gönderilemedi", exc_info=True)
+        LOGGER.warning(f"[sunucu] Duyuru gönderilemedi: {e}")
+        return {"sent": False, "message": f"Duyuru gönderilemedi: {e}"}
+
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# GET/DELETE /api/sunucu/zamanli-silme  → bekleyen zamanlı silmeleri listele / iptal et
+# ──────────────────────────────────────────────────────────────────────────────
+async def sunucu_zamanli_silme_listele(request: Request, _: bool = Depends(require_auth)):
+    from Backend.helper.scheduled_delete import list_pending
+    try:
+        return {"status": "success", "items": await list_pending()}
+    except Exception:
+        _logger.error("Zamanlı silme listesi hatası", exc_info=True)
+        return JSONResponse({"error": "Sunucu hatası"}, status_code=500)
+
+
+async def sunucu_zamanli_silme_ayarla(request: Request, _: bool = Depends(require_auth)):
+    """Bir dosyanın silinme tarihini koyar / değiştirir.
+    Body: {"path": "Filmler/x.mkv", "delete_at": "<ISO-8601>"}  → ayarla
+          {"path": "...", "delete_at": null}                      → zamanlamayı kaldır
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Geçersiz JSON"}, status_code=400)
+
+    rel = (body.get("path") or "").strip()
+    if not rel:
+        return JSONResponse({"error": "path gerekli"}, status_code=400)
+    try:
+        target = _safe_path(rel)
+    except ValueError as e:
+        _logger.warning("Geçersiz yol isteği: %s", e)
+        return JSONResponse({"error": "Geçersiz veya erişilemeyen yol"}, status_code=400)
+    if not target.exists() or not target.is_file():
+        return JSONResponse({"error": "Dosya bulunamadı"}, status_code=404)
+
+    from Backend.helper import scheduled_delete as _sd
+    rel_norm = str(target.resolve().relative_to(SUNUCU_DIR.resolve()))
+
+    # Tarih boşsa: mevcut zamanlamayı kaldır
+    if not body.get("delete_at"):
+        try:
+            pending = await _sd.pending_by_path()
+            info = pending.get(rel_norm) or pending.get(rel)
+            if info:
+                await _sd.cancel(info["id"])
+            return {"status": "success", "message": "Zamanlı silme kaldırıldı.", "scheduled_delete_at": None}
+        except Exception:
+            _logger.error("Zamanlı silme kaldırma hatası", exc_info=True)
+            return JSONResponse({"error": "Sunucu hatası"}, status_code=500)
+
+    try:
+        delete_at = _sd.parse_delete_at(body.get("delete_at"))
+    except ValueError as ve:
+        return JSONResponse({"error": str(ve)}, status_code=400)
+
+    from Backend.helper.encrypt import encode_string as _encode_string
+    try:
+        encoded_id = await _encode_string({"local_path": str(target.resolve())})
+        await _sd.set_for_path(
+            rel_path=rel_norm,
+            abs_path=str(target.resolve()),
+            encoded_id=encoded_id,
+            delete_at=delete_at,
+            title=(body.get("title") or target.name),
+        )
+    except Exception:
+        _logger.error("Zamanlı silme ayarlama hatası", exc_info=True)
+        return JSONResponse({"error": "Sunucu hatası"}, status_code=500)
+
+    return {
+        "status": "success",
+        "message": "Silinme zamanı güncellendi.",
+        "scheduled_delete_at": delete_at.isoformat() + "Z",
+    }
+
+
+async def sunucu_zamanli_silme_iptal(request: Request, _: bool = Depends(require_auth)):
+    from Backend.helper.scheduled_delete import cancel
+    sched_id = request.query_params.get("id", "").strip()
+    if not sched_id:
+        return JSONResponse({"error": "id gerekli"}, status_code=400)
+    try:
+        ok = await cancel(sched_id)
+    except Exception:
+        _logger.error("Zamanlı silme iptal hatası", exc_info=True)
+        return JSONResponse({"error": "Sunucu hatası"}, status_code=500)
+    if not ok:
+        return JSONResponse({"error": "Zamanlama bulunamadı (zaten çalışmış olabilir)."}, status_code=404)
+    return {"status": "success", "message": "Zamanlı silme iptal edildi."}
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # DELETE /api/sunucu/metadata-sil  → Reddet: dosyayı sunucudan sil
@@ -1236,6 +1575,7 @@ async def sunucu_metadata_sil(request: Request, _: bool = Depends(require_auth))
 
         return JSONResponse({"error": "Sunucu hatası"}, status_code=500)
 
+    await _cleanup_db_now()
     return {"status": "success", "message": f"Silindi: {target.name}"}
 
 
@@ -1565,6 +1905,31 @@ VIDEO_MIMES_GDRIVE = {
     "application/octet-stream",
 }
 VIDEO_EXTS_GDRIVE = {".mkv", ".mp4", ".avi", ".mov", ".wmv", ".ts", ".m4v", ".webm", ".flv", ".mpg", ".mpeg"}
+
+
+def _queue_announcement(meta_info: dict, file_name: str) -> None:
+    """
+    Onaylanıp DB'ye eklenen Drive/Rclone içeriğini, Telegram'dan gelen içerikte
+    (reciever.py) ve WebDAV'da yapıldığı gibi duyuru kuyruğuna ekler.
+    Ayarlardan kapalıysa, imdb_id boşsa veya aynı başlık son 18 saat içinde
+    duyurulduysa 18 saat sınırı burada uygulanmaz (sunucu.html). Hata olursa ekleme akışı bozulmaz.
+    """
+    try:
+        from Backend.helper.content_announcer import announce_new_content
+        info = dict(meta_info)
+        info["source_filename"] = file_name  # cam/telesync tespiti bu alana bakar
+        info["announce_resolution"] = meta_info.get("quality")  # duyuruda "Çözünürlük" satırı
+        info["db_index"] = db.current_db_index
+        info["_force_announce"] = True   # sunucu.html: 18 saat sınırı aranmaz
+        # Formdan gelen tmdb_id string olabilir (ör. Drive onayı); DB sorgusu ve
+        # duyuru cooldown anahtarı için sayıya çevir.
+        try:
+            info["tmdb_id"] = int(info.get("tmdb_id") or 0)
+        except (TypeError, ValueError):
+            pass
+        announce_new_content(info)
+    except Exception as e:
+        LOGGER.warning(f"[sunucu] Duyuru tetiklenemedi: {e}")
 GDRIVE_PAGE_SIZE  = 20
 
 
@@ -1861,6 +2226,9 @@ async def sunucu_gdrive_ekle_onay(request: Request, _: bool = Depends(require_au
         _logger.error("DB kayıt hatası", exc_info=True)
 
         return JSONResponse({"error": "Sunucu hatası"}, status_code=500)
+
+    # Onaylanan içerik için gruba/kanala duyuru (content_announcer kuyruğu)
+    _queue_announcement(meta_info, file_name)
 
     # ekle_approved koleksiyonuna kaydet — sunucu.html listesinde görünsün
     try:
@@ -2422,6 +2790,9 @@ async def sunucu_rclone_ekle_onay(request: Request, _: bool = Depends(require_au
             LOGGER.error(f"[rclone-ekle-onay] storage bulunamadı! current_db_index={db.current_db_index}")
     except Exception as e:
         LOGGER.error(f"[rclone-ekle-onay] approved insert hatası: {e}")
+
+    # Onaylanan içerik için gruba/kanala duyuru (content_announcer kuyruğu)
+    _queue_announcement(meta_info, file_name)
 
     LOGGER.info(f"[rclone-ekle-onay] ✅ Eklendi: {meta_info.get('title')} | {rclone_key}")
     return JSONResponse({

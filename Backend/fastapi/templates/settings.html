@@ -103,9 +103,22 @@
                     <label class="s-label">TMDB API Anahtarı</label>
                     <input class="s-input" id="s-tmdb_api" value="{{ settings.tmdb_api }}">
                 </div>
-                <div>
-                    <label class="s-label">DeepL API Anahtarı (opsiyonel)</label>
-                    <input class="s-input" id="s-deepl_api" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx:fx" value="{{ settings.deepl_api }}">
+                <div class="md:col-span-2">
+                    <label class="s-label">DeepL API Anahtarları (opsiyonel)</label>
+                    <p class="text-xs text-text opacity-60 mb-2">
+                        <i class="fa-solid fa-circle-info"></i>
+                        Anahtarlar yukarıdan aşağıya sırayla kullanılır. Birinin karakter limiti dolunca (ya da anahtar geçersizse)
+                        otomatik olarak sıradakine geçilir; yanında <i class="fa-solid fa-triangle-exclamation" style="color:#f59e0b"></i> uyarısı görünür.
+                        Eklemek/silmek için <b>Kaydet</b>'e basmayı unutmayın.
+                    </p>
+                    <div class="multi-list-items" id="list-deepl_api_keys"></div>
+                    <div class="add-row">
+                        <input class="s-input" id="add-deepl_api_keys" type="password" autocomplete="off" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx:fx"
+                               onkeydown="if(event.key==='Enter'){event.preventDefault();addDeeplKey();}">
+                        <button class="add-btn" type="button" onclick="addDeeplKey()"><i class="fa-solid fa-plus"></i> Ekle</button>
+                        <button class="add-btn" type="button" id="deepl-keys-refresh" onclick="refreshDeeplKeys()"><i class="fa-solid fa-rotate"></i> Kullanımı Yenile</button>
+                    </div>
+                    <div id="deepl-keys-summary" class="text-xs mt-2 text-text-sec"></div>
                 </div>
                 <div>
                     <label class="s-label">DeepL Yenileme / Bitiş Tarihi (elle girilir)</label>
@@ -116,7 +129,7 @@
                     <div id="translate-usage-box" class="rounded-xl border p-4 text-sm" style="border-color:var(--border-color,rgba(255,255,255,0.1))">
                         <div class="flex items-center justify-between mb-3">
                             <span class="text-text-sec text-xs">Google / DeepL / MyMemory durumu ve DeepL karakter kotası</span>
-                            <button type="button" id="translate-usage-refresh" class="add-btn" onclick="loadTranslateUsage()"><i class="fa-solid fa-rotate"></i> Yenile</button>
+                            <button type="button" id="translate-usage-refresh" class="add-btn" onclick="loadTranslateUsage(); refreshDeeplKeys();"><i class="fa-solid fa-rotate"></i> Yenile</button>
                         </div>
                         <div id="translate-usage-content" class="text-text-sec text-xs">Yükleniyor…</div>
                     </div>
@@ -252,12 +265,40 @@
                     <label class="s-label">Ödeme / Abonelik Linki</label>
                     <input class="s-input" id="s-subscription_url" value="{{ settings.subscription_url }}">
                 </div>
+                <div>
+                    <label class="s-label">Yönetici Kullanıcı Adı</label>
+                    <input class="s-input" id="s-admin_username" value="{{ settings.admin_username }}" placeholder="kaya89">
+                    <p class="text-xs text-text opacity-60 mt-1">
+                        <i class="fa-solid fa-circle-info"></i>
+                        Abonelik talebi mesajlarında "yönetici" yerine gösterilir (ör. <code>@kaya89</code>).
+                        <code>@</code> işareti olmadan yazın. Boş bırakılırsa "yönetici" yazar.
+                    </p>
+                </div>
             </div>
-            <label class="s-label">Onaylayıcı Kullanıcı ID'leri (Approver IDs)</label>
+            <label class="s-label">Yöneticiler (Onaylayıcı Telegram ID'leri)</label>
+            <p class="text-xs text-text opacity-60 mb-2">
+                <i class="fa-solid fa-circle-info"></i>
+                Buradaki kişiler abonelik, istek ve yükseltme taleplerini onaylayıp reddeder, botta tüm yönetici
+                komutlarını (<code>/ekle</code>, <code>/sil</code>, <code>/ayarlar</code>, <code>/restart</code> vb.) kullanır
+                ve kendi şifreleriyle web panele girer. Yeni yönetici eklemek için Telegram kullanıcı ID'sini (sayı)
+                yazıp <strong>Ekle</strong>'ye basın, silmek için satırın yanındaki <strong>✕</strong> düğmesini kullanın;
+                ardından <strong>Kaydet</strong>'e basın. Yetki kaydedince anında devreye girer; silinen yöneticinin açık
+                panel oturumu da bir sonraki istekte düşer. Yeni yönetici, panel girişini botta <code>/start</code> yazarak alır.
+                Ana yönetici (OWNER_ID) en üstte kilitli görünür; diğer yöneticiler onu silemez, engelleyemez veya panel oturumunu sonlandıramaz.
+            </p>
+            <div class="multi-item" id="owner-admin-row" style="opacity:.95">
+                <input class="s-input" type="text" id="owner-admin-id" value="" readonly disabled
+                    style="cursor:not-allowed">
+                <span class="owner-lock" title="Ana yönetici silinemez veya değiştirilemez"
+                    style="display:inline-flex;align-items:center;gap:.35rem;padding:0 .7rem;font-size:.7rem;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--primary);white-space:nowrap">
+                    <i class="fa-solid fa-crown"></i> Ana Yönetici <i class="fa-solid fa-lock"></i>
+                </span>
+            </div>
             <div class="multi-list-items" id="list-approver_ids"></div>
             <div class="add-row">
-                <input class="s-input" id="add-approver_ids" placeholder="Telegram kullanıcı ID">
-                <button class="add-btn" onclick="addItem('approver_ids')"><i class="fa-solid fa-plus"></i> Ekle</button>
+                <input class="s-input" id="add-approver_ids" inputmode="numeric" placeholder="Telegram kullanıcı ID (örn: 123456789)"
+                    onkeydown="if(event.key==='Enter'){event.preventDefault();addItem('approver_ids');}">
+                <button class="add-btn" type="button" onclick="addItem('approver_ids')"><i class="fa-solid fa-plus"></i> Ekle</button>
             </div>
 
             <hr class="sm-divider">
@@ -296,6 +337,14 @@
                 <div>
                     <label class="s-label">Varsayılan Cihaz Limiti</label>
                     <input class="s-input" id="s-default_device_limit" value="{{ settings.default_device_limit }}">
+                </div>
+                <div>
+                    <label class="s-label">Üye Başına Bot Sayısı</label>
+                    <input class="s-input" id="s-member_bot_limit" placeholder="varsayılan 3" value="{{ settings.member_bot_limit }}">
+                </div>
+                <div>
+                    <label class="s-label">Şifre Geçerlilik Süresi (gün, 0 = kapalı)</label>
+                    <input class="s-input" id="s-credential_rotate_days" placeholder="varsayılan 7" value="{{ settings.credential_rotate_days }}">
                 </div>
                 <div>
                     <label class="s-label">Maks. Eşzamanlı İndirme</label>
@@ -407,6 +456,37 @@
             </div>
         </div>
 
+        <!-- WebDAV Senkronizasyonu -->
+        <div class="theme-card rounded-2xl p-5">
+            <h3 class="text-xs font-extrabold uppercase tracking-wider text-primary mb-4 flex items-center gap-2">
+                <i class="fa-solid fa-rotate"></i> WebDAV Senkronizasyonu
+            </h3>
+            <label class="s-label">Kontrol Aralığı (saat)</label>
+            <p class="text-xs text-text opacity-60 mb-2">
+                <i class="fa-solid fa-circle-info"></i>
+                WebDAV sunucusundan silinen dosyalar bu aralıkla katalogdan da kaldırılır.
+                <code>0</code> yazarsanız otomatik kontrol kapanır (WebDAV sayfasından elle de çalıştırılabilir).
+                Değişiklik kaydedildiği anda, yeniden başlatma gerekmeden uygulanır; ilk kontrol yeni aralık dolunca yapılır.
+            </p>
+            <input class="s-input" id="s-webdav_sync_interval_hours" type="number" min="0" max="8760" step="0.5"
+                value="{{ settings.webdav_sync_interval_hours }}" placeholder="6">
+        </div>
+
+        <!-- rclone / Google Drive Senkronizasyonu -->
+        <div class="theme-card rounded-2xl p-5">
+            <h3 class="text-xs font-extrabold uppercase tracking-wider text-primary mb-4 flex items-center gap-2">
+                <i class="fa-solid fa-cloud-arrow-down"></i> rclone / Google Drive Senkronizasyonu
+            </h3>
+            <label class="s-label">Kontrol Aralığı (saat)</label>
+            <p class="text-xs text-text opacity-60 mb-2">
+                <i class="fa-solid fa-circle-info"></i>
+                rclone remote'undan veya Google Drive'dan silinen (ya da çöp kutusuna atılan) dosyalar bu aralıkla katalogdan da kaldırılır.
+                <code>0</code> yazarsanız otomatik kontrol kapanır.
+            </p>
+            <input class="s-input" id="s-cloud_sync_interval_hours" type="number" min="0" max="8760" step="0.5"
+                value="{{ settings.cloud_sync_interval_hours }}" placeholder="6">
+        </div>
+
         <!-- Brute-force Koruması -->
         <div class="theme-card rounded-2xl p-5">
             <h3 class="text-xs font-extrabold uppercase tracking-wider text-primary mb-4 flex items-center gap-2">
@@ -476,7 +556,7 @@
             <h3 class="text-xs font-extrabold uppercase tracking-wider text-primary mb-4 flex items-center gap-2">
                 <i class="fa-solid fa-user-shield"></i> Yönetici Oturumu
             </h3>
-            <p class="text-xs text-text opacity-60 mb-4">Bu uygulamada sabit bir yönetici şifresi yoktur — giriş bilgileri, sahibin (OWNER_ID) botta <code>/start</code> komutunu her çalıştırışında tek kullanımlık olarak üretilir. Aşağıdaki buton mevcut tüm oturumları anında geçersiz kılar.</p>
+            <p class="text-xs text-text opacity-60 mb-4">Bu uygulamada sabit bir yönetici şifresi yoktur — giriş bilgileri, sahibin (OWNER_ID) ve Yöneticiler listesindeki kişilerin botta <code>/start</code> komutunu her çalıştırışında kendilerine özel, tek kullanımlık olarak üretilir (biri /start yazınca diğerlerinin oturumu düşmez). Aşağıdaki buton tüm yöneticilerin mevcut oturumlarını anında geçersiz kılar.</p>
             <button onclick="invalidateSessions()" class="bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white px-4 py-2.5 rounded-xl text-sm font-bold transition-all">
                 <i class="fa-solid fa-right-from-bracket mr-1"></i> Tüm Oturumları Sonlandır
             </button>
@@ -580,6 +660,19 @@ textarea.s-input { font-family: inherit; resize: vertical; line-height: 1.5; }
     transition: background 0.15s; white-space: nowrap;
 }
 .add-btn:hover { background: color-mix(in srgb, var(--primary) 28%, transparent); }
+
+.deepl-key-row { display: flex; flex-direction: column; gap: 0.3rem; padding: 0.55rem 0.7rem; border-radius: 0.75rem;
+    border: 1px solid var(--border-color, rgba(255,255,255,0.08)); }
+.deepl-key-row[data-status="exhausted"], .deepl-key-row[data-status="invalid"], .deepl-key-row[data-status="error"] {
+    border-color: rgba(239,68,68,0.45); background: rgba(239,68,68,0.06); }
+.deepl-key-row[data-status="low"] { border-color: rgba(245,158,11,0.45); background: rgba(245,158,11,0.06); }
+.deepl-idx { width: 1.4rem; text-align: center; font-size: 0.75rem; font-weight: 800; opacity: 0.6; flex-shrink: 0; }
+.deepl-warn { flex-shrink: 0; font-size: 1.05rem; cursor: help; }
+.deepl-active { flex-shrink: 0; font-size: 0.65rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em;
+    padding: 0.2rem 0.5rem; border-radius: 999px; background: rgba(34,197,94,0.15); color: #22c55e; border: 1px solid rgba(34,197,94,0.35); }
+.deepl-usage { font-size: 0.75rem; color: var(--text-sec); padding-left: 1.9rem; }
+.deepl-bar { background: rgba(255,255,255,0.08); border-radius: 999px; height: 5px; overflow: hidden; margin: 0.25rem 0; }
+.deepl-bar > div { height: 100%; }
 
 .db-row {
     display: flex; align-items: center; justify-content: space-between; gap: 0.75rem;
@@ -781,7 +874,7 @@ function rowHTML(listKey, value, isSecret) {
     const type = isSecret ? 'password' : 'text';
     return `<div class="multi-item">
         <input class="s-input" type="${type}" value="${escapeHtmlAttr(value)}" data-list="${listKey}">
-        <button class="remove-btn" onclick="this.parentElement.remove()"><i class="fa-solid fa-xmark"></i></button>
+        <button class="remove-btn" type="button" onclick="this.parentElement.remove()"><i class="fa-solid fa-xmark"></i></button>
     </div>`;
 }
 
@@ -795,6 +888,20 @@ function addItem(listKey) {
     const input = document.getElementById('add-' + listKey);
     const value = (input.value || '').trim();
     if (!value) return;
+    if (listKey === 'approver_ids' && !/^-?\d+$/.test(value)) {
+        showStatus('❌ Yönetici ID\'si yalnızca rakamlardan oluşmalıdır.', false);
+        return;
+    }
+    if (listKey === 'approver_ids' && String(currentSettings.owner_id ?? '') === value) {
+        showStatus('ℹ️ Bu kişi zaten ana yönetici.', false);
+        input.value = '';
+        return;
+    }
+    if (collectList(listKey).includes(value)) {
+        showStatus('ℹ️ Bu kayıt zaten listede.', false);
+        input.value = '';
+        return;
+    }
     const container = document.getElementById('list-' + listKey);
     container.insertAdjacentHTML('beforeend', rowHTML(listKey, value, input.type === 'password'));
     input.value = '';
@@ -954,7 +1061,7 @@ function renderSettings(s) {
     document.getElementById('s-eklenti_logosu').value = s.eklenti_logosu || '';
     document.getElementById('s-bolum_resimi').value = s.bolum_resimi || '';
     document.getElementById('s-tmdb_api').value = s.tmdb_api || '';
-    document.getElementById('s-deepl_api').value = s.deepl_api || '';
+    renderDeeplKeys((s.deepl_api_keys && s.deepl_api_keys.length) ? s.deepl_api_keys : (s.deepl_api ? [s.deepl_api] : []));
     document.getElementById('s-deepl_renewal_date').value = s.deepl_renewal_date || '';
     document.getElementById('s-replace_mode').checked = !!s.replace_mode;
     document.getElementById('s-hide_catalog').checked = !!s.hide_catalog;
@@ -969,12 +1076,15 @@ function renderSettings(s) {
     document.getElementById('s-subscription').checked = !!s.subscription;
     document.getElementById('s-subscription_group_id').value = s.subscription_group_id ?? '';
     document.getElementById('s-subscription_url').value = s.subscription_url || '';
+    document.getElementById('s-admin_username').value = s.admin_username || '';
     document.getElementById('s-uye_olmayan_mesaji').value = s.uye_olmayan_mesaji || '';
 
     document.getElementById('s-yenileme').value = s.yenileme || '';
     document.getElementById('s-hiz_limiti').value = s.hiz_limiti || '';
     document.getElementById('s-limit_sifirlama').value = s.limit_sifirlama || '';
     document.getElementById('s-default_device_limit').value = s.default_device_limit ?? '';
+    document.getElementById('s-member_bot_limit').value = s.member_bot_limit ?? 3;
+    document.getElementById('s-credential_rotate_days').value = s.credential_rotate_days ?? 7;
     document.getElementById('s-max_concurrent_downloads').value = s.max_concurrent_downloads || '';
     document.getElementById('s-max_concurrent_uploads').value = s.max_concurrent_uploads || '';
     document.getElementById('s-pre_fetch').value = s.pre_fetch ?? 3;
@@ -993,13 +1103,19 @@ function renderSettings(s) {
     renderProxyScopeSelected();
     toggleProxyScopePicker();
 
+    document.getElementById('s-webdav_sync_interval_hours').value = s.webdav_sync_interval_hours ?? 6;
+    document.getElementById('s-cloud_sync_interval_hours').value = s.cloud_sync_interval_hours ?? 6;
     document.getElementById('s-brute_window').value = s.brute_window ?? '';
     document.getElementById('s-brute_max').value = s.brute_max ?? '';
     document.getElementById('s-brute_ban').value = s.brute_ban ?? '';
     document.getElementById('s-trusted_proxy_cidrs').value = s.trusted_proxy_cidrs || '';
 
     renderList('auth_channels', s.auth_channels, false);
-    renderList('approver_ids', s.approver_ids, false);
+    if (s.owner_id != null) currentSettings.owner_id = s.owner_id;
+    const ownerIdStr = String(currentSettings.owner_id ?? '');
+    const ownerInput = document.getElementById('owner-admin-id');
+    if (ownerInput) ownerInput.value = ownerIdStr;
+    renderList('approver_ids', (s.approver_ids || []).filter(x => String(x) !== ownerIdStr), false);
     renderList('extra_databases', s.extra_databases, true);
     renderList('multi_tokens', s.multi_tokens, true);
     renderEnvTokens(s.env_multi_tokens);
@@ -1029,7 +1145,7 @@ function buildPayload() {
         eklenti_logosu: document.getElementById('s-eklenti_logosu').value.trim(),
         bolum_resimi: document.getElementById('s-bolum_resimi').value.trim(),
         tmdb_api: document.getElementById('s-tmdb_api').value.trim(),
-        deepl_api: document.getElementById('s-deepl_api').value.trim(),
+        deepl_api_keys: collectList('deepl_api_keys'),
         deepl_renewal_date: document.getElementById('s-deepl_renewal_date').value,
         replace_mode: document.getElementById('s-replace_mode').checked,
         hide_catalog: document.getElementById('s-hide_catalog').checked,
@@ -1045,6 +1161,7 @@ function buildPayload() {
         subscription: document.getElementById('s-subscription').checked,
         subscription_group_id: toInt('s-subscription_group_id', 0),
         subscription_url: document.getElementById('s-subscription_url').value.trim(),
+        admin_username: document.getElementById('s-admin_username').value.trim().replace(/^@+/, ''),
         approver_ids: collectList('approver_ids').map(x => parseInt(x, 10)).filter(Number.isFinite),
         uye_olmayan_mesaji: document.getElementById('s-uye_olmayan_mesaji').value.trim(),
 
@@ -1052,6 +1169,8 @@ function buildPayload() {
         hiz_limiti: document.getElementById('s-hiz_limiti').value.trim(),
         limit_sifirlama: document.getElementById('s-limit_sifirlama').value.trim(),
         default_device_limit: toInt('s-default_device_limit', 0),
+        member_bot_limit: toInt('s-member_bot_limit', 3),
+        credential_rotate_days: toInt('s-credential_rotate_days', 7),
         max_concurrent_downloads: document.getElementById('s-max_concurrent_downloads').value.trim(),
         max_concurrent_uploads: document.getElementById('s-max_concurrent_uploads').value.trim(),
         pre_fetch: toInt('s-pre_fetch', 3),
@@ -1064,6 +1183,14 @@ function buildPayload() {
         proxy_scope_mode: document.querySelector('input[name="s-proxy_scope_mode"]:checked')?.value || 'subscribers',
         proxy_scope_member_ids: Array.from(proxyScopeSelectedIds).map(x => parseInt(x, 10)).filter(Number.isFinite),
 
+        webdav_sync_interval_hours: (() => {
+            const v = parseFloat(String(document.getElementById('s-webdav_sync_interval_hours').value).replace(',', '.'));
+            return Number.isFinite(v) && v >= 0 ? v : 6;
+        })(),
+        cloud_sync_interval_hours: (() => {
+            const v = parseFloat(String(document.getElementById('s-cloud_sync_interval_hours').value).replace(',', '.'));
+            return Number.isFinite(v) && v >= 0 ? v : 6;
+        })(),
         brute_window: toInt('s-brute_window', 60),
         brute_max: toInt('s-brute_max', 5),
         brute_ban: toInt('s-brute_ban', 1800),
@@ -1136,7 +1263,7 @@ async function restoreBackup(input) {
 }
 
 async function invalidateSessions() {
-    if (!confirm('Tüm yönetici oturumları sonlandırılsın mı? Herkes /start ile yeniden giriş yapmak zorunda kalacak.')) return;
+    if (!confirm('Yönetici oturumları sonlandırılsın mı? Ana yönetici dışındaki bir yönetici bunu yaparsa ana yöneticinin oturumu korunur. Etkilenenler /start ile yeniden giriş yapmak zorunda kalacak.')) return;
     try {
         const res = await fetch('/api/admin/settings/invalidate-sessions', { method: 'POST' });
         const data = await res.json();
@@ -1204,6 +1331,131 @@ function spinIcon(btn, on) {
     if (icon) icon.classList.toggle('fa-spin', on);
 }
 
+
+// ---------- DeepL API anahtarları (çoklu, sıralı, limit dolunca sıradakine geçer) ----------
+const _fmtNum = n => Number(n).toLocaleString('tr-TR');
+
+function deeplRowHTML(value) {
+    return `<div class="deepl-key-row" data-status="pending">
+        <div class="multi-item">
+            <span class="deepl-idx"></span>
+            <input class="s-input" type="password" autocomplete="off" data-list="deepl_api_keys" value="${escapeHtmlAttr(value)}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx:fx">
+            <span class="deepl-warn" style="display:none"><i class="fa-solid fa-triangle-exclamation"></i></span>
+            <span class="deepl-active" style="display:none">Aktif</span>
+            <button class="remove-btn" type="button" title="Anahtarı sil" onclick="removeDeeplKey(this)"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div class="deepl-usage">Kullanım bilgisi alınıyor…</div>
+    </div>`;
+}
+
+function renumberDeeplKeys() {
+    document.querySelectorAll('#list-deepl_api_keys .deepl-key-row .deepl-idx')
+        .forEach((el, i) => { el.textContent = i + 1; });
+}
+
+function renderDeeplKeys(values) {
+    const box = document.getElementById('list-deepl_api_keys');
+    if (!box) return;
+    box.innerHTML = (values || []).map(deeplRowHTML).join('');
+    renumberDeeplKeys();
+    // Elle düzenlenen anahtar için kullanımı yeniden sorgula
+    box.onchange = () => refreshDeeplKeys();
+    refreshDeeplKeys();
+}
+
+function addDeeplKey() {
+    const input = document.getElementById('add-deepl_api_keys');
+    const value = (input.value || '').trim();
+    if (!value) return;
+    if (collectList('deepl_api_keys').includes(value)) {
+        showStatus('⚠ Bu anahtar zaten listede.', false);
+        input.value = '';
+        return;
+    }
+    document.getElementById('list-deepl_api_keys').insertAdjacentHTML('beforeend', deeplRowHTML(value));
+    input.value = '';
+    renumberDeeplKeys();
+    refreshDeeplKeys();   // eklenir eklenmez geçerli mi / ne kadar kaldı
+}
+
+function removeDeeplKey(btn) {
+    btn.closest('.deepl-key-row').remove();
+    renumberDeeplKeys();
+    refreshDeeplKeys();
+}
+
+function _applyDeeplRow(row, it) {
+    const warn = row.querySelector('.deepl-warn');
+    const act = row.querySelector('.deepl-active');
+    const usage = row.querySelector('.deepl-usage');
+    row.dataset.status = it.status;
+    act.style.display = it.active ? '' : 'none';
+
+    const bad = ['exhausted', 'invalid', 'error'].includes(it.status);
+    warn.style.display = (bad || it.status === 'low') ? '' : 'none';
+    warn.style.color = bad ? '#ef4444' : '#f59e0b';
+
+    if (it.status === 'invalid' || it.status === 'error') {
+        warn.title = it.status === 'invalid' ? 'Geçersiz API anahtarı' : 'Kullanım bilgisi alınamadı';
+        usage.innerHTML = `<span style="color:#ef4444">${escapeHtml(it.error || 'Bilinmeyen hata')}</span>`;
+        return;
+    }
+    if (it.limit) {
+        const pct = it.percent_used ?? 0;
+        const color = it.status === 'exhausted' ? '#ef4444' : (pct >= 70 ? '#f59e0b' : '#22c55e');
+        warn.title = it.status === 'exhausted'
+            ? 'Karakter limiti doldu — çeviriler sıradaki anahtara geçer'
+            : `Kalan karakter azaldı (${_fmtNum(it.remaining)})`;
+        usage.innerHTML = `
+            <div class="deepl-bar"><div style="width:${Math.min(pct, 100)}%;background:${color}"></div></div>
+            Kullanılan: <b>${_fmtNum(it.used)}</b> / ${_fmtNum(it.limit)} (%${pct}) ·
+            Kalan: <b style="color:${color}">${_fmtNum(it.remaining)}</b> karakter` +
+            (it.status === 'exhausted' ? ' · <b style="color:#ef4444">Limit doldu</b>' : '');
+    } else {
+        usage.textContent = 'Kullanım bilgisi yok.';
+    }
+}
+
+async function refreshDeeplKeys() {
+    const rows = Array.from(document.querySelectorAll('#list-deepl_api_keys .deepl-key-row'));
+    const summary = document.getElementById('deepl-keys-summary');
+    const btn = document.getElementById('deepl-keys-refresh');
+    if (!summary) return;
+    const filled = rows.filter(r => r.querySelector('input').value.trim());
+    rows.filter(r => !filled.includes(r)).forEach(r => {
+        r.dataset.status = 'pending';
+        r.querySelector('.deepl-usage').textContent = 'Boş satır — kaydedilmez.';
+        r.querySelector('.deepl-warn').style.display = 'none';
+        r.querySelector('.deepl-active').style.display = 'none';
+    });
+    if (!filled.length) { summary.textContent = 'DeepL anahtarı yok — çeviri Google → MyMemory zinciriyle yapılır.'; return; }
+
+    spinIcon(btn, true);
+    try {
+        const res = await fetch('/api/admin/settings/deepl-keys-usage', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ keys: filled.map(r => r.querySelector('input').value.trim()) })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.detail || 'failed');
+        data.keys.forEach((it, i) => { if (filled[i]) _applyDeeplRow(filled[i], it); });
+
+        const usable = data.keys.filter(k => k.status === 'ok' || k.status === 'low').length;
+        const active = data.keys.find(k => k.active);
+        const remainingTotal = data.keys.reduce((a, k) => a + (k.remaining || 0), 0);
+        if (!usable) {
+            summary.innerHTML = '<span style="color:#ef4444"><i class="fa-solid fa-triangle-exclamation"></i> Kullanılabilir DeepL anahtarı kalmadı — çeviriler Google/MyMemory\'ye düşer.</span>';
+        } else {
+            summary.innerHTML = `Kullanılabilir: <b>${usable}/${data.keys.length}</b> anahtar · Aktif: <b>#${active ? active.index + 1 : '-'}</b> · Toplam kalan: <b>${_fmtNum(remainingTotal)}</b> karakter`;
+        }
+    } catch (e) {
+        summary.innerHTML = '<span style="color:#ef4444">Anahtar kullanımı alınamadı.</span>';
+    } finally {
+        spinIcon(btn, false);
+    }
+}
+
 async function loadTranslateUsage() {
     const box = document.getElementById('translate-usage-content');
     const btn = document.getElementById('translate-usage-refresh');
@@ -1234,7 +1486,7 @@ async function loadTranslateUsage() {
             deeplBlock = `
                 <div class="py-1.5">
                     <div class="flex items-center justify-between mb-1">
-                        <span>DeepL karakter kullanımı</span>
+                        <span>DeepL karakter kullanımı${du.keys_total > 1 ? ` (aktif anahtar · ${du.keys_ok}/${du.keys_total} kullanılabilir)` : ''}</span>
                         <span>${du.character_count.toLocaleString('tr-TR')} / ${du.character_limit.toLocaleString('tr-TR')} (%${pct})</span>
                     </div>
                     <div style="background:rgba(255,255,255,0.08);border-radius:999px;height:6px;overflow:hidden">

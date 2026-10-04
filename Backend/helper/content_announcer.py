@@ -303,6 +303,56 @@ async def _ensure_description_translated(info: dict) -> None:
     )
 
 
+#----- Sunucu/Drive/Rclone/WebDAV akışlarından eklenen içeriklerde duyuruya
+#----- "Çözünürlük" satırı eklenir. Değer, metadata'daki "quality" alanından
+#----- gelir (ör. "1080p", "2160p", "1080p • Almanca"). CamRip gibi çözünürlük
+#----- olmayan değerler atlanır (sinema çekimi zaten ayrı "Kalite" satırıyla
+#----- gösteriliyor). Telegram kaynaklı içerik bu anahtarı set etmediği için
+#----- davranışı değişmez.
+_RESOLUTION_RE = re.compile(r'(?<![\w])(\d{3,4}p|[48]k|uhd)(?![\w])', re.IGNORECASE)
+
+
+def _extract_resolution(value) -> Optional[str]:
+    if not value:
+        return None
+    m = _RESOLUTION_RE.search(str(value))
+    if not m:
+        return None
+    res = m.group(1)
+    low = res.lower()
+    if low == "uhd":
+        return "UHD"
+    if low in ("4k", "8k"):
+        return low.upper()
+    return low  # 1080p, 720p ...
+
+
+#----- Zamanlanmış silme tarihini (naive UTC datetime ya da ISO metni)
+#----- Türkiye saatine (Europe/Istanbul) çevirip "gg.aa.yyyy SS:DD" biçiminde döner.
+def _format_delete_at(value) -> Optional[str]:
+    if not value:
+        return None
+    try:
+        from datetime import timezone as _tz
+        if isinstance(value, str):
+            raw = value.strip()
+            if raw.endswith(("Z", "z")):
+                raw = raw[:-1] + "+00:00"
+            dt = datetime.fromisoformat(raw)
+        else:
+            dt = value
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=_tz.utc)
+        try:
+            from zoneinfo import ZoneInfo
+            local = dt.astimezone(ZoneInfo("Europe/Istanbul"))
+        except Exception:
+            local = dt.astimezone(_tz(timedelta(hours=3)))
+        return local.strftime("%d.%m.%Y %H:%M")
+    except Exception:
+        return None
+
+
 #----- Duyuru metnini Türkçe olarak oluşturur
 def _build_caption(info: dict) -> str:
     is_tv = info.get("media_type") == "tv"
@@ -324,6 +374,11 @@ def _build_caption(info: dict) -> str:
     if genres_tr:
         lines.append(f"🎭 <b>Kategori:</b> {', '.join(genres_tr[:4])}")
 
+    #----- Sunucu/Drive/Rclone/WebDAV ile eklenen içeriklerde çözünürlük gösterilir.
+    resolution = _extract_resolution(info.get("announce_resolution"))
+    if resolution:
+        lines.append(f"📐 <b>Çözünürlük:</b> {resolution}")
+
     #----- Ses ve Kalite bilgileri normalde duyuru metnine eklenmez; tek
     #----- istisna, dosya adından tespit edilen "Sinema Çekimi" (cam/telesync)
     #----- kalitesidir. Bu durumda kalite ve (varsa) ses etiketi eklenir.
@@ -332,6 +387,12 @@ def _build_caption(info: dict) -> str:
         lines.append("🎥 <b>Kalite:</b> Sinema Çekimi")
         if cam_audio:
             lines.append(f"🔊 <b>Ses:</b> {cam_audio}")
+
+    #----- "Dosya İndir" ile eklenip zamanlanmış silme tarihi verilen içeriklerde
+    #----- silinme tarihi de yazılır (Türkiye saati).
+    delete_at_txt = _format_delete_at(info.get("announce_delete_at"))
+    if delete_at_txt:
+        lines.append(f"🗑 <b>Silinme Tarihi:</b> {delete_at_txt}")
 
     desc = (info.get("description_tr") or info.get("description") or "").strip()
     if desc:
@@ -552,7 +613,10 @@ def _build_open_buttons(info: dict, settings) -> list:
 
 async def _announce(info: dict) -> None:
     settings = SettingsManager.current()
-    if not settings.announce_new_content:
+    #----- sunucu.html / webdav.html: admin "duyur"u bilinçli işaretlediyse genel
+    #----- "yeni içerik duyuruları" ayarına ve 18 saatlik sınıra takılmadan gönderilir.
+    force = bool(info.get("_force_announce"))
+    if not settings.announce_new_content and not force:
         return
 
     #----- Görünürlük "Sadece seçtiğim üye(ler)" (visibility.mode == "selected")
@@ -578,7 +642,17 @@ async def _announce(info: dict) -> None:
         )
         return
 
-    if not await _claim(info.get("media_type"), info.get("tmdb_id")):
+    if force:
+        #----- 18 saat sınırı uygulanmaz; yalnızca son duyuru zamanı kaydedilir.
+        try:
+            if info.get("tmdb_id"):
+                await db.dbs["tracking"]["announced_content"].update_one(
+                    {"_id": f"{info.get('media_type')}:{info.get('tmdb_id')}"},
+                    {"$set": {"at": datetime.utcnow()}}, upsert=True,
+                )
+        except Exception as e:
+            LOGGER.warning(f"Zorunlu duyuru kaydı güncellenemedi: {e}")
+    elif not await _claim(info.get("media_type"), info.get("tmdb_id")):
         return
 
     #----- Gönderimden hemen önce: description_tr hâlâ orijinal (çevrilmemiş)

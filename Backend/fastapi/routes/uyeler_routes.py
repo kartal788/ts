@@ -762,6 +762,8 @@ async def admin_uye_ban_api(member_id: str, ban: bool) -> dict:
             raise HTTPException(status_code=404, detail="Üyenin Telegram ID'si bulunamadı")
 
         if ban:
+            if int(user_id) == Telegram.OWNER_ID:
+                raise HTTPException(status_code=403, detail="Ana yönetici engellenemez.")
             await db.ban_user(user_id)
         else:
             await db.unban_user(user_id)

@@ -24,6 +24,9 @@ class Telegram:
     #----- (Google -> [DeepL varsa] -> MyMemory). Free-tier key'ler ":fx" ile
     #----- biter; hangi endpoint kullanılacağı buna göre otomatik seçilir.
     DEEPL_API = getenv("DEEPL_API", "")
+    #----- Birden fazla DeepL anahtari (sirayla kullanilir, limiti dolan atlanir).
+    #----- Panelden yonetilir; ilk acilista DEEPL_API'deki anahtar(lar)dan (virgulle ayrilmis olabilir) tohumlanir.
+    DEEPL_API_KEYS = [k.strip() for k in str(getenv("DEEPL_API", "") or "").replace("\n", ",").split(",") if k.strip()]
 
     UPSTREAM_REPO = getenv("UPSTREAM_REPO", "")
     UPSTREAM_BRANCH = getenv("UPSTREAM_BRANCH", "")
@@ -52,6 +55,21 @@ class Telegram:
     EKLENTI_ACIKLAMASI = getenv("EKLENTI_ACIKLAMASI", "Dizi ve film arşivi.")
     EKLENTI_LOGOSU = getenv("EKLENTI_LOGOSU", "")
     BOLUM_RESIMI = getenv("BOLUM_RESIMI", "")
+
+    #----- WebDAV'dan silinen dosyaların katalogdan temizlenme kontrol aralığı (saat).
+    #----- 0 = otomatik kontrol kapalı. İlk açılış değeri config.env'den gelir;
+    #----- sonrasında panelden (Ayarlar > WebDAV Senkronizasyonu) canlı değiştirilebilir.
+    WEBDAV_SYNC_INTERVAL_HOURS = (
+        float(v) if (v := str(getenv("WEBDAV_SYNC_INTERVAL_HOURS", "6") or "6").strip().replace(",", ".")).replace(".", "", 1).isdigit()
+        else 6.0
+    )
+
+    #----- rclone / Google Drive'dan silinen dosyaların katalogdan temizlenme kontrol aralığı (saat).
+    #----- 0 = otomatik kontrol kapalı. Panelden (Ayarlar) canlı değiştirilebilir.
+    CLOUD_SYNC_INTERVAL_HOURS = (
+        float(v) if (v := str(getenv("CLOUD_SYNC_INTERVAL_HOURS", "6") or "6").strip().replace(",", ".")).replace(".", "", 1).isdigit()
+        else 6.0
+    )
 
     MAX_CONCURRENT_DOWNLOADS = getenv("MAX_CONCURRENT_DOWNLOADS", "")
     MAX_CONCURRENT_UPLOADS = getenv("MAX_CONCURRENT_UPLOADS", "1")
@@ -83,6 +101,12 @@ class Telegram:
     #                       0 veya boş → sınırsız.
     #                       Örn: 3 → aynı anda en fazla 3 aktif stream açılabilir.
     DEFAULT_DEVICE_LIMIT = int(v) if (v := str(getenv("DEFAULT_DEVICE_LIMIT", "0") or "0").strip()).lstrip("-").isdigit() else 0
+
+    # MEMBER_BOT_LIMIT: Her üyenin aynı anda kullanabileceği maksimum bot sayısı (min 1, varsayılan 3).
+    MEMBER_BOT_LIMIT = max(1, int(v)) if (v := str(getenv("MEMBER_BOT_LIMIT", "3") or "3").strip()).isdigit() else 3
+
+    # CREDENTIAL_ROTATE_DAYS: /start'tan kaç gün sonra üye ve yönetici şifresi geçersiz olsun (0 = kapalı, varsayılan 7).
+    CREDENTIAL_ROTATE_DAYS = int(v) if (v := str(getenv("CREDENTIAL_ROTATE_DAYS", "7") or "7").strip()).isdigit() else 7
 
     # ── Brute-force (kaba kuvvet) koruması ───────────────────────────────────
     # BRUTE_WINDOW  : Kaç saniye içindeki başarısız girişler sayılsın?    (varsayılan: 60 sn)

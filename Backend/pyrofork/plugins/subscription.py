@@ -2,6 +2,7 @@ from pyrogram import Client, filters, enums
 from pyrogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from Backend.config import Telegram
 from Backend import db, __version__
+from Backend.helper.settings_manager import admin_forwarded_to, admin_contact_ref
 from datetime import datetime, timedelta
 import pathlib, re as _re
 
@@ -74,7 +75,7 @@ async def plan_selection(client: Client, callback_query: CallbackQuery):
             f"⏳ <b>Plan Talebiniz Alındı</b>\n\n"
             f"📦 <b>Plan:</b> {plan['days']} gün — {plan['price']} TL\n"
             f"📅 <b>Tahmini son kullanma tarihi:</b> {expiry_str}\n\n"
-            f"Talebiniz yöneticiye iletildi. Onaylandığında eklenti linkiniz buraya gönderilecektir.",
+            f"Talebiniz {admin_forwarded_to()} iletildi. Onaylandığında eklenti linkiniz buraya gönderilecektir.",
             parse_mode=enums.ParseMode.HTML
         )
     except Exception as e:
@@ -84,7 +85,7 @@ async def plan_selection(client: Client, callback_query: CallbackQuery):
                 f"⏳ <b>Plan Talebiniz Alındı</b>\n\n"
                 f"📦 <b>Plan:</b> {plan['days']} gün — {plan['price']} TL\n"
                 f"📅 <b>Tahmini son kullanma tarihi:</b> {expiry_str}\n\n"
-                f"Talebiniz yöneticiye iletildi. Onaylandığında eklenti linkiniz buraya gönderilecektir.",
+                f"Talebiniz {admin_forwarded_to()} iletildi. Onaylandığında eklenti linkiniz buraya gönderilecektir.",
                 parse_mode=enums.ParseMode.HTML
             )
         except Exception as e2:
@@ -115,7 +116,9 @@ async def plan_selection(client: Client, callback_query: CallbackQuery):
         f"\nLütfen talebi onaylayın veya reddedin."
     )
 
-    approver_ids = Telegram.APPROVER_IDS if Telegram.APPROVER_IDS else [Telegram.OWNER_ID]
+    #----- Bota gelen onay mesajı SADECE ana yöneticiye (OWNER_ID) gider.
+    #----- Diğer yöneticiler talebi web panelinden (/istekler) onaylar.
+    approver_ids = [Telegram.OWNER_ID]
     print(f"DEBUG: Sending admin notification to: {approver_ids}")
     admin_messages = []
     for approver_id in approver_ids:
@@ -145,9 +148,10 @@ async def plan_selection(client: Client, callback_query: CallbackQuery):
 
 @Client.on_callback_query(filters.regex(r"^(approve|reject|ban|unban)_(\d+)$"))
 async def admin_review(client: Client, callback_query: CallbackQuery):
-    approver_ids = Telegram.APPROVER_IDS if Telegram.APPROVER_IDS else [Telegram.OWNER_ID]
-    if callback_query.from_user.id not in approver_ids:
-        return await callback_query.answer("Bu işlemi yapmaya yetkiniz yok.", show_alert=True)
+    #----- Bot üzerinden onay/red/ban yalnızca ana yönetici içindir;
+    #----- diğer yöneticiler web panelini kullanır.
+    if callback_query.from_user.id != Telegram.OWNER_ID:
+        return await callback_query.answer("Bu işlemi yalnızca ana yönetici bottan yapabilir. Web panelini kullanın.", show_alert=True)
 
     action = callback_query.matches[0].group(1)
     target_user_id = int(callback_query.matches[0].group(2))
@@ -287,7 +291,7 @@ async def admin_review(client: Client, callback_query: CallbackQuery):
             await client.send_message(
                 target_user_id,
                 "❌ <b>Talebiniz Reddedildi</b>\n\nAbonelik talebiniz yönetici tarafından reddedildi. "
-                "Daha fazla bilgi için yönetici ile iletişime geçin.",
+                f"Daha fazla bilgi için {admin_contact_ref()} ile iletişime geçin.",
                 parse_mode=enums.ParseMode.HTML
             )
 
@@ -314,6 +318,9 @@ async def admin_review(client: Client, callback_query: CallbackQuery):
             await callback_query.answer("Reddedilemedi — bekleyen talep bulunamadı.", show_alert=True)
 
     elif action == "ban":
+        if target_user_id == Telegram.OWNER_ID:
+            await callback_query.answer("Ana yönetici engellenemez.", show_alert=True)
+            return
         await db.ban_user(target_user_id)
         try:
             await client.send_message(
