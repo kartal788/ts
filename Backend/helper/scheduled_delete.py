@@ -116,6 +116,28 @@ async def list_pending(rel_prefix: Optional[str] = None) -> list:
     return out
 
 
+async def list_due_within(hours: int = 24) -> list:
+    """Silinmesine `hours` saat veya daha az kalmış bekleyen zamanlamalar.
+    Dashboard "Uyarılar" kartı için (silinmeden 24 saat önce uyarı)."""
+    now = _utcnow()
+    limit = now + timedelta(hours=hours)
+    out = []
+    q = {"status": {"$in": ["pending", "running"]}, "delete_at": {"$lte": limit}}
+    async for d in _col().find(q).sort("delete_at", 1):
+        delete_at = d.get("delete_at")
+        if not delete_at:
+            continue
+        remaining = (delete_at - now).total_seconds()
+        out.append({
+            "id": str(d["_id"]),
+            "path": d.get("rel_path"),
+            "title": d.get("title") or Path(d.get("rel_path") or "").name,
+            "delete_at": _iso(delete_at),
+            "minutes_remaining": max(0, int(remaining // 60)),
+        })
+    return out
+
+
 async def pending_by_path() -> dict:
     """{rel_path: {id, delete_at}} — dosya listesinde rozet göstermek için."""
     res = {}

@@ -279,18 +279,6 @@
         .upload-sheet-grab { display: none; }
         .upload-sheet .u-input { min-height: 44px; }
 
-        /* Süre seçici (2 / 3 / 4 / 7 gün) */
-        .upload-days { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.5rem; }
-        .upload-day-chip {
-            min-height: 48px; border-radius: 0.75rem; border: 1px solid rgba(255,255,255,.15);
-            background: rgba(255,255,255,.04); font-weight: 700; font-size: .95rem; line-height: 1.1;
-            display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
-            transition: background .15s, border-color .15s, transform .1s; touch-action: manipulation; -webkit-tap-highlight-color: transparent;
-        }
-        .upload-day-chip small { font-size: .65rem; font-weight: 500; opacity: .7; }
-        .upload-day-chip:active { transform: scale(.96); }
-        .upload-day-chip.active { background: var(--c-prim); border-color: var(--c-prim); color: #fff; box-shadow: 0 4px 14px rgba(0,0,0,.25); }
-
         @keyframes uploadSheetUp { from { transform: translateY(100%); opacity: .6; } to { transform: translateY(0); opacity: 1; } }
         @keyframes uploadSheetIn { from { transform: translateY(12px) scale(.98); opacity: 0; } to { transform: none; opacity: 1; } }
         .upload-modal-overlay:not(.hidden) .upload-sheet { animation: uploadSheetIn .18s ease-out; }
@@ -353,15 +341,10 @@
                         <span><i class="fas fa-clock text-orange-400 mr-1"></i>Süre bitince <b>sunucudan ve Stremio'dan sil</b></span>
                     </label>
                     <div id="upload-schedule-fields" class="hidden space-y-2">
-                        <input id="upload-delete-at" type="hidden">
-                        <div class="upload-days" role="radiogroup" aria-label="Silinme süresi">
-                            <button type="button" class="upload-day-chip" data-days="2" onclick="selectUploadDays(2)" role="radio">2<small>gün</small></button>
-                            <button type="button" class="upload-day-chip" data-days="3" onclick="selectUploadDays(3)" role="radio">3<small>gün</small></button>
-                            <button type="button" class="upload-day-chip" data-days="4" onclick="selectUploadDays(4)" role="radio">4<small>gün</small></button>
-                            <button type="button" class="upload-day-chip" data-days="7" onclick="selectUploadDays(7)" role="radio">7<small>gün</small></button>
-                        </div>
+                        <input id="upload-delete-at" type="datetime-local" onchange="updateDeletePreview()" onclick="try{this.showPicker()}catch(e){}"
+                            class="u-input w-full rounded-xl border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary transition" aria-label="Silinme tarihi ve saati">
                         <p id="upload-delete-preview" class="text-xs text-orange-300"></p>
-                        <p class="text-xs theme-text-secondary">Süre, içerik metadata onayıyla veritabanına kaydedildiği andan itibaren işlemeye başlar.</p>
+                        <p class="text-xs theme-text-secondary">Seçtiğiniz tarih ve saatte dosya sunucudan ve Stremio'dan silinir. Silinmeden 24 saat önce panelde uyarı görünür.</p>
                     </div>
 
                     <label class="flex items-start gap-2.5 text-sm cursor-pointer select-none py-1">
@@ -1272,8 +1255,6 @@ function openUploadModal() {
     document.getElementById('upload-delete-at').value = '';
     document.getElementById('upload-delete-preview').textContent = '';
     document.getElementById('upload-announce').checked = false;
-    _uploadDays = 0;
-    document.querySelectorAll('.upload-day-chip').forEach(c => c.classList.remove('active'));
     const _sheetBody = document.querySelector('#upload-modal .upload-sheet-body');
     if (_sheetBody) _sheetBody.scrollTop = 0;
     document.getElementById('upload-modal').classList.remove('hidden');
@@ -1293,37 +1274,40 @@ function _fmtDateTime(isoOrDate) {
     const d = isoOrDate instanceof Date ? isoOrDate : new Date(isoOrDate);
     return d.toLocaleString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
-// Seçilen silinme süresi (gün): 2 / 3 / 4 / 7
-let _uploadDays = 0;
-const UPLOAD_DAY_OPTIONS = [2, 3, 4, 7];
+// Silinme zamanı: kullanıcı tarih + saat seçer (datetime-local, yerel saat)
+function _defaultUploadDeleteAt() {
+    const d = new Date(Date.now() + 48 * 3600 * 1000);   // varsayılan öneri: 2 gün sonra
+    d.setSeconds(0, 0);
+    return d;
+}
 function toggleUploadSchedule() {
     const on = document.getElementById('upload-schedule-enable').checked;
     const box = document.getElementById('upload-schedule-fields');
+    const inp = document.getElementById('upload-delete-at');
     box.classList.toggle('hidden', !on);
     if (on) {
-        selectUploadDays(UPLOAD_DAY_OPTIONS.includes(_uploadDays) ? _uploadDays : 2);   // varsayılan: 2 gün
+        inp.min = _toLocalInputValue(new Date());
+        if (!inp.value) inp.value = _toLocalInputValue(_defaultUploadDeleteAt());
+        updateDeletePreview();
         // Küçük ekranda seçenekler görünür kalsın
         setTimeout(() => box.scrollIntoView({ block: 'nearest', behavior: 'smooth' }), 50);
     } else {
-        _uploadDays = 0;
+        inp.value = '';
         document.getElementById('upload-delete-preview').textContent = '';
     }
 }
-function selectUploadDays(days) {
-    if (!UPLOAD_DAY_OPTIONS.includes(days)) return;
-    _uploadDays = days;
-    document.querySelectorAll('.upload-day-chip').forEach(c => {
-        const on = Number(c.dataset.days) === days;
-        c.classList.toggle('active', on);
-        c.setAttribute('aria-checked', on ? 'true' : 'false');
-    });
-    updateDeletePreview();
+function _uploadDeleteDate() {
+    const v = document.getElementById('upload-delete-at').value;
+    if (!v) return null;
+    const d = new Date(v);          // datetime-local → yerel saat
+    return isNaN(d) ? null : d;
 }
 function updateDeletePreview() {
     const el = document.getElementById('upload-delete-preview');
-    if (!_uploadDays) { el.textContent = ''; return; }
-    const d = new Date(Date.now() + _uploadDays * 86400 * 1000);
-    el.textContent = `🗑 ${_uploadDays} gün sonra (${_fmtDateTime(d)}) silinecek`;
+    const d = _uploadDeleteDate();
+    if (!d) { el.textContent = ''; return; }
+    if (d.getTime() <= Date.now()) { el.textContent = '⚠ Geçmiş bir zaman seçilemez'; return; }
+    el.textContent = `🗑 ${_fmtDateTime(d)} tarihinde silinecek`;
 }
 
 let _activeSSE = null;
@@ -1366,10 +1350,9 @@ async function startUpload() {
     // Zamanlı silme / duyuru seçenekleri
     const uploadOpts = { delete_at: null, announce: document.getElementById('upload-announce').checked, path: null };
     if (document.getElementById('upload-schedule-enable').checked) {
-        if (!UPLOAD_DAY_OPTIONS.includes(_uploadDays)) { showToast('Silinme süresini seçin (2, 3, 4 veya 7 gün)', 'error'); return; }
-        // Süre, kayıt onaylandığı anda başlar (indirme süresi hesaba katılmaz)
-        uploadOpts.delete_days = _uploadDays;
-        const d = new Date(Date.now() + _uploadDays * 86400 * 1000);
+        const d = _uploadDeleteDate();
+        if (!d) { showToast('Silinme tarihi ve saatini seçin', 'error'); return; }
+        if (d.getTime() < Date.now() + 60 * 1000) { showToast('Silinme zamanı gelecekte olmalı', 'error'); return; }
         uploadOpts.delete_at = d.toISOString();   // UTC; sunucu UTC saklar
         uploadOpts.delete_at_local = _fmtDateTime(d);
     }
@@ -1831,10 +1814,6 @@ function openMetaReview(data) {
     {
         const opts = _activeReviewOptions();
         let iso = (opts && opts.delete_at) || null;
-        if (opts && opts.delete_days) {
-            // Seçilen gün sayısı, onay ekranı açıldığı andan itibaren sayılır
-            iso = new Date(Date.now() + opts.delete_days * 86400 * 1000).toISOString();
-        }
         if (!iso && window._entryMap) {
             const cur = document.getElementById('mr-path').value;
             const ent = Object.values(window._entryMap).find(x => x && x.path === cur);

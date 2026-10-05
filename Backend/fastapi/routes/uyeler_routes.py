@@ -264,6 +264,7 @@ async def admin_usage_discrepancies_api() -> dict:
       - expiring_soon:         Aboneliği 24 saat içinde sona erecek üyeler
       - expired_but_active:    Aboneliği sona ermiş ama hâlâ "active" işaretli üyeler
       - missing_imdb:          imdb_id alanı boş olan diziler (Nuvio kataloğunda görünmezler)
+      - scheduled_delete:      Zamanlı silinmesine 24 saat veya daha az kalan sunucu dosyaları
     """
     try:
         discrepancy_rows = await db.get_daily_usage_discrepancies()
@@ -339,11 +340,19 @@ async def admin_usage_discrepancies_api() -> dict:
             "media_edit_url": f"/media/edit?tmdb_id={r.get('tmdb_id')}&db_index={r.get('db_index')}&media_type=tv",
         } for r in missing_imdb_rows]
 
+        scheduled_delete_alerts = []
+        try:
+            from Backend.helper import scheduled_delete as _sd
+            scheduled_delete_alerts = [{"type": "scheduled_delete", **r}
+                                       for r in await _sd.list_due_within(hours=24)]
+        except Exception:
+            _logger.error("scheduled_delete uyarıları alınamadı", exc_info=True)
+
         total = (
             len(alerts) + len(daily_limit_alerts)
             + len(pending_request_alerts) + len(pending_subscription_alerts)
             + len(expiring_soon_alerts) + len(expired_but_active_alerts)
-            + len(missing_imdb_alerts)
+            + len(missing_imdb_alerts) + len(scheduled_delete_alerts)
         )
 
         return {
@@ -355,6 +364,7 @@ async def admin_usage_discrepancies_api() -> dict:
             "expiring_soon_alerts": expiring_soon_alerts,
             "expired_but_active_alerts": expired_but_active_alerts,
             "missing_imdb_alerts": missing_imdb_alerts,
+            "scheduled_delete_alerts": scheduled_delete_alerts,
             "total": total,
         }
     except Exception as e:

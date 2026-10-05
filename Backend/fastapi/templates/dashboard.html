@@ -1205,6 +1205,30 @@
             </div>`;
     }
 
+    function renderScheduledDeleteAlertRow(alert) {
+        const title = escapeHtmlLocal(alert.title || alert.path || 'Dosya');
+        const path = escapeHtmlLocal(alert.path || '');
+        const deleteAt = formatDateLocal(alert.delete_at);
+        const mins = Math.max(0, Number(alert.minutes_remaining) || 0);
+        const left = mins >= 60 ? `${Math.floor(mins / 60)} sa ${mins % 60} dk` : `${mins} dk`;
+
+        return `
+            <div class="glass-panel rounded-2xl p-4 border border-red-500/20">
+                <div class="flex items-start justify-between gap-3 flex-wrap">
+                    <div class="min-w-0">
+                        <span class="text-[9px] font-bold uppercase tracking-widest text-red-300/80">Yakında Silinecek</span>
+                        <h5 class="font-bold text-sm text-text truncate">${title}</h5>
+                        ${path ? `<p class="text-[10px] text-text-secondary mt-0.5 truncate font-mono">${path}</p>` : ''}
+                        ${deleteAt ? `<p class="text-[10px] text-text-secondary mt-0.5">Silinme: ${deleteAt}</p>` : ''}
+                    </div>
+                    <span class="text-[10px] font-bold px-2 py-1 rounded-lg uppercase whitespace-nowrap text-red-400 bg-red-500/10">
+                        <i class="fa-solid fa-trash mr-1"></i>${left} kaldı
+                    </span>
+                </div>
+                <a href="/admin/sunucu" class="inline-block mt-3 text-[11px] font-semibold text-red-300 hover:underline">Sunucu dosyalarına git →</a>
+            </div>`;
+    }
+
     function renderExpiredButActiveAlertRow(alert) {
         const name = escapeHtmlLocal(alert.name || 'Bilinmeyen üye');
         const tgLink = telegramLinkLocal(alert.username);
@@ -1452,6 +1476,7 @@
             const expiringSoon       = data.expiring_soon_alerts || [];
             const expiredButActive   = data.expired_but_active_alerts || [];
             const missingImdb        = data.missing_imdb_alerts || [];
+            const scheduledDelete    = data.scheduled_delete_alerts || [];
 
             // Not: Dizi/film istekleri (pending_request_alerts) ve Onay Bekleyen
             // Abonelik uyarıları (pending_subscription_alerts) bilinçli olarak
@@ -1460,6 +1485,7 @@
             // gösterilen kategorilerden ayrıca hesaplanıyor.
             const totalCount = usageAlerts.length + dailyLimitAlerts.length
                 + expiringSoon.length + expiredButActive.length + missingImdb.length
+                + scheduledDelete.length
                 + deeplAlerts.length;
 
             if (badge) {
@@ -1476,6 +1502,7 @@
             // edilmiş bir HTML parçası olarak) topla; sayfalama bu liste üzerinden yapılır.
             ALERTS_ITEMS = [
                 ...deeplAlerts.map(renderDeeplAlertRow),
+                ...scheduledDelete.map(renderScheduledDeleteAlertRow),
                 ...expiredButActive.map(renderExpiredButActiveAlertRow),
                 ...dailyLimitAlerts.map(renderDailyLimitAlertRow),
                 ...expiringSoon.map(renderExpiringSoonAlertRow),
