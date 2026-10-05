@@ -46,6 +46,30 @@ def normalize_approver_ids(values) -> List[int]:
     return result
 
 
+#----- Abonelik ve dizi/film isteği taleplerini onaylayacak hesap.
+#----- Seçilen hesap yönetici listesinde (OWNER_ID veya APPROVER_IDS) değilse ya da
+#----- hiç seçilmemişse (0) ana yönetici (OWNER_ID) kullanılır.
+def get_approval_account_id() -> int:
+    owner = int(Telegram.OWNER_ID or 0)
+    try:
+        chosen = int(getattr(Telegram, "APPROVAL_ACCOUNT_ID", 0) or 0)
+    except (TypeError, ValueError):
+        return owner
+    if chosen and (chosen == owner or chosen in (Telegram.APPROVER_IDS or [])):
+        return chosen
+    return owner
+
+
+def can_review_requests(user_id) -> bool:
+    """Bot üzerinden abonelik/istek onay butonlarını kullanabilir mi?
+    Seçili onay hesabı + ana yönetici (eski mesajlardaki butonlar için)."""
+    try:
+        uid = int(user_id)
+    except (TypeError, ValueError):
+        return False
+    return uid == get_approval_account_id() or uid == int(Telegram.OWNER_ID or 0)
+
+
 #----- Yönetici Telegram kullanıcı adı (ör. "kaya89"). Panelde (Ayarlar > Abonelik)
 #----- girilir; abonelik talebi bekleme / red mesajlarında "yönetici" yerine gösterilir.
 #----- Başındaki "@" ve "https://t.me/" öneki atılır; boş bırakılabilir (boşsa
@@ -155,6 +179,8 @@ _DEFAULTS: Dict[str, Any] = {
     "subscription_group_id": 0,
     "subscription_url": "https://t.me/",
     "approver_ids": [],
+    #----- Abonelik/istek onay mesajlarının gideceği hesap. 0 = ana yönetici (OWNER_ID).
+    "approval_account_id": 0,
     #----- Abonelik mesajlarında "yönetici" yerine gösterilen Telegram kullanıcı adı
     #----- (bkz. admin_forwarded_to / admin_contact_ref). Boş = "yönetici".
     "admin_username": "",
@@ -231,6 +257,7 @@ _SETTINGS_TO_TELEGRAM_ATTR: Dict[str, str] = {
     "subscription_group_id": "SUBSCRIPTION_GROUP_ID",
     "subscription_url": "SUBSCRIPTION_URL",
     "approver_ids": "APPROVER_IDS",
+    "approval_account_id": "APPROVAL_ACCOUNT_ID",
     "websitesi": "WEBSITESI",
     "brute_window": "BRUTE_WINDOW",
     "brute_max": "BRUTE_MAX",
@@ -278,6 +305,7 @@ def _seed_from_env() -> Dict[str, Any]:
         "subscription_group_id": Telegram.SUBSCRIPTION_GROUP_ID,
         "subscription_url":     Telegram.SUBSCRIPTION_URL,
         "approver_ids":         list(Telegram.APPROVER_IDS),
+        "approval_account_id":  Telegram.APPROVAL_ACCOUNT_ID,
         "websitesi":            Telegram.WEBSITESI,
         "brute_window":         Telegram.BRUTE_WINDOW,
         "brute_max":            Telegram.BRUTE_MAX,
@@ -448,6 +476,16 @@ class SettingsManager:
 
         #----- Ana yönetici (OWNER_ID) listeden çıkarılamaz — sunucu tarafında zorlanır
         merged["approver_ids"] = normalize_approver_ids(merged.get("approver_ids"))
+
+        #----- Onay hesabı: yönetici listesinde olmalı; aksi halde 0 (= ana yönetici)
+        try:
+            chosen = int(str(merged.get("approval_account_id") or 0).strip() or 0)
+        except (TypeError, ValueError):
+            raise ValueError("Onay hesabı geçerli bir Telegram ID olmalıdır.")
+        #----- (seçili kişi yöneticilerden çıkarıldıysa otomatik olarak ana yöneticiye döner)
+        if chosen == int(Telegram.OWNER_ID or 0) or chosen not in merged["approver_ids"]:
+            chosen = 0
+        merged["approval_account_id"] = chosen
 
         #----- Ek veritabanları değiştiyse önce onları bağla/ayır (başarısızsa kayıt iptal)
         old_extra = old.get("extra_databases") or []

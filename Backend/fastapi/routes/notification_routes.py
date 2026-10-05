@@ -1095,8 +1095,9 @@ async def submit_content_request(request: Request):
         InlineKeyboardButton("❌ Reddet", callback_data=f"req_reject_{request_id}_{user_id}"),
     ]])
 
-    #----- Bota gelen onay mesajı SADECE ana yöneticiye (OWNER_ID) gider.
-    approver_ids = [Telegram.OWNER_ID]
+    #----- Bota gelen onay mesajı SADECE panelden seçilen onay hesabına gider.
+    from Backend.helper.settings_manager import get_approval_account_id as _get_approval_id
+    approver_ids = [_get_approval_id()]
     try:
         from Backend.pyrofork.bot import StreamBot as _StreamBot
     except Exception:
@@ -1407,8 +1408,9 @@ async def _notify_admins_web_action(
         f"{link_str}{admin_str}"
     )
 
-    #----- Panel işlem özeti de yalnızca ana yöneticinin botuna gider.
-    approver_ids = [Telegram.OWNER_ID]
+    #----- Panel işlem özeti de yalnızca seçili onay hesabının botuna gider.
+    from Backend.helper.settings_manager import get_approval_account_id as _get_approval_id
+    approver_ids = [_get_approval_id()]
     for approver_id in approver_ids:
         try:
             await _StreamBot.send_message(

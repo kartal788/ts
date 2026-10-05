@@ -10,6 +10,7 @@ from pyrogram import Client, filters, enums
 from pyrogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
 from Backend.config import Telegram
+from Backend.helper.settings_manager import get_approval_account_id, can_review_requests
 from Backend import db
 from Backend.helper.imdb import get_detail as _imdb_get_detail
 
@@ -280,9 +281,9 @@ async def istek_command(client: Client, message: Message):
         ]
     ])
 
-    #----- Bota gelen onay mesajı SADECE ana yöneticiye (OWNER_ID) gider.
-    #----- Diğer yöneticiler talebi web panelinden (/istekler) onaylar.
-    approver_ids = [Telegram.OWNER_ID]
+    #----- Bota gelen onay mesajı SADECE panelden seçilen onay hesabına gider
+    #----- (seçilmediyse ana yönetici). Diğer yöneticiler web panelinden (/istekler) onaylar.
+    approver_ids = [get_approval_account_id()]
     admin_messages = []
     for approver_id in approver_ids:
         try:
@@ -379,10 +380,10 @@ async def open_yukselt_callback(client: Client, callback_query: CallbackQuery):
 @Client.on_callback_query(filters.regex(r"^req_(approve|reject)_([a-fA-F0-9]{24})_(\d+)$"))
 async def istek_review(client: Client, callback_query: CallbackQuery):
     """Yönetici isteği onaylar veya reddeder."""
-    #----- Bot üzerinden onay/red yalnızca ana yönetici içindir;
+    #----- Bot üzerinden onay/red yalnızca seçili onay hesabı (ve ana yönetici) içindir;
     #----- diğer yöneticiler web panelini kullanır.
-    if callback_query.from_user.id != Telegram.OWNER_ID:
-        return await callback_query.answer("⛔ Bu işlemi yalnızca ana yönetici bottan yapabilir. Web panelini kullanın.", show_alert=True)
+    if not can_review_requests(callback_query.from_user.id):
+        return await callback_query.answer("⛔ Bu işlemi yalnızca onay hesabı bottan yapabilir. Web panelini kullanın.", show_alert=True)
 
     action     = callback_query.matches[0].group(1)   # "approve" | "reject"
     request_id = callback_query.matches[0].group(2)

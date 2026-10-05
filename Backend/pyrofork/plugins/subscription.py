@@ -2,7 +2,7 @@ from pyrogram import Client, filters, enums
 from pyrogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from Backend.config import Telegram
 from Backend import db, __version__
-from Backend.helper.settings_manager import admin_forwarded_to, admin_contact_ref
+from Backend.helper.settings_manager import admin_forwarded_to, admin_contact_ref, get_approval_account_id, can_review_requests
 from datetime import datetime, timedelta
 import pathlib, re as _re
 
@@ -116,9 +116,9 @@ async def plan_selection(client: Client, callback_query: CallbackQuery):
         f"\nLütfen talebi onaylayın veya reddedin."
     )
 
-    #----- Bota gelen onay mesajı SADECE ana yöneticiye (OWNER_ID) gider.
-    #----- Diğer yöneticiler talebi web panelinden (/istekler) onaylar.
-    approver_ids = [Telegram.OWNER_ID]
+    #----- Bota gelen onay mesajı SADECE panelden seçilen onay hesabına gider
+    #----- (seçilmediyse ana yönetici). Diğer yöneticiler web panelinden (/istekler) onaylar.
+    approver_ids = [get_approval_account_id()]
     print(f"DEBUG: Sending admin notification to: {approver_ids}")
     admin_messages = []
     for approver_id in approver_ids:
@@ -148,10 +148,10 @@ async def plan_selection(client: Client, callback_query: CallbackQuery):
 
 @Client.on_callback_query(filters.regex(r"^(approve|reject|ban|unban)_(\d+)$"))
 async def admin_review(client: Client, callback_query: CallbackQuery):
-    #----- Bot üzerinden onay/red/ban yalnızca ana yönetici içindir;
+    #----- Bot üzerinden onay/red/ban yalnızca seçili onay hesabı (ve ana yönetici) içindir;
     #----- diğer yöneticiler web panelini kullanır.
-    if callback_query.from_user.id != Telegram.OWNER_ID:
-        return await callback_query.answer("Bu işlemi yalnızca ana yönetici bottan yapabilir. Web panelini kullanın.", show_alert=True)
+    if not can_review_requests(callback_query.from_user.id):
+        return await callback_query.answer("Bu işlemi yalnızca onay hesabı bottan yapabilir. Web panelini kullanın.", show_alert=True)
 
     action = callback_query.matches[0].group(1)
     target_user_id = int(callback_query.matches[0].group(2))

@@ -301,6 +301,19 @@
                 <button class="add-btn" type="button" onclick="addItem('approver_ids')"><i class="fa-solid fa-plus"></i> Ekle</button>
             </div>
 
+            <div class="mt-4">
+                <label class="s-label">Onay Hesabı (Abonelik ve Dizi/Film İstekleri)</label>
+                <select class="s-input" id="s-approval_account_id" onfocus="refreshApprovalSelect()">
+                    <option value="0">Ana Yönetici (varsayılan)</option>
+                </select>
+                <p class="text-xs text-text opacity-60 mt-1">
+                    <i class="fa-solid fa-circle-info"></i>
+                    Abonelik talepleri ile dizi/film istekleri botta yalnızca burada seçtiğiniz hesaba düşer ve
+                    <strong>Onayla / Reddet</strong> butonlarını o hesap kullanır. Liste, yukarıdaki Yöneticiler'den oluşur;
+                    yeni bir kişi seçmek için önce onu yönetici olarak ekleyin. Kaydedince anında devreye girer.
+                </p>
+            </div>
+
             <hr class="sm-divider">
             <label class="s-label">Üye Olmayanlara Gösterilen /start Mesajı</label>
             <p class="text-xs text-text opacity-60 mb-2">
@@ -874,8 +887,21 @@ function rowHTML(listKey, value, isSecret) {
     const type = isSecret ? 'password' : 'text';
     return `<div class="multi-item">
         <input class="s-input" type="${type}" value="${escapeHtmlAttr(value)}" data-list="${listKey}">
-        <button class="remove-btn" type="button" onclick="this.parentElement.remove()"><i class="fa-solid fa-xmark"></i></button>
+        <button class="remove-btn" type="button" onclick="this.parentElement.remove(); refreshApprovalSelect()"><i class="fa-solid fa-xmark"></i></button>
     </div>`;
+}
+
+//----- Onay hesabı açılır listesi: Ana yönetici + Yöneticiler listesindeki kişiler
+function refreshApprovalSelect(preferred) {
+    const sel = document.getElementById('s-approval_account_id');
+    if (!sel) return;
+    const current = String(preferred !== undefined ? preferred : (sel.value || '0'));
+    const ownerId = String(currentSettings.owner_id ?? '');
+    const ids = collectList('approver_ids').filter(x => x !== ownerId);
+    let html = `<option value="0">Ana Yönetici${ownerId ? ' (' + escapeHtmlAttr(ownerId) + ')' : ''} — varsayılan</option>`;
+    ids.forEach(id => { html += `<option value="${escapeHtmlAttr(id)}">${escapeHtmlAttr(id)}</option>`; });
+    sel.innerHTML = html;
+    sel.value = (current === ownerId || !ids.includes(current)) ? '0' : current;
 }
 
 function renderList(listKey, values, isSecret) {
@@ -905,6 +931,7 @@ function addItem(listKey) {
     const container = document.getElementById('list-' + listKey);
     container.insertAdjacentHTML('beforeend', rowHTML(listKey, value, input.type === 'password'));
     input.value = '';
+    if (listKey === 'approver_ids') refreshApprovalSelect();
 }
 
 function collectList(listKey) {
@@ -1116,6 +1143,7 @@ function renderSettings(s) {
     const ownerInput = document.getElementById('owner-admin-id');
     if (ownerInput) ownerInput.value = ownerIdStr;
     renderList('approver_ids', (s.approver_ids || []).filter(x => String(x) !== ownerIdStr), false);
+    refreshApprovalSelect(String(s.approval_account_id || 0));
     renderList('extra_databases', s.extra_databases, true);
     renderList('multi_tokens', s.multi_tokens, true);
     renderEnvTokens(s.env_multi_tokens);
@@ -1163,6 +1191,7 @@ function buildPayload() {
         subscription_url: document.getElementById('s-subscription_url').value.trim(),
         admin_username: document.getElementById('s-admin_username').value.trim().replace(/^@+/, ''),
         approver_ids: collectList('approver_ids').map(x => parseInt(x, 10)).filter(Number.isFinite),
+        approval_account_id: parseInt(document.getElementById('s-approval_account_id').value, 10) || 0,
         uye_olmayan_mesaji: document.getElementById('s-uye_olmayan_mesaji').value.trim(),
 
         yenileme: document.getElementById('s-yenileme').value.trim(),

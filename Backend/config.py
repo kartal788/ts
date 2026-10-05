@@ -48,6 +48,9 @@ class Telegram:
     SUBSCRIPTION_GROUP_ID = int(getenv("SUBSCRIPTION_GROUP_ID", "0"))
     SUBSCRIPTION_URL = getenv("SUBSCRIPTION_URL", "https://t.me/")
     APPROVER_IDS = [int(x.strip()) for x in (getenv("APPROVER_IDS") or "").split(",") if x.strip().isdigit()]
+    #----- Abonelik ve dizi/film isteği onay mesajlarının gideceği hesap (Telegram ID).
+    #----- 0 / boş = ana yönetici (OWNER_ID). Panelden (Ayarlar > Abonelik) seçilir.
+    APPROVAL_ACCOUNT_ID = int(getenv("APPROVAL_ACCOUNT_ID", "0") or "0")
 
     WEBSITESI = getenv("WEBSITESI", "false").lower() == "true"  # False → bakım modu, abonelere giriş bilgisi gönderilmez
 
