@@ -1168,6 +1168,61 @@ async def _find_existing_record(meta: dict):
     return None, media_type
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Boş gelen çeviri alanlarını (title_tr/de, description_tr/de, overview_tr/de,
+# episode_title_tr/de, episode_overview_tr/de) İngilizce kaynaktan çevirerek doldurur.
+# Dolu alanlara dokunmaz. Doldurulan alan adlarını döner.
+# ──────────────────────────────────────────────────────────────────────────────
+async def _fill_missing_translations(meta: dict) -> list:
+    from Backend.helper.metadata import translate_text_safe, translate_text_safe_de
+
+    def _s(k):
+        return str(meta.get(k) or "").strip()
+
+    en_desc = _s("description") or _s("desc") or _s("overview")
+    # (hedef alan, kaynak metin, "tr" | "de", alan yoksa da eklensin mi)
+    jobs = [
+        ("title_tr",            _s("title"),                 "tr", True),
+        ("title_de",            _s("title"),                 "de", True),
+        ("description_tr",      en_desc,                     "tr", True),
+        ("description_de",      en_desc,                     "de", True),
+        ("overview_tr",         _s("overview") or en_desc,   "tr", False),
+        ("overview_de",         _s("overview") or en_desc,   "de", False),
+        ("episode_title_tr",    _s("episode_title"),         "tr", False),
+        ("episode_title_de",    _s("episode_title"),         "de", False),
+        ("episode_overview_tr", _s("episode_overview"),      "tr", False),
+        ("episode_overview_de", _s("episode_overview"),      "de", False),
+    ]
+
+    todo = []
+    for field, src, lang, always in jobs:
+        if not src:
+            continue
+        if not always and field not in meta:
+            continue
+        if _s(field):
+            continue
+        todo.append((field, src, lang))
+    if not todo:
+        return []
+
+    async def _tr(src, lang):
+        fn = translate_text_safe if lang == "tr" else translate_text_safe_de
+        try:
+            return await asyncio.to_thread(fn, src)
+        except Exception:
+            _logger.warning("Çeviri hatası (%s)", lang, exc_info=True)
+            return ""
+
+    results = await asyncio.gather(*[_tr(src, lang) for _f, src, lang in todo])
+    filled = []
+    for (field, src, _lang), out in zip(todo, results):
+        out = (out or "").strip()
+        meta[field] = out or src      # çeviri alınamazsa orijinal metne düş
+        filled.append(field)
+    return filled
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # POST /api/sunucu/metadata-sorgu  → Sadece sorgula, kaydetme
 # ──────────────────────────────────────────────────────────────────────────────
 async def sunucu_metadata_sorgu(request: Request, _: bool = Depends(require_auth)):
@@ -2583,18 +2638,37 @@ async def sunucu_rclone_listele(request: Request, _: bool = Depends(require_auth
 async def sunucu_rclone_meta_sorgu(request: Request, _: bool = Depends(require_auth)):
     """
     POST /api/sunucu/rclone-meta-sorgu
-    Body: { "remote": "gdrive", "path": "Films/Inception.mkv" }
-    Metadata sorgular, kaydetmez.
+    Body: { "remote": "gdrive", "path": "Films/Inception.mkv",
+            "custom_link": "https://www.imdb.com/title/tt...|https://www.themoviedb.org/movie/123|tt123",  # ops.
+            "custom_filename": "..." }                                                                      # ops.
+    Metadata sorgular, kaydetmez. custom_link verilirse dosya adıyla arama yapmak yerine
+    doğrudan o içerik kullanılır. Boş gelen TR/DE alanları çeviriyle doldurulur.
     """
     try:
         body = await request.json()
     except Exception:
         return JSONResponse({"error": "Geçersiz JSON"}, status_code=400)
 
-    remote = body.get("remote", "").strip()
-    path   = body.get("path", "").strip()
+    remote = (body.get("remote") or "").strip()
+    path   = (body.get("path") or "").strip()
+    custom_link     = (body.get("custom_link") or "").strip()
+    custom_filename = (body.get("custom_filename") or "").strip()
     if not remote or not path:
         return JSONResponse({"error": "remote ve path gerekli"}, status_code=400)
+
+    from Backend.helper.metadata import extract_default_id
+    override_id = None
+    if custom_link:
+        _id, _mt = extract_default_id(custom_link)
+        if not _id:
+            return JSONResponse(
+                {"error": "Link tanınamadı. IMDb (https://www.imdb.com/title/tt1234567/), "
+                          "TMDb (https://www.themoviedb.org/movie/123 veya /tv/123) linki "
+                          "ya da tt1234567 biçiminde bir ID girin."},
+                status_code=400,
+            )
+        # Ham linki ver: metadata() içinde /movie|/tv tipi de korunur
+        override_id = custom_link
 
     loop = asyncio.get_event_loop()
     try:
@@ -2607,19 +2681,52 @@ async def sunucu_rclone_meta_sorgu(request: Request, _: bool = Depends(require_a
     file_name = file_meta.get("name", Path(path).name)
 
     from Backend.helper.pyro import clean_filename
-    clean_name = clean_filename(file_name)
+    clean_name = clean_filename(custom_filename or file_name)
 
     try:
-        from Backend.helper.metadata import extract_default_id
-        override_id, _ = extract_default_id(file_name)
-        meta_info = await fetch_metadata(clean_name, 0, 0, override_id=override_id)
+        if not override_id:
+            override_id, _ = extract_default_id(file_name)
+        meta_info = await fetch_metadata(
+            clean_name, 0, 0,
+            override_id=override_id,
+            ignore_default_id=bool(custom_link),   # link verildiyse global /default modu karışmasın
+        )
     except Exception as e:
         _logger.error("Metadata hatası", exc_info=True)
 
         return JSONResponse({"error": "Sunucu hatası"}, status_code=500)
 
     if meta_info is None:
+        if custom_link:
+            return JSONResponse(
+                {"error": f"Bu link için metadata bulunamadı ({custom_link}). "
+                          "Dizi linki verdiyseniz dosya adında SxxExx bilgisi olmalı; "
+                          "film linki verdiyseniz dosya adı bölüm bilgisi içermemeli.",
+                 "file_name": file_name},
+                status_code=404,
+            )
         return JSONResponse({"error": "Metadata bulunamadı", "file_name": file_name}, status_code=404)
+
+    # TR/DE başlık, açıklama, overview alanları boşsa çeviriyle doldur
+    translated_fields = []
+    try:
+        translated_fields = await _fill_missing_translations(meta_info)
+    except Exception:
+        _logger.warning("Boş alan çevirisi başarısız", exc_info=True)
+
+    # Veritabanında kayıt varsa onay sırasında o kayda eklenir, yoksa yeni kayıt açılır
+    existing_info = None
+    try:
+        existing_doc, _mt_found = await _find_existing_record(meta_info)
+        if existing_doc:
+            existing_info = {
+                "title": existing_doc.get("title_tr") or existing_doc.get("title"),
+                "tmdb_id": existing_doc.get("tmdb_id"),
+                "imdb_id": existing_doc.get("imdb_id"),
+                "media_type": _mt_found,
+            }
+    except Exception:
+        _logger.warning("Mevcut kayıt kontrolü başarısız", exc_info=True)
 
     return JSONResponse({
         "meta":      meta_info,
@@ -2627,6 +2734,8 @@ async def sunucu_rclone_meta_sorgu(request: Request, _: bool = Depends(require_a
         "size":      file_meta.get("size", 0),
         "remote":    remote,
         "path":      path,
+        "existing_record":   existing_info,
+        "translated_fields": translated_fields,
     })
 
 
@@ -2706,6 +2815,12 @@ async def sunucu_rclone_ekle_onay(request: Request, _: bool = Depends(require_au
         meta_info["tmdb_id"] = int(meta_info.get("tmdb_id") or 0)
     except (TypeError, ValueError):
         meta_info["tmdb_id"] = 0
+
+    # Boş kalan TR/DE başlık / açıklama / overview alanlarını çeviriyle doldur
+    try:
+        await _fill_missing_translations(meta_info)
+    except Exception:
+        _logger.warning("Boş alan çevirisi başarısız", exc_info=True)
 
     # Ortak zorunlu alanlar için varsayılanlar
     meta_info.setdefault("imdb_id", "")

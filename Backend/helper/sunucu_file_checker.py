@@ -30,7 +30,7 @@ from urllib.parse import urlparse, parse_qs
 
 logger = logging.getLogger("sunucu_file_checker")
 
-CHECK_INTERVAL = 120          # saniye: periyodik tarama
+CHECK_INTERVAL = 6 * 3600     # saniye: periyodik tarama (6 saatte bir)
 STARTUP_DELAY = 20            # saniye: açılıştan sonra ilk tarama gecikmesi
 SOON_DELAY = 5                # saniye: "yakında tara" isteği debounce süresi
 _CACHE_MAX = 50000

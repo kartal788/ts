@@ -245,12 +245,32 @@
                 <button onclick="rejectAndDeleteFile()" class="flex-1 px-4 py-3 rounded-xl border border-red-500/40 text-red-400 hover:bg-red-500/10 text-sm transition font-medium">
                     <i class="fas fa-trash-alt mr-2"></i>Reddet &amp; Dosyayı Sil
                 </button>
-                <button onclick="reQueryMetadata()" class="flex-1 px-4 py-3 rounded-xl border border-blue-500/40 text-blue-400 hover:bg-blue-500/10 text-sm transition font-medium">
+                <button id="mr-requery-btn" onclick="reQueryMetadata()" class="flex-1 px-4 py-3 rounded-xl border border-blue-500/40 text-blue-400 hover:bg-blue-500/10 text-sm transition font-medium">
                     <i class="fas fa-redo mr-2"></i>Yeniden Sorgula
                 </button>
                 <button id="mr-save-btn" onclick="confirmAndSaveMetadata()"
                     class="flex-1 sm:flex-[2] flex items-center justify-center gap-2 px-4 py-3 bg-green-600 text-white rounded-xl hover:opacity-90 transition font-semibold text-sm shadow-lg">
                     <i class="fas fa-database"></i> Onayla &amp; Veritabanına Kaydet
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Yeniden Sorgula: IMDb / TMDb linki isteme penceresi -->
+    <div id="rq-link-modal" class="fixed inset-0 z-[60] hidden flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+        <div class="theme-card rounded-2xl border border-white/10 shadow-2xl w-full max-w-lg p-5">
+            <h3 class="text-base font-bold mb-1 flex items-center gap-2">
+                <i class="fas fa-link text-blue-400"></i> IMDb / TMDb Linki
+            </h3>
+            <p class="text-xs theme-text-secondary mb-3">Doğru film/dizinin linkini girin; metadata bu link ile sorgulanır. Veritabanında varsa mevcut kayda eklenir, yoksa yeni kayıt açılır.</p>
+            <input id="rq-link-input" type="text" autocomplete="off"
+                placeholder="https://www.imdb.com/title/tt1234567/  ·  https://www.themoviedb.org/movie/123  ·  tt1234567"
+                class="w-full rounded-xl border px-3 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary transition">
+            <p id="rq-link-error" class="hidden text-xs text-red-400 mt-2"></p>
+            <div class="flex gap-2 mt-4">
+                <button type="button" onclick="_rqLinkClose(null)" class="flex-1 px-4 py-2.5 rounded-xl border border-white/20 hover:bg-white/5 text-sm transition">İptal</button>
+                <button type="button" onclick="_rqLinkSubmit()" class="flex-[2] px-4 py-2.5 rounded-xl bg-blue-600 text-white hover:opacity-90 text-sm font-semibold transition flex items-center justify-center gap-2">
+                    <i class="fas fa-search"></i> Bu Link ile Sorgula
                 </button>
             </div>
         </div>
@@ -1955,6 +1975,10 @@ function clearReviewDeleteAt() {
 }
 
 async function reQueryMetadata() {
+    // Rclone akışı: sunucu dosyası olmadığı için ayrı uç nokta + link sorulur
+    if (document.getElementById('mr-path').value === '__rclone__') {
+        return reQueryRcloneMetadata();
+    }
     const path = document.getElementById('mr-path').value;
     const filename = document.getElementById('mr-meta-filename').value.trim();
     const link = (document.getElementById('mr-custom-link')?.value || '').trim();
@@ -2858,6 +2882,7 @@ async function _rcloneSelectFile(remote, path) {
         if (data.error) { _rcloneShowError(data.error); return; }
 
         _rcloneMetaReviewData = { remote, path, meta: data.meta, file_name: data.file_name, size: data.size };
+        _rcNotifyTranslated(data);
         _showRcloneMetaReview(data);
     } catch (e) {
         _rcloneSetStatus('', false);
@@ -2884,6 +2909,7 @@ function _showRcloneMetaReview(data) {
         backdrop:    meta.backdrop    || '',
         genres:      meta.genres      || [],
         metadata:    meta,
+        existing_record: data.existing_record ?? null,   // DB'de varsa "bu kayda eklenecek" notu
     });
 
     _rcloneEnsureHiddenInputs();
@@ -2918,6 +2944,99 @@ function _showRcloneNoMetaPrompt(fileName) {
     const saveBtn = document.getElementById('mr-save-btn');
     saveBtn.onclick = _confirmAndSaveRcloneMeta;
     saveBtn.innerHTML = `<i class="fas fa-cloud"></i> Rclone İçeriğini Kataloğa Ekle`;
+}
+
+// ── Rclone: link ile yeniden sorgula ─────────────────────────────────────────
+let _rqLinkResolve = null;
+
+function _askRequeryLink(prefill) {
+    return new Promise(resolve => {
+        _rqLinkResolve = resolve;
+        const inp = document.getElementById('rq-link-input');
+        inp.value = prefill || '';
+        inp.onkeydown = (e) => {
+            if (e.key === 'Enter')  { e.preventDefault(); _rqLinkSubmit(); }
+            if (e.key === 'Escape') { e.preventDefault(); _rqLinkClose(null); }
+        };
+        document.getElementById('rq-link-error').classList.add('hidden');
+        document.getElementById('rq-link-modal').classList.remove('hidden');
+        setTimeout(() => inp.focus(), 50);
+    });
+}
+function _rqLinkClose(value) {
+    document.getElementById('rq-link-modal').classList.add('hidden');
+    const r = _rqLinkResolve; _rqLinkResolve = null;
+    if (r) r(value);
+}
+function _rqLinkSubmit() {
+    const v = (document.getElementById('rq-link-input').value || '').trim();
+    if (!v) {
+        const e = document.getElementById('rq-link-error');
+        e.textContent = 'Lütfen bir IMDb veya TMDb linki girin.';
+        e.classList.remove('hidden');
+        return;
+    }
+    _rqLinkClose(v);
+}
+
+function _rcNotifyTranslated(data) {
+    const f = (data && data.translated_fields) || [];
+    if (f.length) showToast('Boş alanlar çeviriyle dolduruldu: ' + f.join(', '), 'info');
+}
+
+async function reQueryRcloneMetadata() {
+    const rd = _rcloneMetaReviewData || {
+        remote: document.getElementById('mr-rclone-remote')?.value || '',
+        path:   document.getElementById('mr-rclone-path')?.value   || '',
+    };
+    const errBox = document.getElementById('mr-error');
+    const showErr = (m) => {
+        document.getElementById('mr-error-msg').textContent = m;
+        errBox.style.background = ''; errBox.style.borderColor = ''; errBox.style.color = '';
+        errBox.classList.remove('hidden');
+    };
+    errBox.classList.add('hidden');
+    document.getElementById('mr-success').classList.add('hidden');
+
+    if (!rd.remote || !rd.path) { showErr('Rclone bilgisi kayboldu. Lütfen dosyayı yeniden seçin.'); return; }
+
+    // Kullanıcıdan IMDb / TMDb linkini iste
+    const prefill = (document.getElementById('mr-custom-link')?.value || '').trim();
+    const link = await _askRequeryLink(prefill);
+    if (!link) return;   // iptal
+
+    const customName = (document.getElementById('mr-meta-filename')?.value || '').trim();
+    const btn = document.getElementById('mr-requery-btn');
+    const btnHtml = btn ? btn.innerHTML : '';
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Sorgulanıyor...'; }
+
+    try {
+        const res = await fetch('/api/sunucu/rclone-meta-sorgu', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                remote: rd.remote, path: rd.path,
+                custom_link: link, custom_filename: customName || null,
+            })
+        });
+        const data = await res.json();
+        if (data.error) { showErr(data.error); return; }
+
+        _rcloneMetaReviewData = {
+            remote: rd.remote, path: rd.path,
+            meta: data.meta, file_name: data.file_name, size: data.size,
+        };
+        _showRcloneMetaReview(data);                    // formu yeni sonuçla doldurur
+        document.getElementById('mr-custom-link').value = link;
+        if (customName) document.getElementById('mr-meta-filename').value = customName;
+        showToast('Link ile yeniden sorgulandı', 'success');
+        _rcNotifyTranslated(data);
+    } catch (e) {
+        showErr('Sunucu hatası: ' + e.message);
+    } finally {
+        const b = document.getElementById('mr-requery-btn');
+        if (b) { b.disabled = false; b.innerHTML = btnHtml; }
+    }
 }
 
 function _rcloneEnsureHiddenInputs() {
