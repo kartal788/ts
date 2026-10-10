@@ -13,6 +13,7 @@ from Backend.fastapi.routes.stream_routes import router as stream_router, decay_
 from Backend.helper.db_scheduler import start_scheduler, stop_scheduler
 from Backend.fastapi.routes.yayin_routes import start_scheduler as start_yayin_scheduler, stop_scheduler as stop_yayin_scheduler
 from Backend.fastapi.routes.stremio_routes import router as stremio_router, admin_catalog_router
+from Backend.fastapi.routes.koleksiyon_routes import admin_router as koleksiyon_admin_router, public_router as koleksiyon_public_router
 from Backend.fastapi.routes.subtitle_routes import router as subtitle_router
 from Backend.fastapi.routes.webdav_routes import router as webdav_router
 from Backend.fastapi.routes.yayin_routes import router as yayin_router
@@ -21,7 +22,7 @@ from Backend.fastapi.routes.template_routes import (
     media_management_page, edit_media_page,
     admin_dashboard_page, admin_subscriptions_page, admin_access_page, canli_page,
     link_ekle_page, istatistik_page, sunucu_page, settings_page,
-    istekler_page, kataloglar_page, araclar_page, webdav_page
+    istekler_page, kataloglar_page, araclar_page, webdav_page, koleksiyonlar_page
 )
 from Backend.fastapi.routes.arac_routes import (
     ayni_status_api, ayni_start_api,
@@ -514,8 +515,10 @@ async def _shutdown():
 
 # --- Include existing API routers ---
 app.include_router(stream_router)
+app.include_router(koleksiyon_public_router)
 app.include_router(stremio_router)
 app.include_router(admin_catalog_router)
+app.include_router(koleksiyon_admin_router)
 app.include_router(yayin_router)
 app.include_router(subtitle_router)
 app.include_router(webdav_router)
@@ -1018,6 +1021,10 @@ async def admin_dashboard(request: Request, _: bool = Depends(require_auth)):
 @app.get("/admin/kataloglar", response_class=HTMLResponse)
 async def admin_kataloglar(request: Request, _: bool = Depends(require_auth)):
     return await kataloglar_page(request, _)
+
+@app.get("/admin/koleksiyonlar", response_class=HTMLResponse)
+async def admin_koleksiyonlar(request: Request, _: bool = Depends(require_auth)):
+    return await koleksiyonlar_page(request, _)
 
 @app.get("/admin/araclar", response_class=HTMLResponse)
 async def admin_araclar(request: Request, _: bool = Depends(require_auth)):

@@ -83,7 +83,7 @@ async def send_start_message(client: Client, message: Message):
                 f'🎉 <b>{Telegram.ISIM} Medya Sunucusuna Hoş Geldiniz</b>\n\n'
                 'Kişisel Nuvio eklenti bağlantınız aşağıdadır:\n\n'
                 '🎬 <b>Stremio Eklentisi:</b>\n'
-                f'<code>{addon_url}</code>\n\n'
+                f'<a href="{addon_url}">{addon_url}</a>\n\n'
                 'Dizi ve filmleri izlemek için yukarıdaki linki kopyalayıp Nuvio eklentilerine yapıştırın.',
                 quote=True,
                 parse_mode=enums.ParseMode.HTML
@@ -231,11 +231,11 @@ async def send_start_message(client: Client, message: Message):
                 f'📅 <b>Son kullanma tarihi:</b> {expiry_str}\n\n'
                 '🔗 <b>Eklenti linkiniz:</b>\n\n'
                 '🇹🇷 <b>Türkçe:</b>\n'
-                f'<code>{tr_url}</code>\n\n'
+                f'<a href="{tr_url}">{tr_url}</a>\n\n'
                 '🇩🇪 <b>Deutsch:</b>\n'
-                f'<code>{de_url}</code>\n\n'
+                f'<a href="{de_url}">{de_url}</a>\n\n'
                 '🇬🇧 <b>English:</b>\n'
-                f'<code>{en_url}</code>\n\n'
+                f'<a href="{en_url}">{en_url}</a>\n\n'
                 'Dizi ve filmleri izlemek için yukarıdaki linki kopyalayıp Nuvio eklentilerine yapıştırın.'
                 f'{otp_text}',
                 quote=True,

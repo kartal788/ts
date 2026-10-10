@@ -15,6 +15,7 @@ RUN apt-get update && \
         locales \
         unzip \
         mediainfo \
+        fonts-dejavu-core \
         ffmpeg && \
     locale-gen en_US.UTF-8 && \
     # rclone kur

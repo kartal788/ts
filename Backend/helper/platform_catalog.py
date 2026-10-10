@@ -102,6 +102,7 @@ def _doc_to_meta(doc: dict) -> dict:
         "telegram":       doc.get("telegram", []),
         "seasons":        doc.get("seasons", []),
         "language":       doc.get("language", ""),
+        "updated_on":     doc.get("updated_on"),
     }
 
 
@@ -221,6 +222,7 @@ class PlatformCatalog:
             "description": 1, "description_tr": 1, "description_de": 1,
             "rating": 1, "release_year": 1,
             "cast": 1, "runtime": 1, "media_type": 1,
+            "updated_on": 1,
             "seasons.episodes.telegram.name": 1,
             "seasons.episodes.telegram.is_archive": 1,
         }
@@ -257,6 +259,7 @@ class PlatformCatalog:
                     "rating": 1, "release_year": 1,
                     "cast": 1, "runtime": 1, "media_type": 1,
                     "collection_id": 1,
+                    "updated_on": 1,
                     "telegram": 1,
                     "language": 1,
                 }

@@ -1225,6 +1225,13 @@ async def get_manifest(token: str, lang: str = "en", token_data: dict = Depends(
                     "extraSupported": ["skip"],
                 })
 
+            # --- Koleksiyonlar: aktif koleksiyonların klasör katalogları (Nuvio klasörleri) ---
+            try:
+                from Backend.fastapi.routes.koleksiyon_routes import manifest_catalogs as _kol_manifest
+                all_catalogs.extend(await _kol_manifest(lang))
+            except Exception as _kol_err:
+                _logger.warning(f"[koleksiyonlar] manifest eklenemedi: {_kol_err}")
+
             # --- Canlı Yayın: varsayılan kataloğun yeniden adlandırılmış adı ---
             _live_default_name = await _db_cat.get_live_default_catalog_name()
             if _live_default_name:
@@ -2396,6 +2403,18 @@ async def get_catalog(token: str, media_type: str, id: str, extra: Optional[str]
                 return {"metas": metas}
 
             # ── Admin: Özel (manuel) katalog ────────────────────────────
+            elif id.startswith("kol_"):
+                from Backend.fastapi.routes.koleksiyon_routes import serve_catalog_page as _kol_page
+                kol_docs = await _kol_page(id, lang, stremio_skip, PAGE_SIZE)
+                metas = []
+                for doc in kol_docs:
+                    if not _has_video_stream(doc):
+                        continue
+                    if not _apply_member_restrictions([doc], member_restrictions, user_id=token_data.get("user_id")):
+                        continue
+                    metas.append(await convert_to_stremio_meta(doc, lang))
+                return {"metas": metas}
+
             elif id.startswith("custom_"):
                 from Backend import db as _db_custom
 

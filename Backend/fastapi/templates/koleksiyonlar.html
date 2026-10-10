@@ -1,0 +1,939 @@
+{% extends "base.html" %}
+
+{% block title %}Koleksiyonlar - Telegram Stremio{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 text-text">
+
+    <!-- Başlık + araç çubuğu -->
+    <div class="mb-8 flex flex-col lg:flex-row lg:items-end justify-between gap-4">
+        <div class="min-w-0">
+            <h1 class="text-3xl font-bold text-text">Koleksiyonlar</h1>
+        </div>
+        <div class="flex flex-wrap gap-2 shrink-0">
+            <button data-act="open-presets" class="bg-primary hover:opacity-90 text-white px-4 py-2 rounded-md text-sm font-medium shadow-sm flex items-center gap-2">
+                <i class="fas fa-wand-magic-sparkles"></i> Hazır Koleksiyonlar
+            </button>
+            <button data-act="open-actors" class="px-4 py-2 rounded-md text-sm font-medium border theme-card hover:bg-white/5 flex items-center gap-2">
+                <i class="fas fa-user-group"></i> Oyuncu Koleksiyonu
+            </button>
+            <button data-act="open-directors" class="px-4 py-2 rounded-md text-sm font-medium border theme-card hover:bg-white/5 flex items-center gap-2">
+                <i class="fas fa-clapperboard"></i> Yönetmen Koleksiyonu
+            </button>
+            <button data-act="new-collection" class="px-4 py-2 rounded-md text-sm font-medium border theme-card hover:bg-white/5 flex items-center gap-2">
+                <i class="fas fa-plus"></i> Yeni Koleksiyon
+            </button>
+            <button data-act="open-export" class="px-4 py-2 rounded-md text-sm font-medium border theme-card hover:bg-white/5 flex items-center gap-2">
+                <i class="fas fa-file-export"></i> Nuvio'ya Aktar
+            </button>
+        </div>
+    </div>
+
+    <div id="collections-list" class="space-y-6">
+        <div class="theme-card border rounded-xl p-8 text-center theme-text-secondary text-sm">
+            <i class="fas fa-spinner fa-spin mr-2"></i> Yükleniyor...
+        </div>
+    </div>
+</div>
+
+<!-- ── Koleksiyon Modal ────────────────────────────────────────────────── -->
+<div id="collection-modal" class="hidden fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60">
+    <div class="theme-card border rounded-2xl w-full max-w-md p-6 shadow-xl">
+        <div class="flex items-center justify-between mb-4">
+            <h3 id="collection-modal-title" class="text-lg font-semibold text-text">Yeni Koleksiyon</h3>
+            <button data-close="collection-modal" class="theme-text-secondary hover:text-text"><i class="fas fa-times"></i></button>
+        </div>
+        <input type="hidden" id="col-id">
+        <div class="mb-4">
+            <label class="block text-xs font-bold uppercase tracking-wide theme-text-secondary mb-1.5">Koleksiyon Adı</label>
+            <input type="text" id="col-name" maxlength="80" placeholder="Örn: Yılbaşı Filmleri"
+                class="w-full px-3 py-2 rounded-md border theme-card text-sm focus:outline-none focus:ring-2 focus:ring-primary">
+        </div>
+        <div class="mb-4">
+            <label class="block text-xs font-bold uppercase tracking-wide theme-text-secondary mb-1.5">Açıklama <span class="normal-case font-normal">(opsiyonel)</span></label>
+            <input type="text" id="col-desc" maxlength="300"
+                class="w-full px-3 py-2 rounded-md border theme-card text-sm focus:outline-none focus:ring-2 focus:ring-primary">
+        </div>
+        <div class="mb-4">
+            <label class="block text-xs font-bold uppercase tracking-wide theme-text-secondary mb-1.5">Arka Plan Görseli <span class="normal-case font-normal">(opsiyonel, URL)</span></label>
+            <input type="text" id="col-backdrop" placeholder="https://..."
+                class="w-full px-3 py-2 rounded-md border theme-card text-sm focus:outline-none focus:ring-2 focus:ring-primary">
+        </div>
+        <label class="flex items-start gap-2 mb-4 text-sm cursor-pointer">
+            <input type="checkbox" id="col-hide-home" class="mt-1">
+            <span>Ana ekranda ayrı satır olarak gösterme
+                <span class="block text-xs theme-text-secondary">Klasör katalogları (örn. "Netflix · Popüler Filmler") ana ekrana ayrı satır olarak eklenmez; yalnızca koleksiyon klasörünün içinde görünür.</span>
+            </span>
+        </label>
+        <label class="flex items-start gap-2 mb-4 text-sm cursor-pointer">
+            <input type="checkbox" id="col-pin" class="mt-1">
+            <span>Nuvio'da en üste sabitle</span>
+        </label>
+        <label class="flex items-start gap-2 mb-6 text-sm cursor-pointer">
+            <input type="checkbox" id="col-manifest" class="mt-1" checked>
+            <span>Eklenti kataloglarına dahil et
+                <span class="block text-xs theme-text-secondary">Nuvio klasörlerinin içerik çekebilmesi için gereklidir. Kapatırsanız bu koleksiyonun klasörleri çalışmaz.</span>
+            </span>
+        </label>
+        <div class="flex justify-end gap-2">
+            <button data-close="collection-modal" class="px-4 py-2 rounded-md text-sm font-medium border theme-card hover:bg-white/5">Vazgeç</button>
+            <button data-act="save-collection" class="px-4 py-2 rounded-md text-sm font-medium bg-primary text-white hover:opacity-90">Kaydet</button>
+        </div>
+    </div>
+</div>
+
+<!-- ── Klasör Modal ────────────────────────────────────────────────────── -->
+<div id="folder-modal" class="hidden fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60">
+    <div class="theme-card border rounded-2xl w-full max-w-lg p-6 shadow-xl max-h-[90vh] overflow-y-auto">
+        <div class="flex items-center justify-between mb-4">
+            <h3 id="folder-modal-title" class="text-lg font-semibold text-text">Yeni Klasör</h3>
+            <button data-close="folder-modal" class="theme-text-secondary hover:text-text"><i class="fas fa-times"></i></button>
+        </div>
+        <input type="hidden" id="f-cid"><input type="hidden" id="f-fid"><input type="hidden" id="f-ruletype-locked">
+
+        <div class="grid grid-cols-4 gap-3 mb-4">
+            <div class="col-span-3">
+                <label class="block text-xs font-bold uppercase tracking-wide theme-text-secondary mb-1.5">Klasör Adı</label>
+                <input type="text" id="f-title" maxlength="80" placeholder="Örn: Yeni Eklenenler"
+                    class="w-full px-3 py-2 rounded-md border theme-card text-sm focus:outline-none focus:ring-2 focus:ring-primary">
+            </div>
+            <div>
+                <label class="block text-xs font-bold uppercase tracking-wide theme-text-secondary mb-1.5">Emoji</label>
+                <input type="text" id="f-emoji" maxlength="4" placeholder="🎬"
+                    class="w-full px-3 py-2 rounded-md border theme-card text-sm text-center focus:outline-none focus:ring-2 focus:ring-primary">
+            </div>
+        </div>
+
+        <div class="mb-4 p-3 rounded-lg border border-white/10">
+            <label class="block text-xs font-bold uppercase tracking-wide theme-text-secondary mb-1.5">İçerik Kaynağı</label>
+            <select id="f-rule" class="w-full px-3 py-2 rounded-md border theme-card text-sm focus:outline-none focus:ring-2 focus:ring-primary mb-3">
+                <option value="platform">Platform (Netflix, Disney+, ...)</option>
+                <option value="actor">Oyuncu (filmleri ve dizileri)</option>
+                <option value="manual">Elle seçilen içerikler</option>
+            </select>
+
+            <div id="f-rule-platform" class="grid grid-cols-2 gap-3">
+                <select id="f-platform" class="px-3 py-2 rounded-md border theme-card text-sm"></select>
+                <select id="f-platform-sort" class="px-3 py-2 rounded-md border theme-card text-sm">
+                    <option value="new">Yeni eklenenler</option>
+                    <option value="popular">Popüler (puana göre)</option>
+                </select>
+            </div>
+            <div id="f-rule-actor" class="hidden relative">
+                <input type="text" id="f-actor" placeholder="Oyuncu adı yazın (örn: Tom Cruise)" autocomplete="off"
+                    class="w-full px-3 py-2 rounded-md border theme-card text-sm focus:outline-none focus:ring-2 focus:ring-primary">
+                <div id="f-actor-suggest" class="hidden absolute left-0 right-0 top-full mt-1 z-10 theme-card border rounded-lg max-h-48 overflow-y-auto divide-y divide-white/10 shadow-xl"></div>
+                <p class="text-xs theme-text-secondary mt-1.5">Adlar veritabanındaki oyuncu (cast) kayıtlarından aranır.</p>
+            </div>
+            <p id="f-rule-manual" class="hidden text-xs theme-text-secondary">Klasörü kaydettikten sonra "İçerik" düğmesiyle veritabanından film/dizi ekleyebilirsiniz.</p>
+            <p id="f-rule-locked" class="hidden text-xs theme-text-secondary">Bu klasör hazır olarak üretildi (alt bölümleri var); kaynağı değiştirilemez. Ad, görsel ve GIF'i değiştirebilirsiniz.</p>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3 mb-4">
+            <div>
+                <label class="block text-xs font-bold uppercase tracking-wide theme-text-secondary mb-1.5">İçerik Türü</label>
+                <select id="f-media" class="w-full px-3 py-2 rounded-md border theme-card text-sm">
+                    <option value="all">Film + Dizi</option>
+                    <option value="movie">Sadece Film</option>
+                    <option value="tv">Sadece Dizi</option>
+                </select>
+            </div>
+            <div>
+                <label class="block text-xs font-bold uppercase tracking-wide theme-text-secondary mb-1.5">Kutucuk Şekli</label>
+                <select id="f-shape" class="w-full px-3 py-2 rounded-md border theme-card text-sm">
+                    <option value="LANDSCAPE">Yatay (16:9)</option>
+                    <option value="SQUARE">Kare</option>
+                    <option value="POSTER">Poster (dikey)</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="mb-3">
+            <label class="block text-xs font-bold uppercase tracking-wide theme-text-secondary mb-1.5">GIF Adresi <span class="normal-case font-normal">(opsiyonel)</span></label>
+            <input type="text" id="f-gif" placeholder="https://.../animasyon.gif"
+                class="w-full px-3 py-2 rounded-md border theme-card text-sm focus:outline-none focus:ring-2 focus:ring-primary">
+            <p class="text-xs theme-text-secondary mt-1">Boş bırakırsanız klasör adıyla otomatik animasyonlu bir GIF üretilir.</p>
+        </div>
+        <div class="mb-6">
+            <label class="block text-xs font-bold uppercase tracking-wide theme-text-secondary mb-1.5">Kapak Görseli <span class="normal-case font-normal">(opsiyonel)</span></label>
+            <div class="flex gap-2">
+                <input type="text" id="f-cover" placeholder="https://.../kapak.jpg"
+                    class="flex-1 px-3 py-2 rounded-md border theme-card text-sm focus:outline-none focus:ring-2 focus:ring-primary">
+                <button type="button" id="f-cover-tmdb" data-act="cover-tmdb" class="hidden px-3 py-2 rounded-md text-xs font-medium border theme-card hover:bg-white/5 shrink-0"><i class="fas fa-image mr-1"></i> TMDB'den al</button>
+            </div>
+            <p class="text-xs theme-text-secondary mt-1">Oyuncu ve yönetmen klasörlerinde "TMDB'den al" kişinin fotoğrafını getirir.</p>
+        </div>
+
+        <div class="flex justify-end gap-2">
+            <button data-close="folder-modal" class="px-4 py-2 rounded-md text-sm font-medium border theme-card hover:bg-white/5">Vazgeç</button>
+            <button data-act="save-folder" class="px-4 py-2 rounded-md text-sm font-medium bg-primary text-white hover:opacity-90">Kaydet</button>
+        </div>
+    </div>
+</div>
+
+<!-- ── İçerik Modal ────────────────────────────────────────────────────── -->
+<div id="items-modal" class="hidden fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60">
+    <div class="theme-card border rounded-2xl w-full max-w-2xl p-6 shadow-xl max-h-[85vh] flex flex-col">
+        <div class="flex items-center justify-between mb-1 shrink-0">
+            <h3 id="items-modal-title" class="text-lg font-semibold text-text">Klasör İçeriği</h3>
+            <button data-close="items-modal" class="theme-text-secondary hover:text-text"><i class="fas fa-times"></i></button>
+        </div>
+        <p id="items-modal-summary" class="text-xs theme-text-secondary mb-4 shrink-0"></p>
+
+        <div id="items-tabs" class="hidden shrink-0 flex flex-wrap gap-2 mb-3"></div>
+        <div id="items-add-box" class="hidden shrink-0">
+            <div class="flex gap-2 mb-3">
+                <input type="text" id="items-search" placeholder="Veritabanında film/dizi ara..."
+                    class="flex-1 px-3 py-2 rounded-md border theme-card text-sm focus:outline-none focus:ring-2 focus:ring-primary">
+                <button data-act="items-search" class="px-4 py-2 rounded-md text-sm font-medium bg-primary text-white hover:opacity-90 shrink-0"><i class="fas fa-search"></i></button>
+            </div>
+            <div id="items-search-results" class="hidden mb-4 max-h-44 overflow-y-auto border rounded-lg divide-y divide-white/10"></div>
+        </div>
+
+        <div id="items-list" class="flex-1 overflow-y-auto space-y-2 pr-1"></div>
+    </div>
+</div>
+
+<!-- ── Hazır Koleksiyonlar Modal ───────────────────────────────────────── -->
+<div id="presets-modal" class="hidden fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60">
+    <div class="theme-card border rounded-2xl w-full max-w-lg p-6 shadow-xl max-h-[90vh] overflow-y-auto">
+        <div class="flex items-center justify-between mb-4">
+            <h3 class="text-lg font-semibold text-text">Hazır Koleksiyonlar</h3>
+            <button data-close="presets-modal" class="theme-text-secondary hover:text-text"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="space-y-3 mb-4 text-sm">
+            <label class="flex items-start gap-2 p-3 rounded-lg border border-white/10 cursor-pointer">
+                <input type="checkbox" id="preset-platform" class="mt-1" checked>
+                <span><b>Dijital Platformlar</b>
+                    <span class="block text-xs theme-text-secondary">Tek koleksiyon; içinde Netflix, Disney+, Amazon, HBO Max ... klasörleri (hareketli GIF + TMDB platform logosu). Her klasörde: Yeni Eklenen Diziler/Filmler, Popüler Diziler/Filmler.</span></span>
+            </label>
+            <label class="flex items-start gap-2 p-3 rounded-lg border border-white/10 cursor-pointer">
+                <input type="checkbox" id="preset-countries" class="mt-1" checked>
+                <span><b>Ülkeler</b>
+                    <span class="block text-xs theme-text-secondary">En başta Türkiye (Yerli Filmler / Yerli Diziler); ardından Amerika, İngiltere, Fransa, Almanya, Japonya ... klasörleri ("Fransız Filmleri", "Fransız Dizileri" gibi) ve dalgalanan bayrak GIF'i. İçerik filmin orijinal diline, İngilizce ülkelerde TMDB menşe ülkesine göre belirlenir.</span></span>
+            </label>
+            <label class="flex items-start gap-2 p-3 rounded-lg border border-white/10 cursor-pointer">
+                <input type="checkbox" id="preset-trends" class="mt-1" checked>
+                <span><b>TMDB Trend Listesi</b>
+                    <span class="block text-xs theme-text-secondary">Günlük Trend, Haftalık Trend, Aylık Trend (her birinde Diziler + Filmler), Devam Eden Diziler ve Vizyondakiler; hareketli GIF'li. Liste TMDB'den canlı gelir ve yalnızca kütüphanenizde bulunan yapımlar gösterilir. TMDB anahtarı gerekir.</span></span>
+            </label>
+            <label class="flex items-start gap-2 p-3 rounded-lg border border-white/10 cursor-pointer">
+                <input type="checkbox" id="preset-genres" class="mt-1" checked>
+                <span><b>Türler</b>
+                    <span class="block text-xs theme-text-secondary">Aile, Aksiyon, Komedi, Korku ... klasörleri; her birinde "Yeni Eklenen <i>Tür</i> Dizileri/Filmleri" ve "Popüler <i>Tür</i> Dizileri/Filmleri". Kütüphanenizde içeriği olan türler eklenir.</span></span>
+            </label>
+            <label class="flex items-start gap-2 p-3 rounded-lg border border-white/10 cursor-pointer">
+                <input type="checkbox" id="preset-themes" class="mt-1" checked>
+                <span><b>Temalar</b>
+                    <span class="block text-xs theme-text-secondary">Uzay, Kovboy, Paralel Evren, Uzaylılar, Zaman Yolculuğu, Vampirler ... klasörleri (hareketli GIF); her birinde "<i>Tema</i> Filmleri" ve "<i>Tema</i> Dizileri". İçerik TMDB anahtar kelimelerine göre bulunup kütüphanenizle eşleştirilir (birkaç dakika sürebilir). TMDB anahtarı gerekir.</span></span>
+            </label>
+            <label class="flex items-start gap-2 p-3 rounded-lg border border-white/10 cursor-pointer">
+                <input type="checkbox" id="preset-years" class="mt-1" checked>
+                <span><b>Yıllar</b>
+                    <span class="block text-xs theme-text-secondary">2020'ler, 2010'lar, 2000'ler, 90'lar, 80'ler ... klasörleri; her birinde o döneme ait Yeni Eklenen Filmler, Yeni Eklenen Diziler, Popüler Diziler ve Popüler Filmler.</span></span>
+            </label>
+            <label class="flex items-start gap-2 p-3 rounded-lg border border-white/10 cursor-pointer">
+                <input type="checkbox" id="preset-series" class="mt-1" checked>
+                <span><b>Seri Filmler</b>
+                    <span class="block text-xs theme-text-secondary">Kütüphanedeki film serileri (Harry Potter, Hızlı ve Öfkeli, Yüzüklerin Efendisi ...) için birer klasör; adı ve kapağı TMDB'den, filmler yıl sırasıyla. En az 2 filmi olan seriler eklenir.</span></span>
+            </label>
+            <label class="flex items-start gap-2 p-3 rounded-lg border border-white/10 cursor-pointer">
+                <input type="checkbox" id="preset-companies" class="mt-1" checked>
+                <span><b>Yapım Şirketleri</b>
+                    <span class="block text-xs theme-text-secondary">Marvel, DC, Paramount, Warner Bros., Universal, Disney ... klasörleri (hareketli GIF + TMDB şirket logosu). Her klasörde "<i>Şirket</i> Filmleri" ve "<i>Şirket</i> Dizileri"; içerik TMDB'den alınıp kütüphanenizle eşleştirilir (birkaç dakika sürebilir). Eski ayrı "Marvel" koleksiyonu kaldırılır.</span></span>
+            </label>
+            <label class="flex items-start gap-2 p-3 rounded-lg border border-white/10 cursor-pointer">
+                <input type="checkbox" id="preset-force" class="mt-1">
+                <span>Var olan hazır koleksiyonları da yeniden oluştur
+                    <span class="block text-xs theme-text-secondary">Kapalıyken var olan koleksiyonlara dokunulmaz; yalnızca kütüphaneye sonradan eklenen platform/şirket/ülke/tür/tema/yıl/seri klasörleri eklenir. Açık ise klasör düzenlemeleriniz (görsel, ad) sıfırlanır.</span></span>
+            </label>
+        </div>
+        <div id="presets-report" class="hidden mb-4 text-sm rounded-lg border border-white/10 p-3 space-y-1"></div>
+        <div class="flex justify-end gap-2">
+            <button data-close="presets-modal" class="px-4 py-2 rounded-md text-sm font-medium border theme-card hover:bg-white/5">Kapat</button>
+            <button data-act="run-presets" id="presets-run" class="px-4 py-2 rounded-md text-sm font-medium bg-primary text-white hover:opacity-90">Oluştur</button>
+        </div>
+    </div>
+</div>
+
+<!-- ── Oyuncu Koleksiyonu Modal ────────────────────────────────────────── -->
+<div id="directors-modal" class="hidden fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60">
+    <div class="theme-card border rounded-2xl w-full max-w-lg p-6 shadow-xl max-h-[90vh] overflow-y-auto">
+        <div class="flex items-center justify-between mb-4">
+            <h3 class="text-lg font-semibold text-text">Yönetmen Koleksiyonu</h3>
+            <button data-close="directors-modal" class="theme-text-secondary hover:text-text"><i class="fas fa-times"></i></button>
+        </div>
+        <p class="text-xs theme-text-secondary mb-3">Her yönetmen, tek bir <b>Yönetmenler</b> koleksiyonunda fotoğraflı bir klasör olur (örn. Christopher Nolan); içinde "<i>Nolan</i> Filmleri" ve "<i>Nolan</i> Dizileri" bölümleri bulunur. Fotoğraf ve yönetmenlik bilgileri TMDB'den alınır; kütüphanenizde yapımı olmayan yönetmen eklenmez.</p>
+        <div class="flex gap-2 mb-2">
+            <input type="text" id="director-input" placeholder="Yönetmen adı yazıp Enter'a basın (örn: Christopher Nolan)" autocomplete="off"
+                class="flex-1 px-3 py-2 rounded-md border theme-card text-sm focus:outline-none focus:ring-2 focus:ring-primary">
+            <button type="button" data-act="director-add" class="px-3 py-2 rounded-md text-sm font-medium border theme-card hover:bg-white/5">Ekle</button>
+        </div>
+        <div id="director-chips" class="flex flex-wrap gap-2 mb-4 min-h-[1.5rem]"></div>
+        <label class="flex items-start gap-2 p-3 rounded-lg border border-white/10 mb-4 text-sm cursor-pointer">
+            <input type="checkbox" id="director-suggested" class="mt-1">
+            <span>Önerilen yönetmenleri de ekle
+                <span class="block text-xs theme-text-secondary">Nolan, Spielberg, Scorsese, Tarantino, Cameron, Fincher, Villeneuve, Nuri Bilge Ceylan, Ferzan Özpetek ... (kütüphanenizde yapımı olanlar)</span></span>
+        </label>
+        <div id="directors-report" class="hidden mb-4 text-sm rounded-lg border border-white/10 p-3 space-y-1"></div>
+        <div class="flex justify-end gap-2">
+            <button data-close="directors-modal" class="px-4 py-2 rounded-md text-sm font-medium border theme-card hover:bg-white/5">Kapat</button>
+            <button data-act="run-directors" id="directors-run" class="px-4 py-2 rounded-md text-sm font-medium bg-primary text-white hover:opacity-90">Klasörleri Oluştur</button>
+        </div>
+    </div>
+</div>
+
+<div id="actors-modal" class="hidden fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60">
+    <div class="theme-card border rounded-2xl w-full max-w-lg p-6 shadow-xl max-h-[90vh] overflow-y-auto">
+        <div class="flex items-center justify-between mb-4">
+            <h3 class="text-lg font-semibold text-text">Oyuncu Koleksiyonu</h3>
+            <button data-close="actors-modal" class="theme-text-secondary hover:text-text"><i class="fas fa-times"></i></button>
+        </div>
+        <p class="text-xs theme-text-secondary mb-3">Seçilen her oyuncu, tek bir <b>Oyuncular</b> koleksiyonunda fotoğraflı bir klasör olur; klasörün içinde "<i>Oyuncu</i> Filmleri" ve "<i>Oyuncu</i> Dizileri" bölümleri bulunur. Fotoğraflar TMDB'den alınır. Oyuncu adı kütüphanedeki (cast) yazımıyla aranır.</p>
+
+        <div class="relative mb-2">
+            <input type="text" id="actor-search" placeholder="Oyuncu ara (örn: Tom Cruise)" autocomplete="off"
+                class="w-full px-3 py-2 rounded-md border theme-card text-sm focus:outline-none focus:ring-2 focus:ring-primary">
+            <div id="actor-suggest" class="hidden absolute left-0 right-0 top-full mt-1 z-10 theme-card border rounded-lg max-h-48 overflow-y-auto divide-y divide-white/10 shadow-xl"></div>
+        </div>
+        <div id="actor-chips" class="flex flex-wrap gap-2 mb-4 min-h-[1.5rem]"></div>
+
+        <div class="p-3 rounded-lg border border-white/10 mb-4">
+            <label class="flex items-center gap-2 text-sm cursor-pointer">
+                <input type="checkbox" id="actor-auto">
+                <span>Ayrıca kütüphanede en çok başrol alan oyuncuları otomatik ekle</span>
+            </label>
+            <div class="grid grid-cols-2 gap-3 mt-3">
+                <div>
+                    <label class="block text-xs theme-text-secondary mb-1">En az içerik sayısı</label>
+                    <input type="number" id="actor-min" value="5" min="1" max="100" class="w-full px-3 py-2 rounded-md border theme-card text-sm">
+                </div>
+                <div>
+                    <label class="block text-xs theme-text-secondary mb-1">En fazla oyuncu</label>
+                    <input type="number" id="actor-limit" value="10" min="1" max="50" class="w-full px-3 py-2 rounded-md border theme-card text-sm">
+                </div>
+            </div>
+        </div>
+
+        <div id="actors-report" class="hidden mb-4 text-sm rounded-lg border border-white/10 p-3 space-y-1"></div>
+        <div class="flex justify-end gap-2">
+            <button data-close="actors-modal" class="px-4 py-2 rounded-md text-sm font-medium border theme-card hover:bg-white/5">Kapat</button>
+            <button data-act="run-actors" id="actors-run" class="px-4 py-2 rounded-md text-sm font-medium bg-primary text-white hover:opacity-90">Koleksiyonları Oluştur</button>
+        </div>
+    </div>
+</div>
+
+<!-- ── Nuvio'ya Aktar Modal ────────────────────────────────────────────── -->
+<div id="export-modal" class="hidden fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60">
+    <div class="theme-card border rounded-2xl w-full max-w-lg p-6 shadow-xl">
+        <div class="flex items-center justify-between mb-4">
+            <h3 class="text-lg font-semibold text-text">Nuvio'ya Aktar</h3>
+            <button data-close="export-modal" class="theme-text-secondary hover:text-text"><i class="fas fa-times"></i></button>
+        </div>
+        <p class="text-xs theme-text-secondary mb-4">Aktif koleksiyonlar, seçtiğiniz üyenin eklentisine bağlanan Nuvio koleksiyon JSON'u olarak dışa aktarılır. Nuvio'da Koleksiyonlar &rarr; İçe Aktar bölümünden dosyayı seçin ya da bağlantıyı kullanın.</p>
+        <div class="grid grid-cols-3 gap-3 mb-4">
+            <div class="col-span-2">
+                <label class="block text-xs font-bold uppercase tracking-wide theme-text-secondary mb-1.5">Üye (token)</label>
+                <select id="export-token" class="w-full px-3 py-2 rounded-md border theme-card text-sm"></select>
+            </div>
+            <div>
+                <label class="block text-xs font-bold uppercase tracking-wide theme-text-secondary mb-1.5">Dil</label>
+                <select id="export-lang" class="w-full px-3 py-2 rounded-md border theme-card text-sm">
+                    <option value="tr">Türkçe</option><option value="de">Deutsch</option>
+                    <option value="en">English</option><option value="original">Orijinal</option>
+                </select>
+            </div>
+        </div>
+        <label class="block text-xs font-bold uppercase tracking-wide theme-text-secondary mb-1.5">İçe aktarma bağlantısı</label>
+        <input type="text" id="export-url" readonly class="w-full px-3 py-2 rounded-md border theme-card text-xs mb-4">
+        <div class="flex justify-end gap-2">
+            <button data-act="copy-export-url" class="px-4 py-2 rounded-md text-sm font-medium border theme-card hover:bg-white/5"><i class="fas fa-copy mr-1"></i> Bağlantıyı Kopyala</button>
+            <button data-act="download-export" class="px-4 py-2 rounded-md text-sm font-medium bg-primary text-white hover:opacity-90"><i class="fas fa-download mr-1"></i> JSON İndir</button>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    const API = '/api/admin/koleksiyonlar';
+    let collections = [];
+    let meta = { tokens: [], platforms: [], base_url: '', platform_loaded: true };
+    let itemsCtx = null;          // {cid, fid}
+    const mq = window.matchMedia('(min-width: 768px)');
+    const pageSize = () => mq.matches ? 8 : 2;   // masaüstü: 4 sütun x 2 satır, mobil: 1 sütun x 2 satır
+    const pages = {};             // koleksiyon id -> aktif sayfa (0 tabanlı)
+    let pickedActors = [];        // oyuncu koleksiyonu modalında seçilenler
+
+    const $ = id => document.getElementById(id);
+    const esc = s => escapeHtml(s);
+    const open = id => $(id).classList.remove('hidden');
+    const close = id => $(id).classList.add('hidden');
+    const toast = (msg, type) => (typeof showToast === 'function') ? showToast(msg, type || 'info') : alert(msg);
+
+    async function api(method, url, body) {
+        const opt = { method, headers: {} };
+        if (body !== undefined) { opt.headers['Content-Type'] = 'application/json'; opt.body = JSON.stringify(body); }
+        const res = await fetch(url, opt);
+        let data = null;
+        try { data = await res.json(); } catch (e) { /* gövde yok */ }
+        if (!res.ok) throw new Error((data && (data.detail || data.error)) || 'İşlem başarısız');
+        return data;
+    }
+    const fail = e => toast(e.message || 'İşlem başarısız', 'error');
+    const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
+
+    // ── Görsel yardımcıları ─────────────────────────────────────────────
+    function autoGif(col, f) {
+        const key = String(f.gif_key || col.preset || 'default').toLowerCase().replace(/[^a-z0-9_\-]/g, '-').slice(0, 40) || 'default';
+        return `/stremio/koleksiyon/gif/${key}.gif?t=${encodeURIComponent((f.title || col.name || '').slice(0, 40))}`;
+    }
+    const tileImage = (col, f) => f.cover_url || f.focus_gif_url || autoGif(col, f);
+
+    function platformLabel(key) {
+        const p = meta.platforms.find(x => x.key === key);
+        return p ? p.label : key;
+    }
+    function ruleLabel(f) {
+        if (f.sections && f.sections.length) return f.sections.map(x => x.title).join(' · ');
+        const r = f.rule || {};
+        if (r.type === 'platform') return `${platformLabel(r.platform)} · ${r.sort === 'popular' ? 'Popüler' : 'Yeni eklenenler'}`;
+        if (r.type === 'actor') return `Oyuncu: ${r.name}`;
+        if (r.type === 'titles') return 'Hazır liste';
+        if (r.type === 'collection') return 'Film serisi (TMDB)';
+        return 'Elle seçilmiş';
+    }
+    const mediaLabel = m => ({ all: 'Film + Dizi', movie: 'Film', tv: 'Dizi' }[m] || m);
+
+    // ── Liste ───────────────────────────────────────────────────────────
+    async function load() {
+        try {
+            const data = await api('GET', API);
+            collections = data.collections || [];
+            render();
+        } catch (e) {
+            $('collections-list').innerHTML = '<div class="theme-card border rounded-xl p-8 text-center text-red-500 text-sm">Koleksiyonlar yüklenemedi.</div>';
+        }
+    }
+
+    function render() {
+        const wrap = $('collections-list');
+        if (!collections.length) {
+            wrap.innerHTML = `<div class="theme-card border rounded-xl p-10 text-center theme-text-secondary text-sm">
+                Henüz koleksiyon yok. <b>Hazır Koleksiyonlar</b> ile Netflix, Disney+, Marvel gibi koleksiyonları tek tıkla oluşturabilir
+                ya da <b>Yeni Koleksiyon</b> ile kendiniz başlayabilirsiniz.</div>`;
+            return;
+        }
+        wrap.innerHTML = collections.map(c => `
+            <section class="theme-card border rounded-2xl p-5 ${c.active ? '' : 'opacity-60'}" data-cid="${esc(c._id)}">
+                <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-4">
+                    <div class="min-w-0">
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <h2 class="text-lg font-semibold text-text truncate">${esc(c.name)}</h2>
+                            ${c.pin_to_top ? '<span class="text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary" title="Nuvio\'da en üstte">📌 Üstte</span>' : ''}
+                            ${c.preset ? '<span class="text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary">Hazır</span>' : '<span class="text-xs px-2 py-0.5 rounded-full bg-white/5 theme-text-secondary">Özel</span>'}
+                            <span class="text-xs px-2 py-0.5 rounded-full ${c.active ? 'bg-green-500/10 text-green-500' : 'bg-gray-500/10 theme-text-secondary'}">${c.active ? 'Aktif' : 'Pasif'}</span>
+                            ${c.in_manifest ? '' : '<span class="text-xs px-2 py-0.5 rounded-full bg-yellow-500/10 text-yellow-500">Katalogda yok</span>'}
+                        </div>
+                        <p class="text-xs theme-text-secondary mt-1">${(c.folders || []).length} klasör${c.description ? ' · ' + esc(c.description) : ''}</p>
+                    </div>
+                    <div class="flex items-center gap-2 shrink-0 flex-wrap">
+                        <button data-act="add-folder" data-cid="${esc(c._id)}" class="px-3 py-1.5 rounded-md text-xs font-medium border theme-card hover:bg-white/5"><i class="fas fa-folder-plus mr-1"></i> Klasör Ekle</button>
+                        <button data-act="toggle-collection" data-cid="${esc(c._id)}" class="px-3 py-1.5 rounded-md text-xs font-medium border theme-card hover:bg-white/5">${c.active ? '<i class="fas fa-eye-slash mr-1"></i> Kapat' : '<i class="fas fa-eye mr-1"></i> Aç'}</button>
+                        <button data-act="edit-collection" data-cid="${esc(c._id)}" class="px-3 py-1.5 rounded-md text-xs font-medium border theme-card hover:bg-white/5" title="Düzenle"><i class="fas fa-pen"></i></button>
+                        <button data-act="delete-collection" data-cid="${esc(c._id)}" class="px-3 py-1.5 rounded-md text-xs font-medium bg-red-500/10 text-red-500 hover:bg-red-500/20" title="Koleksiyonu sil"><i class="fas fa-trash"></i></button>
+                    </div>
+                </div>
+                ${(c.folders || []).length ? `
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    ${pageFolders(c).map(f => folderTile(c, f)).join('')}
+                </div>
+                ${pager(c)}` : '<div class="text-center text-sm theme-text-secondary py-6 border border-dashed border-white/10 rounded-xl">Bu koleksiyonda klasör yok.</div>'}
+            </section>`).join('');
+    }
+
+    function pageCount(c) {
+        return Math.max(1, Math.ceil((c.folders || []).length / pageSize()));
+    }
+
+    function pageFolders(c) {
+        const total = pageCount(c);
+        let p = pages[c._id] || 0;
+        if (p > total - 1) p = total - 1;
+        if (p < 0) p = 0;
+        pages[c._id] = p;
+        return c.folders.slice(p * pageSize(), (p + 1) * pageSize());
+    }
+
+    function pager(c) {
+        const total = pageCount(c);
+        if (total <= 1) return '';
+        const p = pages[c._id] || 0;
+        const btn = 'px-3 py-1.5 rounded-md text-xs font-medium border theme-card hover:bg-white/5 disabled:opacity-40 disabled:cursor-not-allowed';
+        return `
+                <div class="flex items-center justify-center gap-3 mt-4">
+                    <button data-act="page-prev" data-cid="${esc(c._id)}" class="${btn}" ${p === 0 ? 'disabled' : ''}><i class="fas fa-chevron-left mr-1"></i> Geri</button>
+                    <span class="text-xs theme-text-secondary">${p + 1} / ${total}</span>
+                    <button data-act="page-next" data-cid="${esc(c._id)}" class="${btn}" ${p >= total - 1 ? 'disabled' : ''}>İleri <i class="fas fa-chevron-right ml-1"></i></button>
+                </div>`;
+    }
+
+    function folderTile(c, f) {
+        const count = (f.item_count === null || f.item_count === undefined) ? '—' : f.item_count;
+        return `
+        <div class="rounded-xl overflow-hidden border border-white/10 flex flex-col">
+            <div class="relative aspect-video bg-black/30 overflow-hidden">
+                <img src="${esc(tileImage(c, f))}" alt="" loading="lazy" class="w-full h-full object-cover ${f.cover_url && f.tile_shape === 'POSTER' ? 'object-top' : ''}" onerror="this.style.opacity=0.15">
+                <div class="absolute inset-x-0 bottom-0 p-2 bg-gradient-to-t from-black/80 to-transparent">
+                    <div class="text-white text-sm font-semibold truncate">${f.emoji ? esc(f.emoji) + ' ' : ''}${esc(f.title)}</div>
+                </div>
+            </div>
+            <div class="p-3 flex-1 flex flex-col gap-2">
+                <div class="text-xs theme-text-secondary line-clamp-2" title="${esc(ruleLabel(f))}">${esc(ruleLabel(f))}</div>
+                <div class="text-xs theme-text-secondary">${f.sections && f.sections.length ? f.sections.length + ' bölüm' : esc(mediaLabel(f.media))} · ${count === '—' ? 'sayı için İçerik\'e bakın' : count + ' içerik'}</div>
+                <div class="flex gap-1.5 mt-auto">
+                    <button data-act="folder-items" data-cid="${esc(c._id)}" data-fid="${esc(f.id)}" class="flex-1 px-2 py-1.5 rounded-md text-xs font-medium border theme-card hover:bg-white/5"><i class="fas fa-film mr-1"></i> İçerik</button>
+                    <button data-act="edit-folder" data-cid="${esc(c._id)}" data-fid="${esc(f.id)}" class="px-2.5 py-1.5 rounded-md text-xs border theme-card hover:bg-white/5" title="Düzenle"><i class="fas fa-pen"></i></button>
+                    <button data-act="delete-folder" data-cid="${esc(c._id)}" data-fid="${esc(f.id)}" class="px-2.5 py-1.5 rounded-md text-xs bg-red-500/10 text-red-500 hover:bg-red-500/20" title="Klasörü sil"><i class="fas fa-trash"></i></button>
+                </div>
+            </div>
+        </div>`;
+    }
+
+    // ── Koleksiyon oluştur / düzenle / sil ──────────────────────────────
+    function openCollectionModal(c) {
+        $('collection-modal-title').textContent = c ? 'Koleksiyonu Düzenle' : 'Yeni Koleksiyon';
+        $('col-id').value = c ? c._id : '';
+        $('col-name').value = c ? c.name : '';
+        $('col-desc').value = c ? (c.description || '') : '';
+        $('col-backdrop').value = c ? (c.backdrop_url || '') : '';
+        $('col-manifest').checked = c ? !!c.in_manifest : true;
+        $('col-hide-home').checked = c ? !!c.hide_from_home : false;
+        $('col-pin').checked = c ? !!c.pin_to_top : false;
+        open('collection-modal');
+        $('col-name').focus();
+    }
+
+    async function saveCollection() {
+        const id = $('col-id').value;
+        const body = {
+            name: $('col-name').value.trim(),
+            description: $('col-desc').value.trim(),
+            backdrop_url: $('col-backdrop').value.trim(),
+            in_manifest: $('col-manifest').checked,
+            hide_from_home: $('col-hide-home').checked,
+            pin_to_top: $('col-pin').checked,
+        };
+        if (!body.name) { toast('Koleksiyon adı gerekli', 'error'); return; }
+        try {
+            await api(id ? 'PUT' : 'POST', id ? `${API}/${id}` : API, body);
+            close('collection-modal');
+            toast(id ? 'Koleksiyon güncellendi' : 'Koleksiyon oluşturuldu', 'success');
+            load();
+        } catch (e) { fail(e); }
+    }
+
+    async function deleteCollection(cid) {
+        const c = collections.find(x => x._id === cid);
+        if (!c || !confirm(`"${c.name}" koleksiyonunu ve içindeki ${(c.folders || []).length} klasörü silmek istediğinizden emin misiniz?\nFilm/dizi kayıtlarınız silinmez, yalnızca koleksiyon kaldırılır.`)) return;
+        try { await api('DELETE', `${API}/${cid}`); toast('Koleksiyon silindi', 'success'); load(); } catch (e) { fail(e); }
+    }
+
+    async function toggleCollection(cid) {
+        const c = collections.find(x => x._id === cid);
+        if (!c) return;
+        try { await api('PUT', `${API}/${cid}`, { active: !c.active }); load(); } catch (e) { fail(e); }
+    }
+
+    // ── Klasör oluştur / düzenle / sil ──────────────────────────────────
+    function syncRuleFields() {
+        const locked = ['titles', 'sections', 'collection'].includes($('f-ruletype-locked').value);
+        const t = $('f-rule').value;
+        $('f-rule').disabled = locked;
+        $('f-rule-platform').classList.toggle('hidden', locked || t !== 'platform');
+        $('f-rule-actor').classList.toggle('hidden', locked || t !== 'actor');
+        $('f-rule-manual').classList.toggle('hidden', locked || t !== 'manual');
+        $('f-rule-locked').classList.toggle('hidden', !locked);
+    }
+
+    function openFolderModal(cid, f) {
+        $('folder-modal-title').textContent = f ? 'Klasörü Düzenle' : 'Yeni Klasör';
+        $('f-cid').value = cid;
+        $('f-fid').value = f ? f.id : '';
+        $('f-title').value = f ? f.title : '';
+        $('f-emoji').value = f ? (f.emoji || '') : '';
+        $('f-media').value = f ? (f.media || 'all') : 'all';
+        $('f-shape').value = f ? (f.tile_shape || 'LANDSCAPE') : 'LANDSCAPE';
+        $('f-gif').value = f ? (f.focus_gif_url || '') : '';
+        $('f-cover').value = f ? (f.cover_url || '') : '';
+        $('f-platform').innerHTML = meta.platforms.map(p => `<option value="${esc(p.key)}">${esc(p.label)}</option>`).join('');
+        const hasSections = !!(f && f.sections && f.sections.length);
+        const r = (f && f.rule) || { type: 'platform', sort: 'new' };
+        const lockedType = hasSections ? 'sections' : (r.type === 'titles' || r.type === 'collection' ? r.type : '');
+        $('f-ruletype-locked').value = lockedType;
+        $('f-rule').value = lockedType ? 'manual' : r.type;
+        const gk = (f && f.gif_key) || '';
+        $('f-cover-tmdb').classList.toggle('hidden', !(hasSections && (gk.startsWith('actor-') || gk.startsWith('director-'))));
+        $('f-cover-tmdb').dataset.dept = gk.startsWith('director-') ? 'Directing' : '';
+        if (r.type === 'platform') { $('f-platform').value = r.platform; $('f-platform-sort').value = r.sort || 'new'; }
+        $('f-actor').value = r.type === 'actor' ? r.name : '';
+        $('f-actor-suggest').classList.add('hidden');
+        syncRuleFields();
+        open('folder-modal');
+        $('f-title').focus();
+    }
+
+    async function saveFolder() {
+        const cid = $('f-cid').value, fid = $('f-fid').value;
+        const body = {
+            title: $('f-title').value.trim(),
+            emoji: $('f-emoji').value.trim(),
+            media: $('f-media').value,
+            tile_shape: $('f-shape').value,
+            focus_gif_url: $('f-gif').value.trim(),
+            cover_url: $('f-cover').value.trim(),
+        };
+        if (!body.title) { toast('Klasör adı gerekli', 'error'); return; }
+        if (!$('f-ruletype-locked').value) {
+            const t = $('f-rule').value;
+            if (t === 'platform') body.rule = { type: 'platform', platform: $('f-platform').value, sort: $('f-platform-sort').value };
+            else if (t === 'actor') {
+                const name = $('f-actor').value.trim();
+                if (!name) { toast('Oyuncu adı gerekli', 'error'); return; }
+                body.rule = { type: 'actor', name };
+            } else body.rule = { type: 'manual', items: [] };
+        }
+        try {
+            await api(fid ? 'PUT' : 'POST', fid ? `${API}/${cid}/folders/${fid}` : `${API}/${cid}/folders`, body);
+            close('folder-modal');
+            toast('Klasör kaydedildi', 'success');
+            load();
+        } catch (e) { fail(e); }
+    }
+
+    async function deleteFolder(cid, fid) {
+        const c = collections.find(x => x._id === cid);
+        const f = c && c.folders.find(x => x.id === fid);
+        if (!f || !confirm(`"${f.title}" klasörünü silmek istediğinizden emin misiniz?`)) return;
+        try { await api('DELETE', `${API}/${cid}/folders/${fid}`); toast('Klasör silindi', 'success'); load(); } catch (e) { fail(e); }
+    }
+
+    // ── Oyuncu otomatik tamamlama (hem klasör hem oyuncu modalı) ────────
+    function bindActorSuggest(inputId, boxId, onPick) {
+        const input = $(inputId), box = $(boxId);
+        const run = debounce(async () => {
+            const q = input.value.trim();
+            if (q.length < 2) { box.classList.add('hidden'); return; }
+            try {
+                const data = await api('GET', `${API}/oyuncu-ara?q=${encodeURIComponent(q)}`);
+                const list = data.results || [];
+                box.innerHTML = list.length
+                    ? list.map(r => `<button type="button" data-actor="${esc(r.name)}" class="w-full text-left px-3 py-2 text-sm hover:bg-white/5 flex justify-between gap-3"><span>${esc(r.name)}</span><span class="text-xs theme-text-secondary">${r.count} içerik</span></button>`).join('')
+                    : '<div class="px-3 py-2 text-xs theme-text-secondary">Eşleşen oyuncu bulunamadı</div>';
+                box.classList.remove('hidden');
+            } catch (e) { box.classList.add('hidden'); }
+        }, 250);
+        input.addEventListener('input', run);
+        box.addEventListener('click', ev => {
+            const b = ev.target.closest('[data-actor]');
+            if (!b) return;
+            box.classList.add('hidden');
+            onPick(b.dataset.actor);
+        });
+    }
+
+    // ── İçerik modalı ───────────────────────────────────────────────────
+    async function openItems(cid, fid) {
+        const c = collections.find(x => x._id === cid);
+        const f = c && c.folders.find(x => x.id === fid);
+        itemsCtx = { cid, fid, sid: (f && f.sections && f.sections.length) ? f.sections[0].id : '' };
+        $('items-modal-title').textContent = f ? `${c.name} · ${f.title}` : 'Klasör İçeriği';
+        $('items-modal-summary').textContent = 'Yükleniyor...';
+        $('items-list').innerHTML = '<div class="text-center py-6 theme-text-secondary text-sm"><i class="fas fa-spinner fa-spin mr-2"></i> Yükleniyor...</div>';
+        $('items-search').value = '';
+        $('items-search-results').classList.add('hidden');
+        $('items-add-box').classList.add('hidden');
+        renderTabs(f);
+        open('items-modal');
+        await refreshItems();
+    }
+
+    function renderTabs(f) {
+        const box = $('items-tabs');
+        const secs = (f && f.sections) || [];
+        box.classList.toggle('hidden', secs.length < 2);
+        box.innerHTML = secs.length < 2 ? '' : secs.map(sec => `
+            <button type="button" data-act="items-tab" data-sid="${esc(sec.id)}"
+                class="px-3 py-1.5 rounded-full text-xs font-medium border ${sec.id === itemsCtx.sid ? 'bg-primary text-white border-primary' : 'theme-card hover:bg-white/5'}">${esc(sec.title)}</button>`).join('');
+    }
+
+    async function refreshItems() {
+        const { cid, fid, sid } = itemsCtx;
+        try {
+            const d = await api('GET', `${API}/${cid}/folders/${fid}/preview?limit=200&sid=${encodeURIComponent(sid || '')}`);
+            $('items-modal-summary').textContent = `${d.total} içerik (${d.movies} film, ${d.series} dizi)` + (d.total > d.items.length ? ` · ilk ${d.items.length} gösteriliyor` : '');
+            $('items-add-box').classList.toggle('hidden', !d.editable);
+            $('items-list').innerHTML = d.items.length ? d.items.map(it => `
+                <div class="flex items-center gap-3 p-2 rounded-lg border border-white/10">
+                    <img src="${esc(it.poster || '')}" alt="" loading="lazy" class="w-10 h-14 object-cover rounded bg-black/30 shrink-0" onerror="this.style.opacity=0.2">
+                    <div class="min-w-0 flex-1">
+                        <div class="text-sm font-medium text-text truncate">${esc(it.title)}</div>
+                        <div class="text-xs theme-text-secondary">${it.media_type === 'tv' ? 'Dizi' : 'Film'}${it.release_year ? ' · ' + esc(it.release_year) : ''}</div>
+                    </div>
+                    ${d.editable ? `<button data-act="item-remove" data-imdb="${esc(it.imdb_id)}" class="px-2.5 py-1.5 rounded-md text-xs bg-red-500/10 text-red-500 hover:bg-red-500/20 shrink-0" title="Çıkar"><i class="fas fa-xmark"></i></button>` : ''}
+                </div>`).join('')
+                : '<div class="text-center py-8 theme-text-secondary text-sm">Bu klasörde henüz içerik yok.</div>';
+        } catch (e) {
+            $('items-list').innerHTML = `<div class="text-center py-6 text-red-500 text-sm">${esc(e.message)}</div>`;
+        }
+    }
+
+    async function searchItems() {
+        const q = $('items-search').value.trim();
+        const box = $('items-search-results');
+        if (!q) return;
+        box.classList.remove('hidden');
+        box.innerHTML = '<div class="p-3 text-xs theme-text-secondary"><i class="fas fa-spinner fa-spin mr-1"></i> Aranıyor...</div>';
+        try {
+            const d = await api('GET', `/api/admin/catalogs/media-search?q=${encodeURIComponent(q)}`);
+            const list = d.results || [];
+            box.innerHTML = list.length ? list.map(r => `
+                <div class="flex items-center gap-3 p-2">
+                    <img src="${esc(r.poster || '')}" alt="" class="w-8 h-12 object-cover rounded bg-black/30 shrink-0" onerror="this.style.opacity=0.2">
+                    <div class="min-w-0 flex-1">
+                        <div class="text-sm truncate">${esc(r.title)}</div>
+                        <div class="text-xs theme-text-secondary">${r.media_type === 'tv' ? 'Dizi' : 'Film'}${r.release_year ? ' · ' + esc(r.release_year) : ''}</div>
+                    </div>
+                    <button data-act="item-add" data-imdb="${esc(r.imdb_id)}" class="px-3 py-1.5 rounded-md text-xs font-medium bg-primary text-white hover:opacity-90 shrink-0"><i class="fas fa-plus mr-1"></i> Ekle</button>
+                </div>`).join('') : '<div class="p-3 text-xs theme-text-secondary">Sonuç bulunamadı.</div>';
+        } catch (e) { box.innerHTML = `<div class="p-3 text-xs text-red-500">${esc(e.message)}</div>`; }
+    }
+
+    async function addItem(imdb) {
+        try {
+            await api('POST', `${API}/${itemsCtx.cid}/folders/${itemsCtx.fid}/items`, { imdb_id: imdb });
+            toast('Eklendi', 'success');
+            await refreshItems();
+            load();
+        } catch (e) { fail(e); }
+    }
+    async function removeItem(imdb) {
+        try {
+            await api('DELETE', `${API}/${itemsCtx.cid}/folders/${itemsCtx.fid}/items/${encodeURIComponent(imdb)}`);
+            await refreshItems();
+            load();
+        } catch (e) { fail(e); }
+    }
+
+    // ── Hazır koleksiyonlar ─────────────────────────────────────────────
+    function reportHtml(r, labels) {
+        const rows = [];
+        for (const [key, label] of Object.entries(labels)) {
+            const list = r[key] || [];
+            if (list.length) rows.push(`<div><b>${label}:</b> ${list.map(esc).join(', ')}</div>`);
+        }
+        return rows.length ? rows.join('') : '<div>Yapılacak bir şey bulunamadı.</div>';
+    }
+
+    async function runPresets() {
+        const kinds = [];
+        if ($('preset-platform').checked) kinds.push('platform');
+        if ($('preset-series').checked) kinds.push('series');
+        if ($('preset-companies').checked) kinds.push('companies');
+        if ($('preset-countries').checked) kinds.push('countries');
+        if ($('preset-genres').checked) kinds.push('genres');
+        if ($('preset-themes').checked) kinds.push('themes');
+        if ($('preset-years').checked) kinds.push('years');
+        if ($('preset-trends').checked) kinds.push('trends');
+        if (!kinds.length) { toast('En az bir tür seçin', 'error'); return; }
+        const btn = $('presets-run');
+        btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Oluşturuluyor...';
+        try {
+            const r = await api('POST', `${API}/hazir/olustur`, { kinds, force: $('preset-force').checked });
+            const box = $('presets-report');
+            box.innerHTML = reportHtml(r, {
+                created: 'Oluşturuldu', updated: 'Yenilendi', skipped: 'Zaten var (atlandı)',
+                removed: 'Eski dağınık koleksiyon kaldırıldı',
+                empty: 'İçerik bulunamadı (atlandı)', missing_titles: 'Kütüphanede bulunamayan Marvel yapımları',
+            });
+            box.classList.remove('hidden');
+            load();
+        } catch (e) { fail(e); }
+        btn.disabled = false; btn.innerHTML = 'Oluştur';
+    }
+
+    async function fetchTmdbPhoto() {
+        const name = $('f-title').value.trim();
+        if (!name) { toast('Önce klasör adını (oyuncu adı) yazın', 'error'); return; }
+        try {
+            const dept = $('f-cover-tmdb').dataset.dept || '';
+            const r = await api('GET', `${API}/tmdb/foto?name=${encodeURIComponent(name)}${dept ? '&dept=' + dept : ''}`);
+            $('f-cover').value = r.profile_url;
+            toast(`TMDB: ${r.name} fotoğrafı alındı — Kaydet'e basın`, 'success');
+        } catch (e) { fail(e); }
+    }
+
+    // ── Oyuncu koleksiyonları ───────────────────────────────────────────
+    function renderChips() {
+        $('actor-chips').innerHTML = pickedActors.map((n, i) =>
+            `<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-primary/10 text-primary text-xs">${esc(n)}
+                <button type="button" data-act="actor-unpick" data-idx="${i}" class="hover:text-red-500"><i class="fas fa-xmark"></i></button></span>`).join('');
+    }
+
+    async function runActors() {
+        const auto = $('actor-auto').checked;
+        if (!pickedActors.length && !auto) { toast('Bir oyuncu seçin ya da otomatik eklemeyi açın', 'error'); return; }
+        const btn = $('actors-run');
+        btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Oluşturuluyor...';
+        try {
+            const r = await api('POST', `${API}/hazir/oyuncular`, {
+                names: pickedActors, auto,
+                min_titles: parseInt($('actor-min').value, 10) || 5,
+                limit: parseInt($('actor-limit').value, 10) || 10,
+            });
+            const box = $('actors-report');
+            box.innerHTML = reportHtml(r, { created: 'Eklendi', skipped: 'Zaten var (atlandı)', empty: 'Kütüphanede filmi/dizisi yok',
+                no_photo: 'TMDB fotoğrafı bulunamadı (klasörü düzenleyip görsel adresi girin)', removed: 'Eski dağınık koleksiyon kaldırıldı' });
+            box.classList.remove('hidden');
+            pickedActors = []; renderChips();
+            load();
+        } catch (e) { fail(e); }
+        btn.disabled = false; btn.innerHTML = 'Koleksiyonları Oluştur';
+    }
+
+    // ── Yönetmen koleksiyonu ────────────────────────────────────────────
+    let pickedDirectors = [];
+    function renderDirectorChips() {
+        $('director-chips').innerHTML = pickedDirectors.map((n, i) =>
+            `<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-primary/10 text-primary text-xs">${esc(n)}
+                <button type="button" data-act="director-unpick" data-idx="${i}" class="hover:text-red-500"><i class="fas fa-xmark"></i></button></span>`).join('');
+    }
+    function addDirector() {
+        const v = $('director-input').value.trim();
+        if (v && !pickedDirectors.includes(v)) pickedDirectors.push(v);
+        $('director-input').value = '';
+        renderDirectorChips();
+    }
+    async function runDirectors() {
+        addDirector();
+        const suggested = $('director-suggested').checked;
+        if (!pickedDirectors.length && !suggested) { toast('Bir yönetmen yazın ya da önerilenleri işaretleyin', 'error'); return; }
+        const btn = $('directors-run');
+        btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Oluşturuluyor...';
+        try {
+            const r = await api('POST', `${API}/hazir/yonetmenler`, { names: pickedDirectors, suggested });
+            const box = $('directors-report');
+            box.innerHTML = reportHtml(r, { created: 'Eklendi', skipped: 'Zaten var (atlandı)',
+                empty: 'Kütüphanenizde filmi/dizisi yok', not_found: 'TMDB\'de yönetmen olarak bulunamadı',
+                no_photo: 'TMDB fotoğrafı yok (klasörü düzenleyip görsel adresi girin)' });
+            box.classList.remove('hidden');
+            pickedDirectors = []; renderDirectorChips();
+            load();
+        } catch (e) { fail(e); }
+        btn.disabled = false; btn.innerHTML = 'Klasörleri Oluştur';
+    }
+
+    // ── Nuvio'ya aktar ──────────────────────────────────────────────────
+    function updateExportUrl() {
+        const token = $('export-token').value, lang = $('export-lang').value;
+        const base = (meta.base_url || location.origin).replace(/\/$/, '');
+        $('export-url').value = token ? `${base}/stremio/${token}/${lang}/koleksiyonlar.json` : '';
+    }
+
+    async function openExport() {
+        const sel = $('export-token');
+        sel.innerHTML = meta.tokens.length
+            ? meta.tokens.map(t => `<option value="${esc(t.token)}">${esc(t.name)}</option>`).join('')
+            : '<option value="">Aktif token yok</option>';
+        updateExportUrl();
+        open('export-modal');
+    }
+
+    async function downloadExport() {
+        const token = $('export-token').value, lang = $('export-lang').value;
+        if (!token) { toast('Önce bir üye (token) seçin', 'error'); return; }
+        try {
+            const data = await api('GET', `${API}/export?token=${encodeURIComponent(token)}&lang=${lang}`);
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = 'nuvio-koleksiyonlar.json';
+            document.body.appendChild(a); a.click(); a.remove();
+            setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+        } catch (e) { fail(e); }
+    }
+
+    // ── Olay yönlendirme ────────────────────────────────────────────────
+    document.addEventListener('click', ev => {
+        const closer = ev.target.closest('[data-close]');
+        if (closer) { close(closer.dataset.close); return; }
+        const el = ev.target.closest('[data-act]');
+        if (!el) return;
+        const { act, cid, fid, imdb, idx, sid } = el.dataset;
+        const col = collections.find(x => x._id === cid);
+        switch (act) {
+            case 'page-prev':        pages[cid] = Math.max(0, (pages[cid] || 0) - 1); render(); break;
+            case 'page-next':        pages[cid] = (pages[cid] || 0) + 1; render(); break;
+            case 'new-collection':   openCollectionModal(null); break;
+            case 'edit-collection':  openCollectionModal(col); break;
+            case 'save-collection':  saveCollection(); break;
+            case 'delete-collection': deleteCollection(cid); break;
+            case 'toggle-collection': toggleCollection(cid); break;
+            case 'add-folder':       openFolderModal(cid, null); break;
+            case 'edit-folder':      openFolderModal(cid, col && col.folders.find(f => f.id === fid)); break;
+            case 'save-folder':      saveFolder(); break;
+            case 'delete-folder':    deleteFolder(cid, fid); break;
+            case 'folder-items':     openItems(cid, fid); break;
+            case 'items-search':     searchItems(); break;
+            case 'items-tab': {
+                itemsCtx.sid = sid;
+                const cc = collections.find(x => x._id === itemsCtx.cid);
+                renderTabs(cc && cc.folders.find(x => x.id === itemsCtx.fid));
+                refreshItems();
+                break;
+            }
+            case 'cover-tmdb':       fetchTmdbPhoto(); break;
+            case 'item-add':         addItem(imdb); break;
+            case 'item-remove':      removeItem(imdb); break;
+            case 'open-presets':     $('presets-report').classList.add('hidden'); open('presets-modal'); break;
+            case 'run-presets':      runPresets(); break;
+            case 'open-actors':      $('actors-report').classList.add('hidden'); open('actors-modal'); break;
+            case 'run-actors':       runActors(); break;
+            case 'open-directors':   $('directors-report').classList.add('hidden'); open('directors-modal'); break;
+            case 'run-directors':    runDirectors(); break;
+            case 'director-add':     addDirector(); break;
+            case 'director-unpick':  pickedDirectors.splice(parseInt(idx, 10), 1); renderDirectorChips(); break;
+            case 'actor-unpick':     pickedActors.splice(parseInt(idx, 10), 1); renderChips(); break;
+            case 'open-export':      openExport(); break;
+            case 'copy-export-url':
+                if ($('export-url').value) { navigator.clipboard.writeText($('export-url').value).then(() => toast('Bağlantı kopyalandı', 'success')); }
+                break;
+            case 'download-export':  downloadExport(); break;
+        }
+    });
+
+    const onViewportChange = () => { Object.keys(pages).forEach(k => { pages[k] = 0; }); render(); };
+    if (mq.addEventListener) mq.addEventListener('change', onViewportChange); else mq.addListener(onViewportChange);
+
+    $('f-rule').addEventListener('change', syncRuleFields);
+    $('items-search').addEventListener('keydown', e => { if (e.key === 'Enter') searchItems(); });
+    $('export-token').addEventListener('change', updateExportUrl);
+    $('export-lang').addEventListener('change', updateExportUrl);
+    ['collection-modal', 'folder-modal', 'items-modal', 'presets-modal', 'actors-modal', 'directors-modal', 'export-modal'].forEach(id => {
+        $(id).addEventListener('mousedown', e => { if (e.target === $(id)) close(id); });
+    });
+
+    $('director-input').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addDirector(); } });
+    bindActorSuggest('f-actor', 'f-actor-suggest', name => { $('f-actor').value = name; });
+    bindActorSuggest('actor-search', 'actor-suggest', name => {
+        if (!pickedActors.includes(name)) pickedActors.push(name);
+        $('actor-search').value = '';
+        renderChips();
+    });
+
+    (async function init() {
+        try { meta = await api('GET', `${API}/meta`); } catch (e) { /* meta olmadan da liste açılır */ }
+        load();
+    })();
+})();
+</script>
+{% endblock %}

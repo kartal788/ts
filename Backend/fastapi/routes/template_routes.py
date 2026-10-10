@@ -87,6 +87,22 @@ async def kataloglar_page(request: Request, _: bool = Depends(require_auth)):
         "owner_name": owner_name,
     })
 
+async def koleksiyonlar_page(request: Request, _: bool = Depends(require_auth)):
+    theme_name = request.session.get("theme", "purple_gradient")
+    theme = get_theme(theme_name)
+    current_user = get_current_user(request)
+    owner_name = await _get_owner_name()
+
+    return templates.TemplateResponse("koleksiyonlar.html", {
+        "request": request,
+        "theme": theme,
+        "themes": get_all_themes(),
+        "current_theme": theme_name,
+        "app_name": Telegram.ISIM,
+        "current_user": current_user,
+        "owner_name": owner_name,
+    })
+
 async def login_page(request: Request):
     if is_authenticated(request):
         return RedirectResponse(url="/", status_code=302)

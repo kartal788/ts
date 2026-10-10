@@ -11,6 +11,7 @@ async def help_command(client: Client, message: Message):
             "/start - Main menu / Purchase membership\n"
             "/status - Check your subscription expiry date\n"
             "/ara - Search content by IMDB/TMDB link or by name\n"
+            "/koleksiyonlar - Get your collections link for Nuvio\n"
             "/help - Show this message"
         )
     else:
