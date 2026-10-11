@@ -11,8 +11,10 @@ Oturum geçersiz kılma (invalidation) kuralları:
   1. Bot yeniden başlatıldığında   → session_version DB'de artırılır
   2. /start komutu atıldığında     → o yöneticinin session_version değeri artırılır
   2b. Yönetici listeden çıkarılırsa → açık oturumu bir sonraki istekte düşer
-  3. /start'tan 4 gün sonra        → oturum/cookie silinir (SessionExpiryMiddleware)
-  4. /start'tan 7 gün sonra        → şifre geçersiz olur (credential_rotator, yeni şifre GÖNDERİLMEZ)
+  3. Girişten 4 gün sonra          → oturum/cookie silinir (SessionExpiryMiddleware, login_at'e göre;
+                                     yönetici ve üyeler için geçerli, şifre hâlâ geçerliyse tekrar girilebilir)
+  4. /start'tan CREDENTIAL_ROTATE_DAYS gün sonra → şifre geçersiz olur (credential_rotator,
+     yeni şifre GÖNDERİLMEZ; açık oturumlar da düşer)
 """
 
 from fastapi import HTTPException, Request
@@ -21,7 +23,8 @@ from typing import Optional
 import time
 from datetime import timezone
 
-# /start (şifre üretimi) anından itibaren oturum/cookie ömrü: 4 gün
+# Giriş yapıldığı andan itibaren oturum/cookie ömrü: 4 gün (yönetici ve üye için aynı).
+# Sayaç session["login_at"] ile giriş anından başlar; her yeni girişte sıfırlanır.
 SESSION_MAX_AGE = 4 * 24 * 3600
 
 security = HTTPBearer(auto_error=False)

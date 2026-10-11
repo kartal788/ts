@@ -168,8 +168,6 @@ async def login_post(
         request.session["authenticated"]   = True
         request.session["username"]        = username
         request.session["login_at"]        = _time.time()
-        from Backend.fastapi.security.credentials import otp_started_ts
-        request.session["otp_started_at"]  = otp_started_ts(admin_doc)  # /start anı → 4 gün sonra cookie silinir
         # session_version: bot restart veya /start ile artırılan DB değerini sakla
         from Backend import db as _db
         _admin_key = admin_doc.get("_id", "admin")

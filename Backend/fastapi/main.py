@@ -392,38 +392,21 @@ app.add_middleware(MemberApiRateLimiter)
 # böylece request.session'a erişebilir.
 app.add_middleware(CSRFMiddleware)
 
-# ── Oturum süresi: /start'tan 4 gün sonra cookie silinir ───────────────────────
-# Giriş sırasında session["otp_started_at"] = şifrenin üretildiği (/start) an olarak
-# yazılır. Süre dolunca session temizlenir → SessionMiddleware cookie'yi tarayıcıdan siler.
+# ── Oturum süresi: girişten 4 gün sonra cookie silinir (yönetici + üye) ────────
+# Giriş sırasında session["login_at"] = giriş anı yazılır (template_routes / member_routes).
+# Süre dolunca session temizlenir → SessionMiddleware cookie'yi tarayıcıdan siler.
+# Şifre hâlâ geçerliyse kullanıcı aynı şifreyle tekrar giriş yapabilir.
 class SessionExpiryMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
         try:
             sess = request.session
-            started = sess.get("otp_started_at")
-
-            # Eski oturumlar (bu özellik gelmeden açılmış): /start zamanını DB'den bul,
-            # oturuma yaz. Bulunamazsa şimdiden say → en geç 4 gün sonra düşer.
-            if not started and (sess.get("authenticated") or sess.get("member")):
-                from Backend import db as _db
-                created = None
-                try:
-                    if sess.get("authenticated"):
-                        created = await _db.get_admin_created_at(sess.get("admin_key", "admin"))
-                    else:
-                        uid = (sess.get("member") or {}).get("user_id")
-                        if uid is not None and str(uid) != "admin":
-                            created = await _db.get_member_created_at(uid)
-                except Exception:
-                    created = None
-                if created is not None:
-                    from Backend.fastapi.security.credentials import otp_started_ts
-                    started = otp_started_ts({"created_at": created})
-                else:
-                    started = _time.time()
-                sess["otp_started_at"] = started
-
-            if started and (_time.time() - float(started)) > SESSION_MAX_AGE:
-                sess.clear()
+            if sess.get("authenticated") or sess.get("member"):
+                started = sess.get("login_at")
+                if not started:
+                    # login_at yazılmamış eski oturum: şimdiden say → en geç 4 gün sonra düşer.
+                    sess["login_at"] = _time.time()
+                elif (_time.time() - float(started)) > SESSION_MAX_AGE:
+                    sess.clear()
         except Exception:
             pass
         return await call_next(request)
@@ -442,7 +425,7 @@ app.add_middleware(
     secret_key=_session_key,
     https_only=_https_only,
     same_site="lax",
-    max_age=SESSION_MAX_AGE,  # 4 gün (asıl kontrol: SessionExpiryMiddleware, /start anından sayar)
+    max_age=SESSION_MAX_AGE,  # 4 gün (asıl kontrol: SessionExpiryMiddleware, giriş anından sayar)
 )
 
 try:
