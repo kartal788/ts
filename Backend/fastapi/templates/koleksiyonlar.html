@@ -218,6 +218,11 @@
                     <span class="block text-xs theme-text-secondary">Günlük Trend, Haftalık Trend, Aylık Trend (her birinde Diziler + Filmler), Devam Eden Diziler ve Vizyondakiler; hareketli GIF'li. Liste TMDB'den canlı gelir ve yalnızca kütüphanenizde bulunan yapımlar gösterilir. TMDB anahtarı gerekir.</span></span>
             </label>
             <label class="flex items-start gap-2 p-3 rounded-lg border border-white/10 cursor-pointer">
+                <input type="checkbox" id="preset-added" class="mt-1" checked>
+                <span><b>Ekleme Tarihine Göre</b>
+                    <span class="block text-xs theme-text-secondary">Bugün Eklenenler, Bu Hafta Eklenenler (son 7 gün) ve Bu Ay Eklenenler (son 30 gün) klasörleri; her birinde Diziler ve Filmler. Kütüphaneye eklenme/güncellenme zamanına göre, en yeni en başta. TMDB gerekmez; içerik canlı hesaplanır.</span></span>
+            </label>
+            <label class="flex items-start gap-2 p-3 rounded-lg border border-white/10 cursor-pointer">
                 <input type="checkbox" id="preset-genres" class="mt-1" checked>
                 <span><b>Türler</b>
                     <span class="block text-xs theme-text-secondary">Aile, Aksiyon, Komedi, Korku ... klasörleri; her birinde "Yeni Eklenen <i>Tür</i> Dizileri/Filmleri" ve "Popüler <i>Tür</i> Dizileri/Filmleri". Kütüphanenizde içeriği olan türler eklenir.</span></span>
@@ -245,7 +250,7 @@
             <label class="flex items-start gap-2 p-3 rounded-lg border border-white/10 cursor-pointer">
                 <input type="checkbox" id="preset-force" class="mt-1">
                 <span>Var olan hazır koleksiyonları da yeniden oluştur
-                    <span class="block text-xs theme-text-secondary">Kapalıyken var olan koleksiyonlara dokunulmaz; yalnızca kütüphaneye sonradan eklenen platform/şirket/ülke/tür/tema/yıl/seri klasörleri eklenir. Açık ise klasör düzenlemeleriniz (görsel, ad) sıfırlanır.</span></span>
+                    <span class="block text-xs theme-text-secondary">Kapalıyken var olan koleksiyonlara dokunulmaz; yalnızca kütüphaneye sonradan eklenen platform/şirket/ülke/tür/tema/yıl/seri klasörleri (ve eksik Ekleme Tarihine Göre klasörleri) eklenir. Açık ise klasör düzenlemeleriniz (görsel, ad) sıfırlanır.</span></span>
             </label>
         </div>
         <div id="presets-report" class="hidden mb-4 text-sm rounded-lg border border-white/10 p-3 space-y-1"></div>
@@ -744,6 +749,7 @@
         if ($('preset-themes').checked) kinds.push('themes');
         if ($('preset-years').checked) kinds.push('years');
         if ($('preset-trends').checked) kinds.push('trends');
+        if ($('preset-added').checked) kinds.push('added');
         if (!kinds.length) { toast('En az bir tür seçin', 'error'); return; }
         const btn = $('presets-run');
         btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Oluşturuluyor...';

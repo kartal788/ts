@@ -30,6 +30,7 @@ Veri modeli  (tracking.koleksiyonlar):
              | {type: "genre",    genre, sort}               (kütüphane türü, örn. "Aile")
              | {type: "director", person_id, name}           (TMDB yönetmenlik kredileri)
              | {type: "tmdb_list", list}                     (trend_day|trend_week|trend_month|airing|now_playing)
+             | {type: "added",    period}                    (today|week|month — kütüphaneye eklenme zamanı)
              | {type: "manual",   items: [imdb_id, ...]}
              | {type: "titles",   titles: [[ad, yıl], ...], items: [imdb_id, ...]},
         # İsteğe bağlı: klasörün içindeki alt bölümler (Nuvio'da sekme olarak görünür).
@@ -55,6 +56,8 @@ Hazır koleksiyonlar (en üstte sabitlenir):
                       Popüler <Dönem> Dizileri / Popüler <Dönem> Filmleri (yapım yılı o dönemde olanlar)
   • "TMDB Trend Listesi" → Günlük / Haftalık / Aylık Trend (Diziler + Filmler), Devam Eden Diziler, Vizyondakiler
         (TMDB'nin güncel listeleri; yalnızca kütüphanenizde bulunanlar, TMDB sırasıyla)
+  • "Ekleme Tarihine Göre" → Bugün Eklenenler / Bu Hafta Eklenenler / Bu Ay Eklenenler klasörleri;
+        her klasörde: Diziler / Filmler (kütüphaneye eklenme/güncellenme zamanına göre, en yeni başta)
   • "Oyuncular"          → Tom Cruise, Cem Yılmaz ... klasörleri (TMDB fotoğrafı);
         her klasörde: <Oyuncu> Filmleri / <Oyuncu> Dizileri
   • "Yönetmenler"        → Christopher Nolan ... klasörleri (TMDB fotoğrafı); her birinde <Soyad> Filmleri / Dizileri
@@ -73,7 +76,7 @@ import re
 import time
 import unicodedata
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from bson import ObjectId
@@ -249,6 +252,9 @@ DEFAULT_GIFS: Dict[str, str] = {
     "genre-talk-show": "https://ahaslides.com/wp-content/uploads/2023/09/corden-behind-the-desk_custom-2d062278b16926aa01465fed0142cd07e6cbf853-s1100-c50-1024x681.jpg",
     "genre-tarih": "https://img.paratic.com/dosya/2017/06/tarihi-savas-filmleri-truva.jpg",
     "genre-vahsi-bati": "https://www.slashfilm.com/img/gallery/clint-eastwood-sergio-leone-connected-through-two-words-on-the-dollars-trilogy/a-language-barrier-blasted-down-with-blazing-pistols-1728922453.jpg",
+    "added-today": "https://i.hizliresim.com/n9zg6wg0.jpg",
+    "added-week": "https://i.hizliresim.com/4o77onza.jpg",
+    "added-month": "https://i.hizliresim.com/h2ykvdbd.jpg",
     "trend-playing": "https://image.hurimg.com/i/hurriyet/75/770x0/56b4850f67b0a93b8c3a2a58.jpg",
     "trend-day": "https://i.hizliresim.com/t1tnjh2w.jpg",
     "trend-month": "https://i.hizliresim.com/gzluwnmq.jpg",
@@ -523,6 +529,9 @@ async def resolve_folder(folder: dict) -> List[dict]:
     elif rtype == "tmdb_list":
         items = await _tmdb_list_items(rule, folder.get("media") or "all")
         sort = "keep"  # TMDB sırası
+    elif rtype == "added":
+        items = await _added_items(rule, folder.get("media") or "all")
+        sort = "new"  # en son eklenen başta
     elif rtype in ("manual", "titles"):
         items = await _by_imdb_ids(rule.get("items") or [])
         sort = "keep"
@@ -593,6 +602,7 @@ _L10N_ROWS: List[Tuple[str, str, str]] = [
     ("Türler", "Genres", "Genres"),
     ("Temalar", "Themes", "Themen"),
     ("TMDB Trend Listesi", "TMDB Trending", "TMDB Trends"),
+    ("Ekleme Tarihine Göre", "By Date Added", "Nach Hinzufügedatum"),
     ("Oyuncular", "Actors", "Schauspieler"),
     ("Yönetmenler", "Directors", "Regisseure"),
     ("Seri Filmler", "Movie Series", "Filmreihen"),
@@ -608,6 +618,11 @@ _L10N_ROWS: List[Tuple[str, str, str]] = [
     ("Aylık Trend", "Trending This Month", "Diesen Monat im Trend"),
     ("Devam Eden Diziler", "Ongoing Series", "Laufende Serien"),
     ("Vizyondakiler", "In Theaters", "Im Kino"),
+    # Ekleme tarihine göre klasörler ve bölümler
+    ("Bugün Eklenenler", "Added Today", "Heute hinzugefügt"),
+    ("Bu Hafta Eklenenler", "Added This Week", "Diese Woche hinzugefügt"),
+    ("Bu Ay Eklenenler", "Added This Month", "Diesen Monat hinzugefügt"),
+    ("Diziler", "Series", "Serien"), ("Filmler", "Movies", "Filme"),
     # Türler
     ("Aile", "Family", "Familie"), ("Aksiyon", "Action", "Action"),
     ("Aksiyon ve Macera", "Action & Adventure", "Action & Abenteuer"),
@@ -1947,6 +1962,7 @@ PRESET_COUNTRIES = "countries"
 PRESET_GENRES = "genres"
 PRESET_TRENDS = "tmdb_trends"
 PRESET_DIRECTORS = "directors"
+PRESET_ADDED = "added_date"
 
 
 def _platform_section_specs(label: str, media_present: set) -> List[Tuple[str, str, str]]:
@@ -2476,6 +2492,83 @@ def _trend_collection() -> dict:
             "backdrop_url": "", "pin_to_top": True, "hide_from_home": True, "folders": folders}
 
 
+# ════════════════════════════════════════════════════════════════════════════
+#  Ekleme Tarihine Göre (Bugün / Bu Hafta / Bu Ay eklenenler)
+# ════════════════════════════════════════════════════════════════════════════
+_TZ_TR = timezone(timedelta(hours=3))  # "bugün" Türkiye takvim gününe göre başlar
+
+# (klasör adı, gif_key, dönem, bölüm öneki)
+ADDED_SPECS: List[Tuple[str, str, str, str]] = [
+    ("Bugün Eklenenler",    "added-today", "today", "Bugün Eklenen"),
+    ("Bu Hafta Eklenenler", "added-week",  "week",  "Bu Hafta Eklenen"),
+    ("Bu Ay Eklenenler",    "added-month", "month", "Bu Ay Eklenen"),
+]
+# Bugünden geriye kaç takvim günü (bugün dahil). "Bu hafta" = son 7 gün, "Bu ay" = son 30 gün.
+ADDED_PERIOD_DAYS: Dict[str, int] = {"today": 1, "week": 7, "month": 30}
+
+
+def _added_cutoff(period: Any) -> Optional[datetime]:
+    """Dönemin başlangıcı (veritabanındaki updated_on gibi UTC, saat dilimsiz). Geçersiz dönemde None."""
+    days = ADDED_PERIOD_DAYS.get(str(period or ""))
+    if not days:
+        return None
+    start = datetime.now(_TZ_TR).replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=days - 1)
+    return start.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+async def _added_items(rule: dict, media: str) -> List[dict]:
+    cutoff = _added_cutoff(rule.get("period"))
+    if cutoff is None:
+        return []
+    items: Dict[str, dict] = {}
+    for kind in ("movie", "tv"):
+        if media not in ("all", "", None, kind):
+            continue
+        for st in _storages():
+            q = {"updated_on": {"$gte": cutoff}}
+            try:
+                docs = await st[kind].find(q, _LIGHT_PROJ).sort("updated_on", -1).limit(600).to_list(None)
+            except Exception as e:  # sıralama için indeks/bellek yetmezse sırasız dene
+                _logger.warning("Ekleme tarihi sorgusu sıralanamadı (%s): %s", rule.get("period"), e)
+                docs = await st[kind].find(q, _LIGHT_PROJ).limit(2000).to_list(None)
+            for d in docs:
+                d.setdefault("media_type", kind)
+                if d.get("imdb_id"):
+                    items.setdefault(d["imdb_id"], _light(d))
+    return list(items.values())
+
+
+def _added_collection() -> dict:
+    """'Ekleme Tarihine Göre'. Yapı sabittir (içerik canlı hesaplanır): her klasörde önce Diziler, sonra Filmler."""
+    folders = []
+    for title, gif_key, period, prefix in ADDED_SPECS:
+        sections = [
+            {"id": _new_id(), "title": noun, "media": media,
+             "rule": {"type": "added", "period": period, "sort": "new"}}
+            for media, noun in (("tv", "Diziler"), ("movie", "Filmler"))
+        ]
+        folders.append({"id": _new_id(), "title": title, "emoji": "", "cover_url": "", "focus_gif_url": "",
+                        "gif_key": gif_key, "tile_shape": "LANDSCAPE", "media": "all", "sections": sections})
+    return {"name": "Ekleme Tarihine Göre",
+            "description": "Kütüphaneye bugün, bu hafta (son 7 gün) ve bu ay (son 30 gün) eklenen diziler ve filmler",
+            "backdrop_url": "", "pin_to_top": True, "hide_from_home": True, "folders": folders}
+
+
+async def _shorten_added_titles(col_id) -> bool:
+    """Eski sürümde 'Bugün Eklenen Diziler' olan bölüm adlarını 'Diziler' / 'Filmler' yapar (değiştiyse True)."""
+    col = await _coll().find_one({"_id": col_id})
+    changed = False
+    for f in col.get("folders", []):
+        for sec in f.get("sections", []):
+            want = "Diziler" if sec.get("media") == "tv" else "Filmler"
+            if sec.get("title") != want:
+                sec["title"] = want
+                changed = True
+    if changed:
+        await _coll().update_one({"_id": col_id}, {"$set": {"folders": col["folders"], "updated_at": datetime.utcnow()}})
+    return changed
+
+
 async def _director_folder(name: str) -> Tuple[Optional[dict], bool]:
     """Yönetmen klasörü: kapak = TMDB fotoğrafı; bölümler '<Soyad> Filmleri' / '<Soyad> Dizileri'.
     (klasör | None, fotoğraf_bulundu_mu) döner; TMDB'de yoksa ya da kütüphanede yapımı yoksa klasör None."""
@@ -2508,9 +2601,10 @@ async def _remove_legacy_presets(prefix: str) -> List[str]:
 async def _reorder_top() -> None:
     """Hazır 'Dijital Platformlar' ve 'Oyuncular' koleksiyonları listenin en üstünde yer alır."""
     rank = {PRESET_PLATFORMS: 0, PRESET_SERIES: 1, PRESET_COMPANIES: 2, PRESET_COUNTRIES: 3,
-            PRESET_GENRES: 4, PRESET_THEMES: 5, PRESET_YEARS: 6, PRESET_TRENDS: 7, PRESET_ACTORS: 8, PRESET_DIRECTORS: 9}
+            PRESET_GENRES: 4, PRESET_THEMES: 5, PRESET_YEARS: 6, PRESET_TRENDS: 7, PRESET_ADDED: 8,
+            PRESET_ACTORS: 9, PRESET_DIRECTORS: 10}
     cols = await _coll().find({}).to_list(None)
-    cols.sort(key=lambda c: (rank.get(c.get("preset"), 10), c.get("order", 0)))
+    cols.sort(key=lambda c: (rank.get(c.get("preset"), 11), c.get("order", 0)))
     for idx, c in enumerate(cols):
         if c.get("order") != idx:
             await _coll().update_one({"_id": c["_id"]}, {"$set": {"order": idx}})
@@ -2578,12 +2672,12 @@ async def create_presets(payload: dict, _: bool = Depends(require_auth)):
 async def _create_presets_impl(payload: dict) -> Dict[str, Any]:
     """Hazır koleksiyonları oluşturur: 'Dijital Platformlar' (tek koleksiyon) ve Marvel.
 
-    payload: {"kinds": ["platform", "series", "companies", "countries", "genres", "themes", "years", "trends"], "force": false}   ("marvel": eski, elle seçilmiş Marvel listesi)
+    payload: {"kinds": ["platform", "series", "companies", "countries", "genres", "themes", "years", "trends", "added"], "force": false}   ("marvel": eski, elle seçilmiş Marvel listesi)
       force=False → zaten var olan koleksiyonlara dokunulmaz (platformlarda yalnızca eksik klasörler eklenir).
       force=True  → mevcut hazır koleksiyonun klasörleri baştan üretilir.
     Eski sürümün ürettiği dağınık koleksiyonlar (Netflix, Disney+ ... ayrı ayrı) otomatik kaldırılır.
     """
-    kinds = payload.get("kinds") or ["platform", "series", "companies", "countries", "genres", "themes", "years", "trends"]
+    kinds = payload.get("kinds") or ["platform", "series", "companies", "countries", "genres", "themes", "years", "trends", "added"]
     force = bool(payload.get("force", False))
     report: Dict[str, Any] = {"created": [], "updated": [], "skipped": [], "removed": [],
                               "missing_titles": [], "empty": []}
@@ -2669,6 +2763,20 @@ async def _create_presets_impl(payload: dict) -> Dict[str, Any]:
                 n += len(await resolve_folder(sec))
             if not n:
                 report["empty"].append(f"{f['title']} (şu an kütüphanenizde eşleşen yok; içerik geldikçe dolar)")
+
+    if "added" in kinds:
+        doc = _added_collection()  # TMDB gerekmez; içerik veritabanından canlı gelir
+        existing = await _coll().find_one({"preset": PRESET_ADDED})
+        if existing and not force:
+            added = await _merge_new_folders(existing, doc)
+            renamed = await _shorten_added_titles(existing["_id"])
+            if added or renamed:
+                report["updated"].append("Ekleme Tarihine Göre" + (" (+ " + ", ".join(added) + ")" if added else " (bölüm adları kısaltıldı)"))
+            else:
+                report["skipped"].append("Ekleme Tarihine Göre")
+        else:
+            status = await _upsert_preset(PRESET_ADDED, doc, force=True)
+            report[status].append("Ekleme Tarihine Göre")
 
     if "genres" in kinds:
         doc, empty = await _genres_collection()
