@@ -222,7 +222,7 @@ async def admin_review(client: Client, callback_query: CallbackQuery):
                     portal_url = f"{base_url}/uye/giris"
                     otp_text = (
                         f"\n\n🌐 <b>Dizi ve filmleri indirmek için:</b>\n"
-                        f"🔗 {portal_url}\n"
+                        f"🔗 <a href='{portal_url}'>{portal_url}</a>\n"
                         f"👤 <b>Kullanıcı Adı:</b> <code>{otp['username']}</code>\n"
                         f"🔑 <b>Şifre:</b> <code>{otp['password']}</code>\n"
                         f"<i>⚠️ Bu bilgiler her /start'ta yenilenir.</i>"
@@ -245,11 +245,11 @@ async def admin_review(client: Client, callback_query: CallbackQuery):
                     f"📅 <b>Son kullanma tarihi:</b> {expiry_str}\n\n"
                     f"🔗 <b>Eklenti linkiniz:</b>\n\n"
                     f"🇹🇷 <b>Türkçe:</b>\n"
-                    f"<code>{tr_url}</code>\n\n"
+                    f"<a href='{tr_url}'>{tr_url}</a>\n\n"
                     f"🇩🇪 <b>Deutsch:</b>\n"
-                    f"<code>{de_url}</code>\n\n"
+                    f"<a href='{de_url}'>{de_url}</a>\n\n"
                     f"🇬🇧 <b>English:</b>\n"
-                    f"<code>{en_url}</code>\n\n"
+                    f"<a href='{en_url}'>{en_url}</a>\n\n"
                     f"Dizi ve filmleri izlemek için yukarıdaki linki kopyalayıp Nuvio eklentilerine yapıştırın."
                     f"{otp_text}"
                 )

@@ -1137,7 +1137,7 @@ async def admin_review_subscription_request_api(user_id: int, payload: dict) -> 
                 portal_url = f"{base_url}/uye/giris"
                 otp_text = (
                     f"\n\n🌐 <b>Dizi ve filmleri indirmek için:</b>\n"
-                    f"🔗 {portal_url}\n"
+                    f"🔗 <a href='{portal_url}'>{portal_url}</a>\n"
                     f"👤 <b>Kullanıcı Adı:</b> <code>{otp['username']}</code>\n"
                     f"🔑 <b>Şifre:</b> <code>{otp['password']}</code>\n"
                     f"<i>⚠️ Bu bilgiler her /start'ta yenilenir.</i>"
@@ -1158,9 +1158,9 @@ async def admin_review_subscription_request_api(user_id: int, payload: dict) -> 
                 f"✅ <b>Aboneliğiniz aktif durumdadır.</b>\n"
                 f"📅 <b>Son kullanma tarihi:</b> {expiry_str}\n\n"
                 f"🔗 <b>Eklenti linkiniz:</b>\n\n"
-                f"🇹🇷 <b>Türkçe:</b>\n<code>{tr_url}</code>\n\n"
-                f"🇩🇪 <b>Deutsch:</b>\n<code>{de_url}</code>\n\n"
-                f"🇬🇧 <b>English:</b>\n<code>{en_url}</code>\n\n"
+                f"🇹🇷 <b>Türkçe:</b>\n<a href='{tr_url}'>{tr_url}</a>\n\n"
+                f"🇩🇪 <b>Deutsch:</b>\n<a href='{de_url}'>{de_url}</a>\n\n"
+                f"🇬🇧 <b>English:</b>\n<a href='{en_url}'>{en_url}</a>\n\n"
                 f"Dizi ve filmleri izlemek için yukarıdaki linki kopyalayıp Nuvio eklentilerine yapıştırın."
                 f"{otp_text}"
             )
